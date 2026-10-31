@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.PowerManager
 import android.util.Log
 import dev.simrelay.protocol.v1.Update
 import org.json.JSONObject
@@ -91,6 +92,16 @@ object Updater {
 
     private fun set(s: Update.State, err: String = "") { state = s; error = err; changed() }
 
+    /** Keeps the CPU up for [block]: the phone suspends with its screen off even on the charger, and 30 Oct 2026 an
+     *  install sat 44 s in suspend (5 s otherwise) while Play Protect's check ran. A successful install ends this
+     *  process, which releases the lock. */
+    private fun <T> awake(why: String, block: () -> T): T {
+        val wl = (app.getSystemService(Context.POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "tosbisim:update-$why").apply { setReferenceCounted(false) }
+        wl.acquire(4 * 60_000L)
+        try { return block() } finally { wl.release() }
+    }
+
     private fun check() {
         if (state == Update.State.DOWNLOADING || state == Update.State.INSTALLING) return
         set(Update.State.CHECKING)
@@ -126,14 +137,14 @@ object Updater {
         if (apkFile.exists() && sha256(apkFile) == sha) return verified()
         set(Update.State.DOWNLOADING)
         val tmp = File(app.filesDir, "update.part")
-        val ok = runCatching {
+        val ok = awake("download") { runCatching {
             val c = URL(apk.getString("url")).openConnection() as HttpURLConnection
             c.connectTimeout = 15_000; c.readTimeout = 30_000
             check(c.responseCode == 200) { "HTTP ${c.responseCode}" }
             c.inputStream.use { i -> tmp.outputStream().use { o -> i.copyTo(o) } }
             check(sha256(tmp) == sha) { "checksum mismatch" }
             tmp.renameTo(apkFile)
-        }
+        } }
         ok.exceptionOrNull()?.let { tmp.delete(); return set(Update.State.FAILED, "download failed: ${it.message}") }
         verified()
     }
@@ -158,7 +169,9 @@ object Updater {
     }
 
     /** null = started (the app is replaced and restarts), else why not. */
-    private fun install(): String? {
+    private fun install(): String? = awake("install") { installAwake() }
+
+    private fun installAwake(): String? {
         if (state != Update.State.READY) return "no update ready"
         if (CallRegistry.snapshot().any { it.state != dev.simrelay.protocol.v1.CallEvent.State.ENDED }) return "after the call"
         set(Update.State.INSTALLING)

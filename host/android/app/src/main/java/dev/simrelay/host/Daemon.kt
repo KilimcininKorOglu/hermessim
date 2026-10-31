@@ -88,6 +88,7 @@ object Daemon {
     fun hasProfile(): Boolean = profile != null
     fun profile(): Profile? = profile
     @Volatile private var autoTried = false
+    @Volatile private var fitTried = false
     @Volatile private var inventoryTried = false
 
     /** Build the automatic profile now (debug: on a phone that has a shipped one too) and log it. */
@@ -147,8 +148,24 @@ object Daemon {
             // from a wrong control, most likely). It writes none this boot; we want to know which phone and profile.
             if (send("STATUS")?.contains("safe=1") == true)
                 Diag.event("daemon_safe_mode", org.json.JSONObject().put("what", "crash while writing").put("profile", p?.id ?: ""))
-            // No shipped profile: try one from the phone's own audio files once (the call test still decides).
-            if (p == null && !autoTried) {
+            // A shipped profile on this card, once: its PCMs by name, and one matched by family (another phone's
+            // measurements) only if this card has every control it drives; else this phone's own audio files decide
+            // (31 Oct 2026). A phone's own measured profile is kept as it is, with a note in the log.
+            if (p != null && !fitTried) {
+                fitTried = true
+                val (fit, why) = p.onThisCard({ n -> send("HAS $n")?.startsWith("OK") == true }, AsoundPcm.byName())
+                when {
+                    fit != null -> profile = fit
+                    p.source == "family" -> {
+                        profile = null
+                        Log.w(TAG, "profile ${p.id} doesn't fit this phone ($why): trying its own audio files")
+                        Diag.event("family_profile", org.json.JSONObject().put("what", "rejected").put("profile", p.id).put("why", why))
+                    }
+                    else -> Log.w(TAG, "profile ${p.id}: $why (kept: this phone's own profile)")
+                }
+            }
+            // No shipped profile (or none that fits): try one from the phone's own audio files once (the call test still decides).
+            if (profile == null && !autoTried) {
                 autoTried = true
                 profile = AutoProfile.build { n -> send("HAS $n")?.startsWith("OK") == true }
                 Log.i(TAG, "profile: ${profile?.let { "${it.id} (auto)" } ?: "none, Basic mode"}")

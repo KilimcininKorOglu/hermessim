@@ -17,6 +17,7 @@
   "card": 0,
   "capture": {
     "pcm": 17,
+    "pcm_name": "Capture_Mono_1",
     "rate": 16000,
     "channels": 1,
     "route": "-",
@@ -24,6 +25,7 @@
   },
   "inject": {
     "pcm": 2,
+    "pcm_name": "Playback_2",
     "rate": 48000,
     "channels": 2,
     "route_by_session": {}

@@ -64,8 +64,8 @@ object Hotspot {
                                 .getOrDefault(e.toString())
                         }
                         Log.i(TAG, "tethered interfaces: $ifaces")
-                        val wifi = ifaces.any { it.startsWith("wlan") || it.startsWith("swlan") || it.startsWith("ap") }
-                        DataUsage.tetheringChanged(ifaces.filter { it.startsWith("swlan") || it.startsWith("wlan") || it.startsWith("ap") })
+                        val wifi = ifaces.any(::isWifiAp)
+                        DataUsage.tetheringChanged(ifaces.filter(::isWifiAp))
                         tethered = ifaces
                         if (wifi != tetheredWifi) { tetheredWifi = wifi; Log.i(TAG, "hotspot tethered=$wifi $ifaces"); changed() }
                         if (!wifi) whenDown?.invoke()
@@ -261,12 +261,14 @@ object Hotspot {
     /**
      * Offered settings. WPA2 only (18 Oct): WPA3 hotspots depend on the phone (the Redmi Note 8 Pro's station
      * has WPA3, its hotspot refuses SAE and silently never starts) and nobody needs them for a phone-to-phone link.
+     * Not offered (31 Oct 2026), both for the same reason: 6 GHz (Android allows a 6 GHz hotspot only with WPA3 or OWE)
+     * and a device limit (Android won't start a hotspot with a limit unless the hotspot hardware can disconnect
+     * clients, SoftApCapability CLIENT_FORCE_DISCONNECT, which the S20 FE's lacks; apps can't read the capability).
      */
     private fun capabilities(wm: WifiManager): HotspotMsg.Capabilities {
-        val b = HotspotMsg.Capabilities.newBuilder().setHiddenSsid(true).setMaxClients(true).setAutoOff(true).setOffWhenUnused(true)
+        val b = HotspotMsg.Capabilities.newBuilder().setHiddenSsid(true).setMaxClients(false).setAutoOff(true).setOffWhenUnused(true)
         b.addBands(HotspotMsg.Band.BAND_2GHZ)
         if (wm.is5GHzBandSupported) b.addBands(HotspotMsg.Band.BAND_5GHZ).addBands(HotspotMsg.Band.BAND_AUTO)
-        if (wm.is6GHzBandSupported) b.addBands(HotspotMsg.Band.BAND_6GHZ)
         if (wm.is5GHzBandSupported && android.os.Build.VERSION.SDK_INT >= 31 && wm.isBridgedApConcurrencySupported) b.addBands(HotspotMsg.Band.BAND_DUAL_2_5)
         b.addSecurities(HotspotMsg.Security.WPA2)
         return b.build()
@@ -308,7 +310,7 @@ object Hotspot {
                     HotspotMsg.Band.BAND_6GHZ -> "$BAND_6GHZ"; HotspotMsg.Band.BAND_AUTO -> "${BAND_2GHZ or BAND_5GHZ}"; else -> "$BAND_2GHZ"
                 }
                 fun b64(x: String) = android.util.Base64.encodeToString(x.toByteArray(), android.util.Base64.NO_WRAP)
-                RootWifi.run(ctx, "set", b64(c.ssid), b64(c.passphrase), "$sec", bands, if (c.hidden) "1" else "0", "${c.maxClients}",
+                RootWifi.run(ctx, "set", b64(c.ssid), b64(c.passphrase), "$sec", bands, if (c.hidden) "1" else "0", "0",
                     if (c.autoOff) "1" else "0", "${if (c.autoOff && c.autoOffMinutes > 0) c.autoOffMinutes * 60_000L else 0L}")
                     ?: error("the phone rejected these settings")
                 rootCfg = null
@@ -330,7 +332,7 @@ object Hotspot {
                 else -> call("setBand", arrayOf(Int::class.javaPrimitiveType!!), BAND_2GHZ)
             }
             call("setHiddenSsid", arrayOf(Boolean::class.javaPrimitiveType!!), c.hidden)
-            if (c.maxClients > 0) call("setMaxNumberOfClients", arrayOf(Int::class.javaPrimitiveType!!), c.maxClients)
+            call("setMaxNumberOfClients", arrayOf(Int::class.javaPrimitiveType!!), 0)     // no limit (capabilities)
             call("setAutoShutdownEnabled", arrayOf(Boolean::class.javaPrimitiveType!!), c.autoOff)
             if (c.autoOff && c.autoOffMinutes > 0)
                 call("setShutdownTimeoutMillis", arrayOf(Long::class.javaPrimitiveType!!), c.autoOffMinutes * 60_000L)
@@ -355,11 +357,13 @@ object Hotspot {
         set(ctx, false) { _, _ -> }
     }
 
+    /** A Wi-Fi hotspot interface by its usual names (wlan1 / swlan0 / ap0 / softap0, by maker): one list for both uses. */
+    private fun isWifiAp(name: String) = name.startsWith("wlan") || name.startsWith("swlan") || name.startsWith("ap") || name.startsWith("softap")
+
     /** The soft AP's own IPv4 (e.g. 192.168.x.1): on the interfaces Android reports as tethered, else by usual names. */
     private fun gateway(): String = runCatching {
         java.net.NetworkInterface.getNetworkInterfaces().toList()
-            .filter { it.isUp && !it.isLoopback && (it.name in tethered || it.name.startsWith("swlan") || it.name.startsWith("ap") ||
-                it.name.startsWith("softap") || (it.name.startsWith("wlan") && it.name != "wlan0")) }
+            .filter { it.isUp && !it.isLoopback && (it.name in tethered || (isWifiAp(it.name) && it.name != "wlan0")) }
             .sortedByDescending { it.name in tethered }
             .flatMap { it.inetAddresses.toList() }
             .firstOrNull { it is java.net.Inet4Address && it.isSiteLocalAddress }?.hostAddress

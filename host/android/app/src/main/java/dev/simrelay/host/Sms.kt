@@ -35,6 +35,8 @@ object SmsStore {
 
     fun ack(ctx: Context, id: String) { prefs(ctx).edit().remove(id).apply() }
 
+    fun isPending(ctx: Context, id: String) = prefs(ctx).contains(id)
+
     fun pending(ctx: Context): List<SmsReceived> = prefs(ctx).all.values.mapNotNull { v ->
         runCatching { SmsReceived.parseFrom(android.util.Base64.decode(v as String, android.util.Base64.NO_WRAP)) }.getOrNull()
     }.sortedBy { it.receivedMs }

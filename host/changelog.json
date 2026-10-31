@@ -1,5 +1,29 @@
 [
   {
+    "version": "0.12.12",
+    "code": 48,
+    "en": "Better at phones we haven't tested ourselves: a profile measured on another phone of the same family is used only if this phone's sound hardware has everything it needs (its audio streams looked up by name), otherwise the host builds one from the phone's own files; once it finds call audio paths, the phone shows as Expected to work. An active eSIM line now shows on the iPhone (data roaming and mobile data can be changed). The hotspot no longer offers 6 GHz or a device limit, which some phones accept but then never start the hotspot.",
+    "tr": "Kendimiz denemediğimiz telefonlarda daha iyi: aynı ailedeki başka bir telefonda ölçülmüş profil yalnızca bu telefonun ses donanımında gereken her şey varsa kullanılıyor (ses akışları adıyla bulunuyor), yoksa ana cihaz telefonun kendi dosyalarından bir profil oluşturuyor; arama ses yollarını bulduğunda telefon Çalışması bekleniyor olarak görünüyor. Etkin bir eSIM hattı artık iPhone'da görünüyor (veri dolaşımı ve mobil veri değiştirilebiliyor). Erişim noktası artık 6 GHz ve cihaz sınırı sunmuyor: bazı telefonlar bunları kabul edip erişim noktasını hiç başlatmıyordu."
+  },
+  {
+    "version": "0.12.11",
+    "code": 47,
+    "en": "Updates install in seconds again: the host keeps itself awake while it downloads and installs an update (one paused for most of a minute while the phone slept).",
+    "tr": "Güncellemeler yeniden saniyeler içinde kuruluyor: ana cihaz, bir güncellemeyi indirip kurarken uykuya geçmiyor (telefon uyurken bir güncelleme neredeyse bir dakika beklemişti)."
+  },
+  {
+    "version": "0.12.10",
+    "code": 46,
+    "en": "Calls and texts wake your iPhone even with Internet mode off: push wake-ups now have their own encrypted key, handed over Bluetooth. Needs TosbiSim 0.9.5 on the iPhone.",
+    "tr": "İnternet modu kapalıyken bile aramalar ve mesajlar iPhone'unuzu uyandırıyor: uyandırma bildirimlerinin artık Bluetooth ile verilen kendi şifreli anahtarı var. iPhone'da TosbiSim 0.9.5 gerekir."
+  },
+  {
+    "version": "0.12.9",
+    "code": 45,
+    "en": "With Internet mode on, calls and texts now reach your iPhone even when iOS has closed TosbiSim: the host has Apple wake your iPhone with an end-to-end encrypted push (our server and Apple see only ciphertext). Needs TosbiSim 0.9 on the iPhone.",
+    "tr": "İnternet modu açıkken aramalar ve mesajlar, iOS TosbiSim'i kapatmış olsa bile artık iPhone'unuza ulaşıyor: ana cihaz, uçtan uca şifreli bir bildirimle Apple'a iPhone'unuzu uyandırtıyor (sunucumuz ve Apple yalnızca şifreli veriyi görür). iPhone'da TosbiSim 0.9 gerekir."
+  },
+  {
     "version": "0.12.8",
     "code": 44,
     "en": "Automatic hotspot is more dependable while your iPhone sleeps: when your iPhone moves to another Wi-Fi, the host itself turns the hotspot off once nothing uses it for a minute, and the host checks in with your iPhone every few minutes even in deep sleep. On Samsung hosts, the phone's own 20-minute hotspot timer now follows TosbiSim's auto off setting.",

@@ -1,7 +1,7 @@
 {
-  "comment": "TosbiSim support table, hand-written part. tools/corpus/gen_support.py merges it with the AndroidDumps corpus into profiles/support.json (do not edit that one). Tiers: verified = measured by us; expected = its own firmware shows our auto profile builds (same family as a verified phone); experimental = our family, but its files need a hand-made profile, or only the chip platform is known; not_yet = an audio family we can't drive yet (Basic mode: SMS, call control, hotspot); unsupported = rules below (can't be rooted). Full voice still needs the in-app call test on every phone.",
+  "comment": "TosbiSim support table, hand-written part. tools/corpus/gen_support.py merges it with the AndroidDumps corpus into profiles/support.json (do not edit that one). Tiers: verified = measured by us; expected = its own firmware shows our auto profile builds (same family as a verified phone), or every Android 11+ phone with its chip does; experimental = our family, but its files need a hand-made profile, or its chip's phones aren't all known to build; not_yet = an audio family we can't drive yet (Basic mode: SMS, call control, hotspot); unsupported = rules below (can't be rooted). Full voice still needs the in-app call test on every phone.",
   "version": 2,
-  "updated": "2026-10-16",
+  "updated": "2026-10-31",
   "phones": [
     {
       "name": "Galaxy S20 FE",
@@ -46,10 +46,10 @@
       ],
       "devices": [],
       "soc": "Snapdragon 865",
-      "tier": "experimental",
+      "tier": "expected",
       "profile": null,
-      "note": "Same board as the verified S20 FE, but the last firmware checked (Android 12) lacked the in-call music path.",
-      "note_tr": "Doğrulanmış S20 FE ile aynı kart, ancak incelenen son yazılımda (Android 12) arama içi müzik yolu yoktu.",
+      "note": "Same board as the verified S20 FE (r8q), so the host uses its measured profile. Its own kernel wasn't checked: the call test decides.",
+      "note_tr": "Doğrulanmış S20 FE ile aynı kart (r8q), bu yüzden ana cihaz onun ölçülmüş profilini kullanır. Kendi çekirdeği incelenmedi: karar arama testinde.",
       "source": "docs/desk-study/expected-list.md",
       "family": "qcom-legacy"
     },
@@ -257,10 +257,10 @@
         "ginkgo"
       ],
       "soc": "Snapdragon 665",
-      "tier": "experimental",
+      "tier": "expected",
       "profile": null,
-      "note": "Same Qualcomm call-audio controls as the S20 FE (in-call music on PCM 27). Host silence needs measuring.",
-      "note_tr": "S20 FE ile aynı Qualcomm arama sesi kontrolleri (arama içi müzik PCM 27). Ana cihazın sessizliği ölçülmeli.",
+      "note": "Its Android 11 firmware has the same Qualcomm call-audio controls as the verified S20 FE (in-call music on PCM 27). Needs Mi Unlock.",
+      "note_tr": "Android 11 yazılımında doğrulanmış S20 FE ile aynı Qualcomm arama ses kontrolleri var (arama içi müzik PCM 27'de). Mi Unlock gerekir.",
       "source": "docs/desk-study/redmi-note-8.md",
       "family": "qcom-legacy"
     },
@@ -310,10 +310,10 @@
         "a32"
       ],
       "soc": "MediaTek Helio G80 (MT6769V)",
-      "tier": "experimental",
+      "tier": "expected",
       "profile": null,
-      "note": "Chip from the maker's specs (MediaTek Helio G80 (MT6769V)): our MediaTek family. No firmware of this model in our archive yet, so the call test decides.",
-      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G80 (MT6769V)): MediaTek ailemiz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde.",
+      "note": "Chip from the maker's specs (MediaTek Helio G80 (MT6769V)): every phone with this chip on Android 11 or newer in our firmware archive has our call-audio paths. No firmware of this exact model yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G80 (MT6769V)): arşivimizde bu işlemciyi kullanan Android 11 veya üstü her telefonda arama ses yollarımız var. Bu modelin yazılımı henüz arşivimizde yok, karar arama testinde.",
       "source": "spec: https://m.gsmarena.com/samsung_galaxy_a32-10753.php",
       "family": "mtk-afe"
     },
@@ -328,10 +328,10 @@
         "a22"
       ],
       "soc": "MediaTek Helio G80 (MT6769V)",
-      "tier": "experimental",
+      "tier": "expected",
       "profile": null,
-      "note": "Chip from the maker's specs (MediaTek Helio G80 (MT6769V)): our MediaTek family. No firmware of this model in our archive yet, so the call test decides.",
-      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G80 (MT6769V)): MediaTek ailemiz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde.",
+      "note": "Chip from the maker's specs (MediaTek Helio G80 (MT6769V)): every phone with this chip on Android 11 or newer in our firmware archive has our call-audio paths. No firmware of this exact model yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G80 (MT6769V)): arşivimizde bu işlemciyi kullanan Android 11 veya üstü her telefonda arama ses yollarımız var. Bu modelin yazılımı henüz arşivimizde yok, karar arama testinde.",
       "source": "spec: https://m.gsmarena.com/samsung_galaxy_a22-10948.php",
       "family": "mtk-afe"
     },
@@ -346,10 +346,10 @@
         "a05m"
       ],
       "soc": "MediaTek Helio G85 (MT6769V)",
-      "tier": "experimental",
+      "tier": "expected",
       "profile": null,
-      "note": "Chip from the maker's specs (MediaTek Helio G85 (MT6769V)): our MediaTek family. No firmware of this model in our archive yet, so the call test decides.",
-      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G85 (MT6769V)): MediaTek ailemiz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde.",
+      "note": "Chip from the maker's specs (MediaTek Helio G85 (MT6769V)): every phone with this chip on Android 11 or newer in our firmware archive has our call-audio paths. No firmware of this exact model yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G85 (MT6769V)): arşivimizde bu işlemciyi kullanan Android 11 veya üstü her telefonda arama ses yollarımız var. Bu modelin yazılımı henüz arşivimizde yok, karar arama testinde.",
       "source": "spec: https://m.gsmarena.com/samsung_galaxy_a05-12583.php",
       "family": "mtk-afe"
     },
@@ -365,10 +365,10 @@
         "a02q"
       ],
       "soc": "Snapdragon 450",
-      "tier": "experimental",
+      "tier": "expected",
       "profile": null,
-      "note": "Chip from the maker's specs (Snapdragon 450): our Qualcomm (classic audio) family. No firmware of this model in our archive yet, so the call test decides.",
-      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Snapdragon 450): Qualcomm (klasik ses) ailemiz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde.",
+      "note": "Chip from the maker's specs (Snapdragon 450): every phone with this chip on Android 11 or newer in our firmware archive has our call-audio paths. No firmware of this exact model yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Snapdragon 450): arşivimizde bu işlemciyi kullanan Android 11 veya üstü her telefonda arama ses yollarımız var. Bu modelin yazılımı henüz arşivimizde yok, karar arama testinde.",
       "source": "spec: https://m.gsmarena.com/samsung_galaxy_a02s-10603.php",
       "family": "qcom-legacy"
     },
@@ -558,10 +558,10 @@
         "TECNO-CK6n"
       ],
       "soc": "MediaTek Helio G85 (MT6769Z)",
-      "tier": "experimental",
+      "tier": "expected",
       "profile": null,
-      "note": "Chip from the maker's specs (MediaTek Helio G85 (MT6769Z)): our MediaTek family. No firmware of this model in our archive yet, so the call test decides.",
-      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G85 (MT6769Z)): MediaTek ailemiz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde.",
+      "note": "Chip from the maker's specs (MediaTek Helio G85 (MT6769Z)): every phone with this chip on Android 11 or newer in our firmware archive has our call-audio paths. No firmware of this exact model yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G85 (MT6769Z)): arşivimizde bu işlemciyi kullanan Android 11 veya üstü her telefonda arama ses yollarımız var. Bu modelin yazılımı henüz arşivimizde yok, karar arama testinde.",
       "source": "spec: https://telset.id/harga-spesifikasi/tecno/tecno-camon-20",
       "family": "mtk-afe"
     },
@@ -573,10 +573,10 @@
       ],
       "devices": [],
       "soc": "MediaTek Helio G88 (MT6769H)",
-      "tier": "experimental",
+      "tier": "expected",
       "profile": null,
-      "note": "Chip from the maker's specs (MediaTek Helio G88 (MT6769H)): our MediaTek family. No firmware of this model in our archive yet, so the call test decides.",
-      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G88 (MT6769H)): MediaTek ailemiz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde.",
+      "note": "Chip from the maker's specs (MediaTek Helio G88 (MT6769H)): every phone with this chip on Android 11 or newer in our firmware archive has our call-audio paths. No firmware of this exact model yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G88 (MT6769H)): arşivimizde bu işlemciyi kullanan Android 11 veya üstü her telefonda arama ses yollarımız var. Bu modelin yazılımı henüz arşivimizde yok, karar arama testinde.",
       "source": "spec: https://m.gsmarena.com/infinix_hot_30-12214.php",
       "family": "mtk-afe"
     },
@@ -592,10 +592,10 @@
         "VIA_X30_Plus"
       ],
       "soc": "MediaTek Helio G99",
-      "tier": "experimental",
+      "tier": "expected",
       "profile": null,
-      "note": "Chip from the maker's specs (MediaTek Helio G99): our MediaTek family. No firmware of this model in our archive yet, so the call test decides.",
-      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G99): MediaTek ailemiz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde.",
+      "note": "Chip from the maker's specs (MediaTek Helio G99): every phone with this chip on Android 11 or newer in our firmware archive has our call-audio paths. No firmware of this exact model yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G99): arşivimizde bu işlemciyi kullanan Android 11 veya üstü her telefonda arama ses yollarımız var. Bu modelin yazılımı henüz arşivimizde yok, karar arama testinde.",
       "source": "spec: https://www.donanimhaber.com/casper-via-x30-plus-tanitildi-iste-ozellikleri-ve-fiyati--161885",
       "family": "mtk-afe"
     },
@@ -662,11 +662,11 @@
       "devices": [],
       "soc": "Qualcomm Snapdragon 695 (SM6375)",
       "family": "qcom-legacy",
-      "tier": "experimental",
+      "tier": "expected",
       "source": "spec: https://www.gsmarena.com/sony_xperia_10_iv-11522.php (XQ-CC44: https://en.wikipedia.org/wiki/Sony_Xperia_10_IV)",
       "profile": null,
-      "note": "Chip from the maker's specs (Qualcomm Snapdragon 695 (SM6375)): our Qualcomm family. Sony unlocks the bootloader of global models (XQ-…) through its developer site; Japanese carrier models (SO-/SOG/A…SO) can't be unlocked. No firmware of this model in our archive yet, so the call test decides.",
-      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Qualcomm Snapdragon 695 (SM6375)): Qualcomm ailemiz. Sony, küresel modellerin (XQ-…) önyükleyici kilidini geliştirici sitesinden açar; Japon operatör modellerinin (SO-/SOG/A…SO) kilidi açılamaz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde."
+      "note": "Chip from the maker's specs (Qualcomm Snapdragon 695 (SM6375)): every phone with this chip on Android 11 or newer in our firmware archive has our call-audio paths. Sony unlocks the bootloader of global models (XQ-…) through its developer site; Japanese carrier models (SO-/SOG/A…SO) can't be unlocked. No firmware of this exact model yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Qualcomm Snapdragon 695 (SM6375)): arşivimizde bu işlemciyi kullanan Android 11 veya üstü her telefonda arama ses yollarımız var. Sony, küresel modellerin (XQ-…) önyükleyici kilidini geliştirici sitesinden açar; Japon operatör modellerinin (SO-/SOG/A…SO) kilidi açılamaz. Bu modelin yazılımı henüz arşivimizde yok, karar arama testinde."
     },
     {
       "name": "Xperia 10 V",
@@ -678,11 +678,11 @@
       "devices": [],
       "soc": "Qualcomm Snapdragon 695 (SM6375)",
       "family": "qcom-legacy",
-      "tier": "experimental",
+      "tier": "expected",
       "source": "spec: https://m.gsmarena.com/sony_xperia_10_v-12264.php",
       "profile": null,
-      "note": "Chip from the maker's specs (Qualcomm Snapdragon 695 (SM6375)): our Qualcomm family. Sony unlocks the bootloader of global models (XQ-…) through its developer site; Japanese carrier models (SO-/SOG/A…SO) can't be unlocked. No firmware of this model in our archive yet, so the call test decides.",
-      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Qualcomm Snapdragon 695 (SM6375)): Qualcomm ailemiz. Sony, küresel modellerin (XQ-…) önyükleyici kilidini geliştirici sitesinden açar; Japon operatör modellerinin (SO-/SOG/A…SO) kilidi açılamaz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde."
+      "note": "Chip from the maker's specs (Qualcomm Snapdragon 695 (SM6375)): every phone with this chip on Android 11 or newer in our firmware archive has our call-audio paths. Sony unlocks the bootloader of global models (XQ-…) through its developer site; Japanese carrier models (SO-/SOG/A…SO) can't be unlocked. No firmware of this exact model yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Qualcomm Snapdragon 695 (SM6375)): arşivimizde bu işlemciyi kullanan Android 11 veya üstü her telefonda arama ses yollarımız var. Sony, küresel modellerin (XQ-…) önyükleyici kilidini geliştirici sitesinden açar; Japon operatör modellerinin (SO-/SOG/A…SO) kilidi açılamaz. Bu modelin yazılımı henüz arşivimizde yok, karar arama testinde."
     },
     {
       "name": "Xperia 5 III",
@@ -695,11 +695,11 @@
       "devices": [],
       "soc": "Qualcomm Snapdragon 888 (SM8350)",
       "family": "qcom-legacy",
-      "tier": "experimental",
+      "tier": "expected",
       "source": "spec: https://www.gsmarena.com/sony_xperia_5_iii-10851.php (XQ-BQ42: https://en.wikipedia.org/wiki/Sony_Xperia_5_III)",
       "profile": null,
-      "note": "Chip from the maker's specs (Qualcomm Snapdragon 888 (SM8350)): our Qualcomm family. Sony unlocks the bootloader of global models (XQ-…) through its developer site; Japanese carrier models (SO-/SOG/A…SO) can't be unlocked. No firmware of this model in our archive yet, so the call test decides.",
-      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Qualcomm Snapdragon 888 (SM8350)): Qualcomm ailemiz. Sony, küresel modellerin (XQ-…) önyükleyici kilidini geliştirici sitesinden açar; Japon operatör modellerinin (SO-/SOG/A…SO) kilidi açılamaz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde."
+      "note": "Chip from the maker's specs (Qualcomm Snapdragon 888 (SM8350)): every phone with this chip on Android 11 or newer in our firmware archive has our call-audio paths. Sony unlocks the bootloader of global models (XQ-…) through its developer site; Japanese carrier models (SO-/SOG/A…SO) can't be unlocked. No firmware of this exact model yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Qualcomm Snapdragon 888 (SM8350)): arşivimizde bu işlemciyi kullanan Android 11 veya üstü her telefonda arama ses yollarımız var. Sony, küresel modellerin (XQ-…) önyükleyici kilidini geliştirici sitesinden açar; Japon operatör modellerinin (SO-/SOG/A…SO) kilidi açılamaz. Bu modelin yazılımı henüz arşivimizde yok, karar arama testinde."
     },
     {
       "name": "S19 Max Pro S",

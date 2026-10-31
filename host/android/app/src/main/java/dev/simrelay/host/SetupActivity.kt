@@ -231,7 +231,7 @@ class SetupActivity : Activity() {
         val btOn = bt?.isEnabled == true
         val paired = Relay.pairedClient()
         val sims = runCatching { Sims.status(this) }.getOrDefault(emptyList())
-        val v = Compat.verdict(this)
+        val v = Compat.onThisPhone(Compat.verdict(this), Daemon.profile())
         val permsOk = runtimeMissing.isEmpty() && sms && dialer && battery && silent
         // A PIN/pattern/password: after a restart or power cut TosbiSim can't start until someone unlocks the phone
         // (credential-encrypted storage), which nobody can on a phone without a screen (audit, 19 Oct).

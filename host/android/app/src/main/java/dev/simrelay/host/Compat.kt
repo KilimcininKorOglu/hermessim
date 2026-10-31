@@ -100,16 +100,27 @@ object Compat {
                 return Verdict(if (t == Tier.VERIFIED) Tier.EXPECTED else t, "${p.optString("name")} (${Build.MODEL})", note(p))
             }
         }
-        // Not listed: the chip platform's call-audio family from the AndroidDumps corpus (support.json "platforms").
+        // Not listed: the chip platform's call-audio family from the AndroidDumps corpus (support.json "platforms"),
+        // "expected" where every Android 11+ phone with that chip builds our auto profile ("platform_tiers", 31 Oct 2026)
         val fams = table?.optJSONObject("families")
-        val fam = table?.optJSONObject("platforms")?.let { pl -> Profiles.platformNames().firstNotNullOfOrNull { pl.optString(it).ifEmpty { null } } }
+        fun byPlatform(key: String) = table?.optJSONObject(key)?.let { pl -> Profiles.platformNames().firstNotNullOfOrNull { pl.optString(it).ifEmpty { null } } }
+        val fam = byPlatform("platforms")
         if (fam != null) {
             val f = fams?.optJSONObject(fam)
             val router = f?.optBoolean("router", false) == true
-            return Verdict(if (router) Tier.EXPERIMENTAL else Tier.NOT_YET, fallbackName, f?.let { local(it, "about") }.orEmpty())
+            val tier = when { !router -> Tier.NOT_YET; byPlatform("platform_tiers") == "expected" -> Tier.EXPECTED; else -> Tier.EXPERIMENTAL }
+            return Verdict(tier, fallbackName, f?.let { local(it, "about") }.orEmpty())
         }
         return Verdict(Tier.UNKNOWN, fallbackName, "")
     }
+
+    /**
+     * The table's verdict corrected by what the host found on this phone: a call-audio profile that fits its own card
+     * (Daemon) is what "expected" means, whatever the table guessed from the model or the chip; the call test still
+     * decides. Reports keep the table's tier (with the profile's source next to it).
+     */
+    fun onThisPhone(v: Verdict, profile: Profile?): Verdict =
+        if (profile != null && v.tier in setOf(Tier.EXPERIMENTAL, Tier.NOT_YET, Tier.UNKNOWN)) v.copy(tier = Tier.EXPECTED) else v
 
     /** "note" / "reason" in the phone's language: support.json carries a Turkish "<key>_tr". */
     private fun local(o: JSONObject, key: String): String =

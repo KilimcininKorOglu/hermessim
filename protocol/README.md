@@ -59,6 +59,26 @@ ChannelBinds (channel 0x4000) the other's relay address. One UDP datagram carrie
 inner packet as the L2CAP channel (10 ms frames; the receiver's jitter buffer reorders). Allocations are refreshed and
 channels re-bound every 4 minutes while a call lasts; `RemoteAudio{close}` or the call ending releases them.
 
+## Push
+
+When the iPhone can't hear the host (iOS closed the app, or it is away from Bluetooth), the host has api.tosbisim.com
+push a sealed envelope through APNs. Push has its own key `P`: the client makes 32 random bytes and sends
+`PushSetup{key}` over Bluetooth only whenever the host's `HostStatus.push_key_id` (first 8 bytes of sha256(P)) isn't
+its own; Internet mode can be off. A host that never reports `push_key_id` (older than 0.12.10) uses remote mode's
+key K instead, and so does the client with it. Below, `room_token` and the push key are derived from P (or K) exactly
+as remote mode derives them from K. The client registers `POST /api/v1/push/register {room_token,
+voip_token, alert_token, environment: sandbox|production, app_version}` (stored under `room_id`; no tokens = forget)
+and the host sends `POST /api/v1/push/send {room_token, kind: call|sms|note, sealed: base64, collapse_id?}`.
+`sealed` = `nonce12 || ChaCha20-Poly1305(push key, nonce, [u64 BE unix ms][Envelope])`, AAD `"h2c"`, push key = HKDF
+info `push` (the client keeps only this key where its notification extension can read it). `PushSetup{}` (empty) or
+Unpair forgets P.
+
+| kind | when | APNs | client |
+| --- | --- | --- | --- |
+| `call` | `CallEvent` RINGING, incoming, no client on Bluetooth, full voice | VoIP, expiration 0 | rings it in CallKit at once (every VoIP push must report a call), then reaches the host as usual |
+| `sms` | `SmsReceived` not acked within 4 s | alert, mutable, collapse id = SMS id, 1 day | the notification extension writes the text's notification; the app stays quiet when the text then arrives |
+| `note` | a ringing call in Basic mode | as `sms`, collapse id `basic-<call_id>` | "Missed call" note |
+
 ## Updates
 
 `GET /api/v1/releases/host?since=<versionCode>` lists the host releases newer than `since` (newest first: version,

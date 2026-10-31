@@ -44,8 +44,8 @@ object VoiceGate {
     fun allows(clientUuid: String?): Boolean = fullVoice || (Daemon.hasProfile() && clientUuid != null && clientUuid == testUuid)
 
     fun status(): VoiceStatus {
-        val v = Compat.verdict(app)
         val p = Daemon.profile()
+        val v = Compat.onThisPhone(Compat.verdict(app), p)
         val pass = runCatching { JSONObject(prefs.getString("pass", "") ?: "") }.getOrNull()
         return VoiceStatus.newBuilder()
             .setSupportTier(v.tier.name.lowercase()).setDeviceName(v.name)

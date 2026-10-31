@@ -29,15 +29,20 @@ object Sims {
     fun active(ctx: Context): List<SubscriptionInfo> =
         ctx.getSystemService(SubscriptionManager::class.java).activeSubscriptionInfoList.orEmpty()
 
-    /** Inserted physical SIMs, including ones switched off from the client (not in the active list). */
+    /**
+     * Inserted physical SIMs, including ones switched off from the client (not in the active list), and active eSIM
+     * lines (an eSIM was invisible to the iPhone yet got its data roaming switched off, 31 Oct 2026). A downloaded eSIM
+     * that isn't active is left out: it has no slot to address.
+     */
     @SuppressLint("MissingPermission")
     fun inserted(ctx: Context): List<SubscriptionInfo> {
+        val activeIds = active(ctx).map { it.subscriptionId }.toSet()
         val sm = ctx.getSystemService(SubscriptionManager::class.java)
         @Suppress("UNCHECKED_CAST")
         val all = runCatching {
             SubscriptionManager::class.java.getMethod("getAvailableSubscriptionInfoList").invoke(sm) as List<SubscriptionInfo>?
         }.onFailure { Log.w(TAG, "getAvailableSubscriptionInfoList: $it") }.getOrNull() ?: active(ctx)
-        return all.filter { it.simSlotIndex >= 0 && !it.isEmbedded }.sortedBy { it.simSlotIndex }
+        return all.filter { it.simSlotIndex >= 0 && (!it.isEmbedded || it.subscriptionId in activeIds) }.sortedBy { it.simSlotIndex }
     }
 
     /** SIM inserted/removed/switched, or default data SIM moved. */
@@ -194,6 +199,8 @@ object Sims {
         val info = inserted(ctx).firstOrNull { it.simSlotIndex == s.slot } ?: return "no SIM in slot ${s.slot}"
         val sub = info.subscriptionId
         val sm = ctx.getSystemService(SubscriptionManager::class.java)
+        // An eSIM switched off may leave the list (nothing to switch back on from the iPhone, and the host has no screen)
+        if (s.hasEnabled() && !s.enabled && info.isEmbedded) return "an eSIM line can't be switched off from the iPhone yet"
         if (s.hasEnabled()) {
             val ok = call { SubscriptionManager::class.java
                 .getMethod("setUiccApplicationsEnabled", Int::class.java, Boolean::class.java).invoke(sm, sub, s.enabled) }

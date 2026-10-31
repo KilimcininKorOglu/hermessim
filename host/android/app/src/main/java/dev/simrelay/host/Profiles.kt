@@ -49,6 +49,35 @@ data class Profile(val id: String, val json: JSONObject, val source: String = "m
         return l + silenceLines()
     }
 
+    /** Every mixer control this profile drives ("Voc Rec Config" is optional: older kernels lack it, the daemon skips it). */
+    fun controlNames(): List<String> {
+        val routes = json.optJSONObject("inject")?.optJSONObject("route_by_session")
+        val mute = json.optJSONObject("mute")
+        fun keys(k: String) = json.optJSONObject(k)?.keys()?.asSequence()?.toList().orEmpty()
+        return (listOfNotNull(json.optJSONObject("capture")?.optString("route"), mute?.optString("tx"), mute?.optString("rx")) +
+            routes?.keys()?.asSequence()?.map { routes.optString(it) }?.toList().orEmpty() + keys("call_controls") + keys("silence"))
+            .filter { it.isNotEmpty() && it != "-" }.distinct()
+    }
+
+    /**
+     * This profile on this phone's sound card: each PCM looked up by its "pcm_name" (the measured phone's number can differ
+     * on a sibling) and every control it drives checked with [has]. Null and why when it doesn't fit: the daemon skips a
+     * missing control, so a sibling's card would route half a call, or open the wrong PCM. [pcms] empty (no root to read
+     * /proc/asound): the numbers are kept.
+     */
+    fun onThisCard(has: (String) -> Boolean, pcms: Map<String, Int>): Pair<Profile?, String> {
+        val j = JSONObject(json.toString())
+        val why = mutableListOf<String>()
+        for (k in listOf("capture", "inject")) {
+            val o = j.optJSONObject(k) ?: continue
+            val name = o.optString("pcm_name")
+            if (name.isEmpty() || pcms.isEmpty()) continue
+            pcms[name]?.let { o.put("pcm", it) } ?: run { why += "no PCM $name" }
+        }
+        controlNames().filterNot(has).takeIf { it.isNotEmpty() }?.let { why += "missing controls $it" }
+        return (if (why.isEmpty()) Profile(id, j, source) else null) to why.joinToString("; ")
+    }
+
     /** Voice session (1/2) for a SIM slot: the profile's map, else Qualcomm's VoiceMMode numbering (slot + 1). */
     fun sessionForSlot(slot: Int): Int = json.optJSONObject("session_by_slot")?.optInt(slot.toString(), slot + 1) ?: (slot + 1)
 

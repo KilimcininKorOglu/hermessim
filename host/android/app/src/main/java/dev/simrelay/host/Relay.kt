@@ -83,6 +83,7 @@ object Relay {
         ble.start()
         val adapter = (app.getSystemService(android.content.Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager).adapter
         audio = AudioBridge(adapter, ble).also { it.start() }
+        Push.start(app)
         RemoteLink.start(app, { bytes -> main.post { runCatching { onPeerFrame(Peer.Internet, bytes) }.onFailure { Log.e(TAG, "remote frame failed: $it") } } }) { present, wasThere ->
             main.post {
                 // A room blip mid-call doesn't touch the call's audio (TURN carries it); it ends with the call.
@@ -184,9 +185,15 @@ object Relay {
             main.post { HostWifi.evaluate("call ended") }
         }
         broadcast(Envelope.newBuilder().setCallEvent(e))
+        // No iPhone on Bluetooth: the app may be closed, iOS only starts it for a push. One in the room gets the event
+        // above as well; it rings the same call once.
+        if (e.incoming && e.state == CallEvent.State.RINGING && !bleNear()) Push.call(e)
     }
 
-    fun smsReceived(m: SmsReceived) = broadcast(Envelope.newBuilder().setSmsReceived(m))
+    fun smsReceived(m: SmsReceived) {
+        broadcast(Envelope.newBuilder().setSmsReceived(m))
+        Push.sms(m)
+    }
 
     fun smsSendResult(r: SmsSendResult) = broadcast(Envelope.newBuilder().setSmsSendResult(r))
 
@@ -339,6 +346,13 @@ object Relay {
                 RemoteLink.configure(env.remoteSetup.enabled, env.remoteSetup.key.toByteArray())
                 main.postDelayed(pushStatus, 500)
             }
+            Envelope.BodyCase.PUSH_SETUP -> {
+                // Like remote mode's key: it only ever travels over Bluetooth. Forgetting it is fine from anywhere.
+                val k = env.pushSetup.key.toByteArray()
+                if (d !is Peer.Ble && k.isNotEmpty()) return error(d, env.seq, Error.Code.BAD_REQUEST, "push setup over Bluetooth only")
+                Push.setKey(k)
+                main.postDelayed(pushStatus, 300)
+            }
             Envelope.BodyCase.UPDATE_ACTION -> Updater.action(env.updateAction.action) { why ->
                 main.post {
                     if (why != null) error(d, env.seq, Error.Code.BAD_REQUEST, "update: $why")
@@ -408,6 +422,7 @@ object Relay {
         main.postDelayed({
             targets().forEach { it.drop() }
             p.edit().remove("pinned_install_id").remove("client_model").remove("client_mac").apply()
+            Push.setKey(ByteArray(0))
             trusted.clear()
             if (::ble.isInitialized) runCatching { ble.stop() }
             Log.i(TAG, "RETIRED: the iPhone was told, pairing forgotten")
@@ -436,6 +451,7 @@ object Relay {
         val mac = p.getString("client_mac", null) ?: (d as? Peer.Ble)?.id
         send(d, Envelope.newBuilder().setUnpair(Unpair.getDefaultInstance()), replyTo)   // the iPhone waits for this
         p.edit().remove("pinned_install_id").remove("client_model").remove("client_mac").apply()
+        Push.setKey(ByteArray(0))
         trusted.clear()
         pairableChanged()                                       // unpaired: ready for the next iPhone
         Log.i(TAG, "UNPAIRED: the iPhone forgot this host")
@@ -637,6 +653,7 @@ object Relay {
         b.setMobileData(MobileData.isOn(app))
         b.setHostWifi(HostWifi.status())
         b.setUplink(uplink(b.simsList))
+        Push.keyId()?.let { b.setPushKeyId(com.google.protobuf.ByteString.copyFrom(it)) }
         b.setUpdate(Updater.status())
         return b.build()
     }

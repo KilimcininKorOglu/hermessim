@@ -17,6 +17,7 @@
   "card": 0,
   "capture": {
     "pcm": 0,
+    "pcm_name": "MultiMedia1",
     "route": "MultiMedia1 Mixer VOC_REC_DL",
     "rec_config": "Voc Rec Config",
     "rate": 16000,
@@ -24,6 +25,7 @@
   },
   "inject": {
     "pcm": 23,
+    "pcm_name": "MultiMedia9",
     "rate": 48000,
     "channels": 2,
     "route_by_session": {

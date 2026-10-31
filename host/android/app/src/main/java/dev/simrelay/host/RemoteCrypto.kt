@@ -41,6 +41,7 @@ class RemoteCrypto(key: ByteArray) {
     val roomId: String = hex(MessageDigest.getInstance("SHA-256").digest(roomToken))
     private val control = SecretKeySpec(hkdf(key, "control"), "ChaCha20")
     private val audio = SecretKeySpec(hkdf(key, "audio"), "ChaCha20")
+    private val push = SecretKeySpec(hkdf(key, "push"), "ChaCha20")
 
     fun sealControl(plain: ByteArray) = seal(control, plain, H2C)
     fun openControl(sealed: ByteArray) = open(control, sealed, C2H)
@@ -50,6 +51,10 @@ class RemoteCrypto(key: ByteArray) {
     /** Control plaintext = [u64 BE unix ms][envelope]. */
     fun sealEnvelope(env: ByteArray): ByteArray =
         sealControl(ByteBuffer.allocate(8 + env.size).putLong(System.currentTimeMillis()).put(env).array())
+
+    /** Push plaintext = [u64 BE unix ms][envelope], under its own key (the iPhone's notification extension holds only it). */
+    fun sealPush(env: ByteArray): ByteArray =
+        seal(push, ByteBuffer.allocate(8 + env.size).putLong(System.currentTimeMillis()).put(env).array(), H2C)
 
     private fun seal(k: SecretKeySpec, plain: ByteArray, aad: ByteArray): ByteArray {
         val nonce = ByteArray(12).also { rng.nextBytes(it) }

@@ -49,6 +49,7 @@ message Envelope {
     DiagnosticsRequest diagnostics_request = 61; // client -> host: the host's side of a problem report
     Diagnostics diagnostics = 62;                // host -> client (reply)
     Unpair unpair = 63;                          // client -> host: "forget this host" on the iPhone (host -> client: its answer, or unasked: the host was removed)
+    PushSetup push_setup = 64;                   // client -> host, over Bluetooth only: the push wake-up key
   }
 }
 
@@ -108,6 +109,7 @@ message HostStatus {
                                  // only the user turns it off. Remote mode needs it.
   HostWifi host_wifi = 14;       // the host's own Wi-Fi connection (not the hotspot)
   Uplink uplink = 15;            // what the host's own internet runs on right now
+  bytes push_key_id = 16;        // first 8 bytes of sha256(PushSetup.key) the host holds; empty = none (README "Push")
   enum VoiceTier { VOICE_TIER_UNSPECIFIED = 0; BASIC = 1; FULL_VOICE = 2; }
 }
 
@@ -396,6 +398,9 @@ message Uplink {
 // The iPhone forgets this host: the host forgets the iPhone too (its pin and its Bluetooth bond), so both sides
 // start clean and another iPhone can pair.
 message Unpair {}
+
+// The key for push wake-ups, apart from remote mode's: pushes work with Internet mode off. Empty = forget it.
+message PushSetup { bytes key = 1; }           // 32 random bytes
 
 message DiagnosticsRequest {
   uint32 max_bytes = 1;          // 0 = the host's default (16 KB)

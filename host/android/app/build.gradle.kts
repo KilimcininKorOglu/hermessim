@@ -38,8 +38,8 @@ android {
         applicationId = "dev.simrelay.host"
         minSdk = 30
         targetSdk = 33   // TODO(M6): 34+ needs foregroundServiceType declarations
-        versionCode = 44
-        versionName = "0.12.8"
+        versionCode = 48
+        versionName = "0.12.12"
     }
     sourceSets["main"].apply {
         // Device profiles (repo-root profiles/) ship as assets, e.g. assets/qcom/sm8250-samsung-r8q.json
@@ -71,6 +71,7 @@ dependencies {
     implementation("com.google.protobuf:protobuf-javalite:4.31.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")   // remote mode WebSocket (Apache-2.0)
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")       // Android's org.json is only a stub in local unit tests
 }
 
 // Every permission the app requests is either on the module's privapp allowlist or an ordinary (normal/runtime) one
