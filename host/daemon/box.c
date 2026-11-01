@@ -121,6 +121,7 @@ int box_role(const char *role, const char *pkg) {
 static const struct { const char *path; int stop; } CUT_NODES[] = {
     { "/sys/class/power_supply/battery/batt_slate_mode", 1 },           // Samsung: 1 = run from the battery
     { "/sys/class/power_supply/battery/input_suspend", 1 },             // Qualcomm/MediaTek: 1 = charger input suspended
+    { "/sys/class/qcom-battery/input_suspend", 1 },                     // newer Qualcomm (qti_battery_charger): the same
     { "/sys/class/power_supply/battery/charging_enabled", 0 },          // 0 = don't charge
 };
 #define BATT_CAPACITY "/sys/class/power_supply/battery/capacity"
@@ -459,15 +460,20 @@ static void broadcast(const char *action) {
 #define LOG_FILE "/data/adb/tosbisim/logs/host.log"
 #define LOG_PIDF "/data/adb/tosbisim/logs/logcat.pid"
 
-static void log_stop(void) {
-    // One capture at a time: stop the running logcat (pid file; a pattern kill would match itself).
-    int old = read_int(LOG_PIDF);
-    if (old <= 1) return;
+// The capture's logcat (pid file; a pattern match would find itself), or 0 if it no longer runs.
+static int log_pid(void) {
+    int pid = read_int(LOG_PIDF);
+    if (pid <= 1) return 0;
     char comm[64] = "", path[64];
-    snprintf(path, sizeof(path), "/proc/%d/comm", old);
+    snprintf(path, sizeof(path), "/proc/%d/comm", pid);
     int fd = open(path, O_RDONLY | O_CLOEXEC);
     if (fd >= 0) { ssize_t n = read(fd, comm, sizeof(comm) - 1); close(fd); if (n > 0) comm[n] = 0; }
-    if (strncmp(comm, "logcat", 6) == 0) kill(old, SIGTERM);
+    return strncmp(comm, "logcat", 6) == 0 ? pid : 0;
+}
+
+static void log_stop(void) {
+    int pid = log_pid();                 // one capture at a time
+    if (pid) kill(pid, SIGTERM);
 }
 
 /** since: "MM-DD hh:mm:ss.mmm" to resume after the file's last line (no copy of what it already holds), or NULL. */
@@ -498,20 +504,21 @@ void box_log_capture(void) {
     log_spawn(NULL);
 }
 
-// logcat can stay alive while logd no longer feeds it (S20 FE, 19 Oct 2026: nothing written after 19:32 although
-// the app kept logging), and diagnostics read this file. Nothing written for 10 min: restart the capture from the
-// last line's time. A quiet host only costs a restart every 10 min.
+// A capture that ended (logcat killed or crashed) starts again from the file's last line. Judged by whether logcat
+// runs, not by the file's age: logcat writes the file in whole 4 KiB blocks (Android 13), so a quiet host adds nothing
+// for 10-25 min. Judged by age it was killed every ~10 min, which threw the unwritten block away and left cut lines and
+// duplicates (519 restarts in 13 days; the "logd stopped feeding it" of 19 Oct was most likely this too; audit, 1 Nov
+// 2026). Problem reports take the newest lines from logcat itself (Diag.recentLog).
 void box_log_watch(void) {
     static struct timespec last;
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
     if (last.tv_sec && now.tv_sec - last.tv_sec < 60) return;
     last = now;
-    if (now.tv_sec - g_log_started.tv_sec < 600) return;   // a capture gets 10 min before it is judged
+    // A capture just started may not be "logcat" in /proc yet (judged in its first millisecond, a second one started)
+    if (now.tv_sec - g_log_started.tv_sec < 60 || log_pid()) return;
     struct stat st;
-    if (stat(LOG_FILE, &st) != 0) return;
-    long age = (long)(time(NULL) - st.st_mtime);
-    if (age < 600) return;                        // (negative after a clock change: also left alone)
+    if (stat(LOG_FILE, &st) != 0) st.st_size = 0;
     char tail[2048] = "", since[19] = "";
     int fd = open(LOG_FILE, O_RDONLY | O_CLOEXEC);
     if (fd >= 0) {
@@ -532,8 +539,7 @@ void box_log_watch(void) {
             }
         }
     }
-    LOGW("log capture: nothing written for %ld s, restarting it", age);
-    log_stop();
+    LOGW("log capture: logcat is gone, restarting it");
     log_spawn(since[0] ? since : NULL);
 }
 

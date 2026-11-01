@@ -12,6 +12,17 @@ import java.io.DataInputStream
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
+ * Closes a daemon audio socket so both ends notice at once. close() alone leaves the socket open while one of our
+ * threads is blocked reading it (the read holds it): after a Bluetooth call the daemon kept the dead client until the
+ * next call's first frame woke that read (1 Nov 2026). shutdown wakes our reader and tells the daemon now.
+ */
+internal fun LocalSocket.closeNow() {
+    runCatching { shutdownInput() }
+    runCatching { shutdownOutput() }
+    runCatching { close() }
+}
+
+/**
  * Bridges the audio daemon (simrelayd, unix SEQPACKET "@simrelayd-audio") and the iPhone (BLE L2CAP CoC).
  * The daemon owns the call-audio codec and PCM I/O; this just forwards Opus packets both ways.
  *
@@ -118,7 +129,7 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
         } finally {
             alive.set(false)
             runCatching { l2cap.close() }
-            runCatching { ds.close() }
+            ds.closeNow()
             down.join(500)
             Log.i(TAG, "audio bridge down")
         }

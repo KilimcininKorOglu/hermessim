@@ -30,6 +30,11 @@ notifications or writes (MTU is typically 185-517 on iOS). Reset both stream buf
   made a ring take 1.9 s in M1).
 - Numbers: the host sends `number_raw` and, when possible, `number_e164` (normalised with the SIM's
   country) so the client can match the iPhone Contacts list.
+- Ringback (outgoing calls): with `alerting_known`, the client stays silent until `alerting`, then plays
+  the network's early media, or its own ringback (the SIM country's ITU E.180 tone) if no network audio
+  arrives within 1 s. Without it (older hosts, or a phone whose precise call state the host can't read),
+  the local ringback starts with dialing. Network audio always silences the local ringback for the rest
+  of the dialing phase. The same DIALING event may arrive again (replays): it changes nothing.
 
 ## Remote mode (internet)
 

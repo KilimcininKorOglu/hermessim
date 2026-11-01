@@ -123,6 +123,9 @@ object RemoteLink {
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             h.post { if (my == gen) { Log.w(TAG, "remote: socket failed: $t"); ws = null; setOnline(false); setPeer(false); retry() } }
         }
+        // The server closing (Reverb pruning or restarting): answer it, so onClosed follows now. Unanswered, the socket
+        // counted as online until the next ping failed, up to ~50 s of messages into nothing (audit, 1 Nov 2026).
+        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(1000, null) }
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             h.post { if (my == gen) { Log.i(TAG, "remote: socket closed $code"); ws = null; setOnline(false); setPeer(false); retry() } }
         }

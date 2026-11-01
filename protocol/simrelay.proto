@@ -232,6 +232,10 @@ message CallEvent {
   int64 state_since_ms = 8;      // host wall clock
   DisconnectCause cause = 9;     // set when state == ENDED
   string client_call_uuid = 10;  // echoes Dial.client_call_uuid for calls the client started
+  // Outgoing calls, DIALING: the far end is ringing (the network alerted: 180 Ringing, or 183 with early media). A
+  // phone plays no ringback before that; then the network's own (early media) or, when it sends none, a local one.
+  bool alerting = 11;
+  bool alerting_known = 12;      // the host reports `alerting` for this call; false: ring back from the start of dialing
   enum State { STATE_UNSPECIFIED = 0; RINGING = 1; DIALING = 2; ACTIVE = 3; HOLDING = 4; ENDED = 5; }
   enum DisconnectCause { CAUSE_UNSPECIFIED = 0; LOCAL = 1; REMOTE = 2; REJECTED = 3; MISSED = 4; BUSY = 5; ERROR = 6; }
 }

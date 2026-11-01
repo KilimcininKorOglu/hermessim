@@ -42,7 +42,7 @@
 // ---- PCM I/O through the phone's own libtinyalsa (dlopen) ----
 // Upstream tinyalsa 2.0.0, compiled in, misbehaved on SM8250 (15 Oct 2026): in-call capture faulted with
 // EFAULT or free-ran at 30x real time, and Incall_Music playback consumed ~20 kHz instead of 48 kHz with
-// correct negotiated params. The system /system/lib64/libtinyalsa.so (what stock tinycap/tinyplay use) runs
+// correct negotiated params. The system's own libtinyalsa.so (what stock tinycap/tinyplay use) runs
 // both in real time with 10 ms periods and 0 errors. Its pcm_config layout matches; I/O is byte-based.
 struct pcm;
 struct pcm_config {
@@ -109,9 +109,15 @@ static int pcm_negotiate(int card, int device, int playback, int want_rate, int 
 
 static int ta_load(void) {
     if (ta.open) return 0;
-    // The system's own tinyalsa (what stock tinycap/tinyplay use); vendors keep it in different partitions.
-    static const char *paths[] = { "/system/lib64/libtinyalsa.so", "/vendor/lib64/libtinyalsa.so",
-                                   "/system_ext/lib64/libtinyalsa.so", "/odm/lib64/libtinyalsa.so" };
+    // The system's own tinyalsa (what stock tinycap/tinyplay use); vendors keep it in different partitions. Our own
+    // word size: lib64 for the 64-bit build, lib for the 32-bit one (32-bit Android has no lib64).
+#ifdef __LP64__
+#define LIBDIR "lib64"
+#else
+#define LIBDIR "lib"
+#endif
+    static const char *paths[] = { "/system/" LIBDIR "/libtinyalsa.so", "/vendor/" LIBDIR "/libtinyalsa.so",
+                                   "/system_ext/" LIBDIR "/libtinyalsa.so", "/odm/" LIBDIR "/libtinyalsa.so" };
     void *h = NULL;
     for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]) && !h; i++) h = dlopen(paths[i], RTLD_NOW);
     if (!h) { __android_log_print(ANDROID_LOG_ERROR, "simrelayd", "dlopen libtinyalsa: %s", dlerror()); return -1; }

@@ -4,6 +4,7 @@ package dev.simrelay.host
 import android.annotation.SuppressLint
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.telecom.Call
 import android.telecom.DisconnectCause
@@ -32,7 +33,7 @@ object CallRegistry {
     private val ids = ConcurrentHashMap<Call, String>()
     private val byId = ConcurrentHashMap<String, Call>()
     private val clientUuids = ConcurrentHashMap<String, String>()   // call id -> client's CallKit UUID
-    private val lastSent = ConcurrentHashMap<String, CallEvent.State>() // send state changes only
+    private val lastSent = ConcurrentHashMap<String, CallEvent>()       // send changes only
     @Volatile private var pendingDial: Pair<String, Long>? = null     // client uuid, when requested
     private val owned: MutableSet<String> = ConcurrentHashMap.newKeySet()   // call ids the iPhone dialled or answered
     private lateinit var app: Context
@@ -76,8 +77,8 @@ object CallRegistry {
     }
 
     fun changed(call: Call) {
-        val e = event(call)
-        if (lastSent.put(e.callId, e.state) != e.state) Relay.callEvent(e)
+        send(call)
+        if (!dialingPhase()) RootCallState.stop()
         // Audio runs while a call is ACTIVE, and for outgoing calls already while DIALING: the network's early
         // media (ringback, "number unavailable" announcements) then reaches the iPhone instead of the host.
         // The iPhone's call first: a call taken on the host can be active while the iPhone's own waits on hold.
@@ -98,11 +99,64 @@ object CallRegistry {
 
     fun removed(call: Call) {
         val id = ids.remove(call) ?: return
-        if (lastSent.remove(id) != CallEvent.State.ENDED) Relay.callEvent(event(call, forceEnded = true, id = id))
+        if (lastSent.remove(id)?.state != CallEvent.State.ENDED) Relay.callEvent(event(call, forceEnded = true, id = id))
         byId.remove(id)
         clientUuids.remove(id)
+        alertingIds.remove(id)
+        if (!dialingPhase()) RootCallState.stop()
         disown(call, id)
         if (byId.values.none { it.stateCompat == Call.STATE_ACTIVE || it.stateCompat == Call.STATE_DIALING }) Daemon.callIdle()
+    }
+
+    private fun send(call: Call) {
+        val e = event(call)
+        val prev = lastSent.put(e.callId, e)
+        if (prev == null || prev.state != e.state || prev.alerting != e.alerting || prev.alertingKnown != e.alertingKnown) Relay.callEvent(e)
+    }
+
+    // ------------------------------------------------------------------ ringback
+    // The iPhone plays no ringback until the far end rings (CallEvent.alerting), like any phone. Two sources: the
+    // modem's precise call state (RootCallState, any phone) and Samsung's own connection event. The client relies on
+    // it (alerting_known) only on a firmware where an alert was seen before, and not after this dial's watcher failed;
+    // otherwise it rings back from the start of dialing, as before 0.12.14.
+    private val alertingIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    @Volatile private var watchLost = false
+    private const val SAMSUNG_ALERTING = "com.samsung.telecom.Call.EVENT_SET_ALERTING"
+
+    private val dialingStates = setOf(Call.STATE_DIALING, Call.STATE_CONNECTING, Call.STATE_SELECT_PHONE_ACCOUNT)
+    /** An outgoing call is on its way (or the client's Dial is, before Telecom adds the call). */
+    private fun dialingPhase() = byId.values.any { it.stateCompat in dialingStates } ||
+        pendingDial?.let { System.currentTimeMillis() - it.second < 15_000 } == true
+
+    private fun alertingKnown(call: Call): Boolean =
+        call.details.callDirection == Call.Details.DIRECTION_OUTGOING && isOwned(call) && !watchLost &&
+            prefs.getString("alerting_seen", null) == Build.FINGERPRINT
+
+    /** Main thread: the far end of [call] rings. */
+    private fun alerting(call: Call, how: String) {
+        val id = ids[call] ?: return
+        if (call.stateCompat !in dialingStates || !alertingIds.add(id)) return
+        Log.i(TAG, "call ${id.take(8)} alerting ($how)")
+        if (prefs.getString("alerting_seen", null) != Build.FINGERPRINT) prefs.edit().putString("alerting_seen", Build.FINGERPRINT).apply()
+        send(call)
+    }
+
+    fun connectionEvent(call: Call, event: String) { if (event == SAMSUNG_ALERTING) alerting(call, "Samsung event") }
+
+    private fun watchAlerting() {
+        watchLost = false
+        RootCallState.watch(app, onState = { slot, state ->
+            if (state == RootCallState.ALERTING) byId.values.filter {
+                it.details.callDirection == Call.Details.DIRECTION_OUTGOING && slotOf(it).let { s -> s == slot || s < 0 }
+            }.forEach { alerting(it, "precise call state") }
+        }, onLost = { why ->
+            val dialing = byId.values.filter { it.stateCompat in dialingStates }
+            if (dialing.any(::alertingKnown)) {
+                Diag.event("alerting_watch_lost", org.json.JSONObject().put("what", why.take(60)), withLog = false)
+            }
+            watchLost = true                                // the client rings back itself from now on
+            dialing.forEach(::send)
+        })
     }
 
     /** Any call at all (ringing, dialling, active or held): cheap, and safe before [init]. */
@@ -141,6 +195,7 @@ object CallRegistry {
         pendingDial = d.clientCallUuid to System.currentTimeMillis()
         if (d.voiceTest) VoiceGate.testUuid = d.clientCallUuid
         Log.i(TAG, "client dial slot=${d.slot}${if (d.voiceTest) " (call test)" else ""}")
+        watchAlerting()
         tm.placeCall(Uri.fromParts("tel", d.number, null), extras)
         return null
     }
@@ -173,6 +228,8 @@ object CallRegistry {
             .setStateSinceMs(System.currentTimeMillis())
             .setCause(if (state == CallEvent.State.ENDED) cause(d.disconnectCause) else CallEvent.DisconnectCause.CAUSE_UNSPECIFIED)
             .setClientCallUuid(clientUuids[callId].orEmpty())
+            .setAlerting(state == CallEvent.State.DIALING && callId in alertingIds)
+            .setAlertingKnown(state == CallEvent.State.DIALING && alertingKnown(call))
             .build()
     }
 

@@ -141,9 +141,12 @@ object Compat {
         runCatching { ctx.packageManager.getPackageInfo("com.topjohnwu.magisk", 0); true }.getOrDefault(false) ||
             File("/system/bin/su").exists() || File("/sbin/su").exists() || File("/debug_ramdisk/su").exists()
 
-    fun bleAdvertising(ctx: Context): Boolean? {
+    /** Before the host runs: false without Bluetooth LE at all, null while Bluetooth is off. Whether advertising works
+     *  shows once the host advertises ([BleLink.advStatus]): no flag answers that ahead of time. */
+    fun bluetoothLe(ctx: Context): Boolean? {
+        if (!ctx.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_BLUETOOTH_LE)) return false
         val a = ctx.getSystemService(BluetoothManager::class.java)?.adapter ?: return false
-        return if (a.isEnabled) a.isMultipleAdvertisementSupported else null      // unknown while Bluetooth is off
+        return if (a.isEnabled) true else null
     }
 
     /** The Bluetooth controller's LE abilities, for diagnostics: what separates "should work" from "works" on

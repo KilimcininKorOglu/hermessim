@@ -140,7 +140,7 @@ object Onboarding {
     private fun plainInstallError(log: String): String {
         val last = log.lines().map { it.trim().trimStart('!', '-', ' ') }.lastOrNull { it.isNotBlank() }.orEmpty()
         return when {
-            log.contains("arm64 only") -> "this phone runs 32-bit Android"
+            log.contains("unsupported processor") -> "this phone's processor isn't supported"
             log.contains("Incomplete Magisk install", true) -> "Magisk's setup isn't complete: open the Magisk app once and let it finish"
             log.contains("su:") || log.contains("timeout") -> "root was lost during the install"
             else -> last.take(160)
@@ -258,6 +258,7 @@ object Onboarding {
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("onboarding", Context.MODE_PRIVATE)
 
-    /** 64-bit Android (the daemon and module are arm64 only). */
-    val is64Bit: Boolean get() = Build.SUPPORTED_64_BIT_ABIS.isNotEmpty()
+    /** The daemon build for this phone's Android: the module carries arm64-v8a and armeabi-v7a, and customize.sh keeps
+     *  the one for the primary ABI (Magisk's ARCH), which is Build.SUPPORTED_ABIS[0]. Null: no build (x86). */
+    val daemonAbi: String? get() = Build.SUPPORTED_ABIS.firstOrNull()?.takeIf { it == "arm64-v8a" || it == "armeabi-v7a" }
 }

@@ -24,6 +24,10 @@ object Push {
     /** A text not acked by then (the iPhone asleep or out of reach, even if it looks present in the room) is pushed. */
     private const val SMS_ACK_WAIT_MS = 4000L
     private lateinit var app: Context
+    private val wake by lazy {
+        app.getSystemService(android.os.PowerManager::class.java)
+            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "tosbisim:sms-push").apply { setReferenceCounted(false) }
+    }
     private val main = Handler(Looper.getMainLooper())
     private val exec = Bg.single("push")
     private val pushedCalls = LinkedHashSet<String>()           // main thread
@@ -69,6 +73,9 @@ object Push {
     /** Relay.smsReceived, main: pushed only if the iPhone hasn't acked it (stored it) shortly. */
     fun sms(m: SmsReceived) {
         if (!::app.isInitialized) return
+        // The wait counts uptime: the phone wakes for the text and fell back asleep inside it, so one push went out after
+        // 131 s, not 4 (31 Oct 2026). Held awake for the wait and the push's request.
+        wake.acquire(SMS_ACK_WAIT_MS + 10_000)
         main.postDelayed({
             if (!SmsStore.isPending(app, m.id)) return@postDelayed
             send("sms", Envelope.newBuilder().setSmsReceived(fitted(m)).build().toByteArray(), m.id, "text ${m.id.take(8)}")

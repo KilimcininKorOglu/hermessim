@@ -214,11 +214,13 @@ object Updater {
         if (CallRegistry.snapshot().any { it.state != dev.simrelay.protocol.v1.CallEvent.State.ENDED }) {
             h.postDelayed({ swapDaemonIfNeeded() }, 60_000); return
         }
+        val abi = Onboarding.daemonAbi ?: return                     // no build for this phone: the module never installed
         runCatching {
             val zip = File(app.cacheDir, "module.zip")
             app.assets.open("module/tosbisim-host-module.zip").use { i -> zip.outputStream().use { o -> i.copyTo(o) } }
             val fresh = File(app.cacheDir, "simrelayd")
-            ZipFile(zip).use { z -> z.getInputStream(z.getEntry("simrelayd")).use { i -> fresh.outputStream().use { o -> i.copyTo(o) } } }
+            // The build customize.sh kept at install (bin/<abi>/simrelayd): a 32-bit phone must never get the 64-bit one
+            ZipFile(zip).use { z -> z.getInputStream(z.getEntry("bin/$abi/simrelayd")).use { i -> fresh.outputStream().use { o -> i.copyTo(o) } } }
             val installedSha = Root.sh("sha256sum /data/adb/modules/simrelay-host/simrelayd").out.substringBefore(' ')
             val freshSha = sha256(fresh)
             // service.sh went back to simrelayd.prev because this build kept failing to start, and wrote its sha256

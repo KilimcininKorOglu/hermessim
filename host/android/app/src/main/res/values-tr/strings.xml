@@ -11,7 +11,7 @@
     <string name="checking">Bu telefon kontrol ediliyor…</string>
 
     <string name="cant_title">Bu telefon ana cihaz olamaz</string>
-    <string name="cant_32bit">32 bit Android çalıştırıyor; TosbiSim 64 bit bir sistem gerektirir.</string>
+    <string name="cant_cpu">İşlemci türü desteklenmiyor; TosbiSim ARM işlemcili bir telefon gerektirir.</string>
     <string name="cant_unsupported">%s</string>
     <string name="cant_unsupported_generic">Önyükleyici kilidi açılamıyor, bu yüzden root\'lanamaz.</string>
     <string name="cant_alt">Başka bir yedek telefonu TosbiSim uygulamasında sorgulayın: Ana cihaz → Telefon sorgula.</string>
@@ -121,6 +121,11 @@
     <string name="ble_ok">Açık; iPhone\'unuz bu telefonu bulabilir</string>
     <string name="ble_off">Kapalı</string>
     <string name="ble_no">Bu telefon Bluetooth LE ile görünür olamıyor, bu yüzden iPhone\'unuz ona bağlanamaz.</string>
+    <string name="ble_none">Bu telefonda Bluetooth LE yok, bu yüzden iPhone\'unuz ona bağlanamaz.</string>
+    <string name="ble_present">Açık; TosbiSim çalışınca yeniden denetlenir</string>
+    <string name="ble_starting">Başlatılıyor…</string>
+    <string name="ble_busy">Başka bir uygulama bu telefonun tek Bluetooth duyuru yuvasını kullanıyor; her dakika yeniden deneniyor.</string>
+    <string name="ble_retrying">Android Bluetooth duyurusunu reddetti (kod %1$d); yeniden deneniyor.</string>
     <string name="c_iphone">iPhone\'unuz</string>
     <string name="iphone_none">Eşleşmedi</string>
     <string name="iphone_connected">%s, bağlı</string>

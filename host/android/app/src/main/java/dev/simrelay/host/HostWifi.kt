@@ -50,6 +50,9 @@ object HostWifi {
     @Volatile private var reason = HostWifiMsg.Reason.REASON_UNSPECIFIED
     @Volatile var connectedSsid = ""; private set
     private var wasAway = true      // no "you just left" at start-up
+    private var wasNear = false
+    private const val AWAY_ALARM = "client-away"
+    private const val JOIN_ALARM = "wifi-join"
     @Volatile private var saved: List<HostWifiMsg.Saved> = emptyList()
 
     private val prefs by lazy { app.getSharedPreferences("hostwifi", Context.MODE_PRIVATE) }
@@ -61,8 +64,14 @@ object HostWifi {
         this.near = near; this.inCall = inCall; this.paired = paired; this.hotspotOn = hotspotOn; this.changed = changed
         // Just started: away until the client shows up on Bluetooth (a host abroad keeps its Wi-Fi through a restart).
         lastNear = -AWAY_MS
+        // Wi-Fi switched by someone else (Android bringing it back after the hotspot on phones that can't run both,
+        // Wi-Fi Wake, Samsung's Auto Wi-Fi): the rule applies again at once, not at the next keep-alive
         app.registerReceiver(object : BroadcastReceiver() {
-            override fun onReceive(c: Context, i: Intent) { refresh() }
+            override fun onReceive(c: Context, i: Intent) {
+                refresh()
+                val st = i.getIntExtra(WifiManager.EXTRA_WIFI_STATE, -1)
+                if (st == WifiManager.WIFI_STATE_ENABLED || st == WifiManager.WIFI_STATE_DISABLED) evaluate("Wi-Fi changed")
+            }
         }, IntentFilter(WifiManager.WIFI_STATE_CHANGED_ACTION))
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(n: Network) = refresh()
@@ -86,7 +95,11 @@ object HostWifi {
         if (!::app.isInitialized) return
         val now = SystemClock.elapsedRealtime()
         val isNear = clientOverride ?: near()
-        if (isNear) lastNear = now
+        // Near until this moment: "away" counts from when that ended. Stamped only on checks while near, it counted from
+        // the last keep-alive before (minutes apart while the host sleeps): Wi-Fi came on the instant Bluetooth went,
+        // 19 of 29 times, and was switched back off seconds later (audit, 1 Nov 2026).
+        if (isNear || wasNear) lastNear = now
+        wasNear = isNear
         val away = clientOverride == false || now - lastNear >= AWAY_MS
         if (away && !wasAway && paired()) leftHost()
         wasAway = away
@@ -104,13 +117,11 @@ object HostWifi {
             Log.i(TAG, "host Wi-Fi -> ${if (want) "on" else "off"} ($r, $why)")
             setRadio(want)
         }
-        if (want == true && r == HostWifiMsg.Reason.AWAY) kickJoin() else main.removeCallbacks(joinKick)
+        if (want == true && r == HostWifiMsg.Reason.AWAY) kickJoin() else { WakeAlarm.cancel(app, JOIN_ALARM); kicks = 0 }
         // Bluetooth just went: look again when "away" begins.
-        main.removeCallbacks(awayCheck)
-        if (!isNear && !away) main.postDelayed(awayCheck, lastNear + AWAY_MS - now + 500)
+        if (!isNear && !away) WakeAlarm.set(app, AWAY_ALARM, lastNear + AWAY_MS - now + 500) { evaluate("client away") }
+        else WakeAlarm.cancel(app, AWAY_ALARM)
     }
-
-    private val awayCheck = Runnable { evaluate("client away") }
 
     /**
      * Wi-Fi on but not joined: scan ourselves. With the screen off (box mode) Samsung only looks for saved networks
@@ -118,25 +129,30 @@ object HostWifi {
      * A finished scan makes Android's own network selection join a saved network.
      */
     private var kicks = 0
-    private val joinKick = Runnable {
-        if (reason != HostWifiMsg.Reason.AWAY || !wifiOn() || connectedSsid.isNotEmpty()) { kicks = 0; return@Runnable }
+    private fun joinKick() {
+        if (reason != HostWifiMsg.Reason.AWAY || !wifiOn() || connectedSsid.isNotEmpty()) { kicks = 0; return }
         kicks++
         exec.execute { root("cmd wifi start-scan"); refresh() }
         Log.i(TAG, "host Wi-Fi: not joined yet, scanning (try $kicks)")
         kickJoin()
     }
+    /** Quick tries, then every 2 min. An armed try stays as it is: re-armed by every evaluation, the 2-minute one never
+     *  came while the minutely keep-alive kept pushing it back. */
     private fun kickJoin() {
         if (connectedSsid.isNotEmpty()) { kicks = 0; return }
-        main.removeCallbacks(joinKick)
-        main.postDelayed(joinKick, when { kicks == 0 -> 5_000L; kicks < 6 -> 15_000L; else -> 120_000L })   // quick tries, then every 2 min
+        if (WakeAlarm.pending(JOIN_ALARM)) return
+        WakeAlarm.set(app, JOIN_ALARM, when { kicks == 0 -> 5_000L; kicks < 6 -> 15_000L; else -> 120_000L }) { joinKick() }
     }
 
     /** You just left (Bluetooth gone [AWAY_MS]): a hotspot nobody uses is pointless now and would keep the host off
      *  Wi-Fi (18 Oct: any unused hotspot). Only at that moment: one turned on later while away stays. */
     private fun leftHost() {
-        if (!Hotspot.isOn(app) || Hotspot.clientCount() > 0) return
-        Log.i(TAG, "client left, hotspot unused: turning it off")
-        Hotspot.set(app, false) { _, _ -> }
+        if (!Hotspot.isOn(app)) return
+        Hotspot.freshClientCount { n ->                // unknown (query failed) counts as used
+            if (n != 0 || !Hotspot.isOn(app)) return@freshClientCount
+            Log.i(TAG, "client left, hotspot unused: turning it off")
+            Hotspot.set(app, false) { _, _ -> }
+        }
     }
 
     /** The user's switch. Off from the internet while the host sits on Wi-Fi: if that cuts the host off (no working

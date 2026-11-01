@@ -98,11 +98,26 @@ object Diag {
     /** The host log's last [bytes], scrubbed: the persistent host log with root, else this app's own logcat. */
     fun recentLog(bytes: Int): String {
         val raw = Root.sh("tail -c $bytes /data/adb/tosbisim/logs/host.log", 10_000).takeIf { it.ok && it.out.length > 200 }?.out
+            ?.let { it + newerThan(it) }
             ?: runCatching {
                 val p = ProcessBuilder("logcat", "-d", "-t", "600", "--pid=${android.os.Process.myPid()}").redirectErrorStream(true).start()
                 p.inputStream.bufferedReader().readText().also { p.waitFor() }
             }.getOrDefault("")
         return Scrub.text(raw.takeLast(bytes))
+    }
+
+    /**
+     * The lines logcat holds after the file's last one: it writes the file in whole 4 KiB blocks, so a quiet host's file
+     * trails by up to 25 minutes, the very ones a problem report is about (audit, 1 Nov 2026). Same buffers and tags as
+     * the capture (box.c log_spawn).
+     */
+    private fun newerThan(file: String): String {
+        val last = Regex("""^\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}""", RegexOption.MULTILINE).findAll(file).lastOrNull()?.value ?: return ""
+        val r = Root.sh("logcat -d -b main,system,crash -v time -T ${Root.q(last)} -s SimRelayHost:I simrelayd:I voice:D " +
+            "Telecom:I SemWifiApTimeOutImpl:I Tethering:W AndroidRuntime:E", 10_000)
+        if (!r.ok) return ""
+        val newer = r.out.lines().filter { it.length > 18 && it.substring(0, 18) > last }
+        return if (newer.isEmpty()) "" else (if (file.endsWith("\n")) "" else "\n") + newer.joinToString("\n") + "\n"
     }
 
     /** Our own test emulators (tools/rig/emulator.sh) must not count as people's phones; adb can allow them. */

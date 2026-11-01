@@ -229,8 +229,8 @@ object Retire {
             |pm uninstall ${'$'}PKG
             |am force-stop ${'$'}PKG
             |sleep 1
-            |for n in batt_slate_mode:0 input_suspend:0 charging_enabled:1; do
-            |  f=/sys/class/power_supply/battery/${'$'}{n%%:*}; [ -e "${'$'}f" ] && echo "${'$'}{n##*:}" > "${'$'}f"
+            |for n in power_supply/battery/batt_slate_mode:0 power_supply/battery/input_suspend:0 qcom-battery/input_suspend:0 power_supply/battery/charging_enabled:1; do
+            |  f=/sys/class/${'$'}{n%%:*}; [ -e "${'$'}f" ] && echo "${'$'}{n##*:}" > "${'$'}f"
             |done
             |# What service.sh silenced (its snapshot, else Android's defaults)
             |put system vibrate_when_ringing 1

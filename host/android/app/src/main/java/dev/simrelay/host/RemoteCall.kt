@@ -36,7 +36,7 @@ object RemoteCall {
         fun close() {
             alive = false
             refresh?.cancel(false)
-            runCatching { daemon.close() }
+            daemon.closeNow()
             Thread { runCatching { turn.close() } }.start()
         }
     }
@@ -84,7 +84,7 @@ object RemoteCall {
                 Thread({ pump(s, crypto, answer) }, "remote-audio").start()
             } catch (e: Exception) {
                 Log.e(TAG, "remote audio failed: ${e.message ?: e}")
-                runCatching { daemon?.close() }
+                daemon?.closeNow()
                 turn?.let { t -> Thread { runCatching { t.close() } }.start() }
                 if (gen.get() == my) answer(RemoteAudio.newBuilder().setClose(true).build())
             }

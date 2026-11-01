@@ -99,6 +99,7 @@ class HostService : Service() {
                 Log.i(TAG, "hotspot: supported=${h.supported} on=${h.on} band=${h.band} sec=${h.security} hidden=${h.hidden} " +
                         "max=${h.maxClients} autoOff=${h.autoOff}/${h.autoOffMinutes}min clients=${h.clientsCount} " +
                         "caps bands=${h.capabilities.bandsList} sec=${h.capabilities.securitiesList}")
+                Log.i(TAG, "bluetooth: advertising status ${Relay.advertisingStatus()} (0 = works), client connected ${Relay.clientConnected()}")
             }
             "PAIR" -> Relay.openPairing()          // adb: re-pair a (new) client within 5 min
             "BOX" -> Box.set(intent.getBooleanExtra("on", false))   // adb debug: --ez on true|false

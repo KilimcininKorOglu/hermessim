@@ -5,6 +5,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.app.KeyguardManager
 import android.bluetooth.BluetoothManager
+import android.bluetooth.le.AdvertisingSetCallback
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.content.res.Configuration
@@ -155,7 +156,7 @@ class SetupActivity : Activity() {
         val v = Compat.verdict(this)
         val boot = Compat.bootloader()
         val magisk = Compat.magiskInstalled(this)
-        val ble = Compat.bleAdvertising(this)
+        val ble = Compat.bluetoothLe(this)
         val rootState = Onboarding.root
         val rooted = rootState == Onboarding.Root.OK
         val checks = listOf(
@@ -167,7 +168,7 @@ class SetupActivity : Activity() {
                 Onboarding.Root.OK -> Mark.OK; Onboarding.Root.CHECKING -> Mark.WAIT
                 Onboarding.Root.UNKNOWN -> Mark.WARN; else -> Mark.FAIL }, rootText(rootState)),
             Check(getString(R.string.c_bluetooth), when (ble) { true -> Mark.OK; false -> Mark.FAIL; null -> Mark.WARN },
-                getString(when (ble) { true -> R.string.ble_ok; false -> R.string.ble_no; null -> R.string.ble_off })),
+                getString(when (ble) { true -> R.string.ble_present; false -> R.string.ble_none; null -> R.string.ble_off })),
         )
         val sub = getString(R.string.subtitle_setup)
         fun at(step: Int, card: Card) = Model(sub, step, 6, card, checks)
@@ -176,9 +177,9 @@ class SetupActivity : Activity() {
             Onboarding.clearInstallFailure()
         val install = Onboarding.install
         return when {
-            !Onboarding.is64Bit -> at(0, cant(getString(R.string.cant_32bit)))
+            Onboarding.daemonAbi == null -> at(0, cant(getString(R.string.cant_cpu)))
             v.tier == Compat.Tier.UNSUPPORTED && !rooted -> at(0, cant(v.note.ifEmpty { getString(R.string.cant_unsupported_generic) }))
-            ble == false -> at(0, cant(getString(R.string.ble_no)))
+            ble == false -> at(0, cant(getString(R.string.ble_none)))
             install == Onboarding.Install.RESTART_PENDING && Onboarding.restartedSinceInstall(this) -> at(4, inactive())
             install == Onboarding.Install.RESTART_PENDING ->
                 at(4, Card(getString(R.string.restart_title), getString(R.string.restart_body), Mark.OK, Btn(getString(R.string.btn_restart), Act.RESTART)))
@@ -245,7 +246,7 @@ class SetupActivity : Activity() {
                 if (privMissing.isEmpty()) getString(R.string.module_active) else getString(R.string.fix_privileged, names(privMissing))),
             Check(getString(R.string.c_permissions), if (permsOk) Mark.OK else Mark.WARN,
                 if (permsOk) getString(R.string.perm_ok) else problems(runtimeMissing, sms, dialer, battery, silent, true).joinToString(" ")),
-            Check(getString(R.string.c_bluetooth), if (btOn) Mark.OK else Mark.FAIL, getString(if (btOn) R.string.ble_ok else R.string.ble_off)),
+            bluetoothCheck(btOn),
             Check(getString(R.string.c_lock), if (locked) Mark.WARN else Mark.OK, getString(if (locked) R.string.lock_on else R.string.lock_off)),
             Check(getString(R.string.c_iphone), if (paired != null && Relay.clientConnected()) Mark.OK else Mark.WARN,
                 when { paired == null -> getString(R.string.iphone_none); Relay.clientConnected() -> getString(R.string.iphone_connected, paired)
@@ -318,6 +319,21 @@ class SetupActivity : Activity() {
     }
 
     private fun cant(why: String) = Card(getString(R.string.cant_title), "$why\n\n${getString(R.string.cant_alt)}", Mark.FAIL)
+
+    /** Host running: what Android answered when we advertised (a connected iPhone proves it too). Only "unsupported"
+     *  is final; a busy slot or another refusal is retried by BleLink. */
+    private fun bluetoothCheck(btOn: Boolean): Check {
+        val s = Relay.advertisingStatus()
+        val (mark, text) = when {
+            !btOn -> Mark.FAIL to getString(R.string.ble_off)
+            s == AdvertisingSetCallback.ADVERTISE_SUCCESS || Relay.clientConnected() -> Mark.OK to getString(R.string.ble_ok)
+            s == null -> Mark.WAIT to getString(R.string.ble_starting)
+            s == AdvertisingSetCallback.ADVERTISE_FAILED_FEATURE_UNSUPPORTED -> Mark.FAIL to getString(R.string.ble_no)
+            s == AdvertisingSetCallback.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS -> Mark.WARN to getString(R.string.ble_busy)
+            else -> Mark.WARN to getString(R.string.ble_retrying, s)
+        }
+        return Check(getString(R.string.c_bluetooth), mark, text)
+    }
 
     private fun inactive(): Card {
         val m = moduleNow()

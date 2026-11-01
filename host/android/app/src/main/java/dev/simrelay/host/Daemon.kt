@@ -107,11 +107,18 @@ object Daemon {
     fun wake() = exec.execute { request("WAKE") }
     fun role(role: String, pkg: String) = exec.execute { request("ROLE $role $pkg") }
 
-    /** Charge cap; [done] (on main) gets true if applied, false if this phone has no cap node or it failed. */
-    fun charge(percent: Int, done: (Boolean) -> Unit = {}) = exec.execute {
+    /** Charge cap. Box hears the daemon's answer, here and after every reconnect ([chargeAnswer]). */
+    fun charge(percent: Int) = exec.execute {
         chargeLimit = percent
-        val ok = request("CHARGE $percent")?.startsWith("OK") == true
-        main.post { done(ok) }
+        chargeAnswer(request("CHARGE $percent"))
+    }
+
+    /** The daemon's answer is the one truth on the cap; no answer (daemon not up yet, at boot) tells nothing: the
+     *  reconnect sends it again. Read as "unsupported", it showed so until the next app restart (audit, 1 Nov 2026). */
+    private fun chargeAnswer(reply: String?) {
+        if (reply == null) return
+        val ok = reply.startsWith("OK")
+        main.post { Box.chargeAnswered(ok) }
     }
 
     private val probing = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -175,7 +182,7 @@ object Daemon {
             }
             profile?.daemonSetLines()?.forEach { send(it) }
             if (Box.blocksPowerKey) send("POWERKEY 1")      // a restarted daemon has let go of the power key
-            if (chargeLimit > 0) send("CHARGE $chargeLimit")
+            if (chargeLimit > 0) chargeAnswer(send("CHARGE $chargeLimit"))
             // Once per firmware, never during a call (not even a ringing one: the daemon is busy for seconds): the sound
             // card as the kernel describes it (read-only). One try per process: a daemon that fails or dies on it must
             // not get it again at every reconnect (audit, 20 Oct 2026).

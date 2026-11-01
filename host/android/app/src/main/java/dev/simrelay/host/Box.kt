@@ -7,8 +7,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.location.LocationManager
-import android.os.Handler
-import android.os.Looper
 import android.os.PowerManager
 import android.os.Process
 import android.os.UserHandle
@@ -53,7 +51,6 @@ object Box {
     private val NET_BLOCK = listOf("com.google.android.gms", "com.android.vending")
 
     private lateinit var app: Context
-    private val main = Handler(Looper.getMainLooper())
     private var onChange: () -> Unit = {}
     @Volatile var chargeSupported = false; private set
     @Volatile private var hotspotOn = false
@@ -67,6 +64,9 @@ object Box {
     val chargeLimit get() = if (ready) prefs.getInt("charge_limit", DEFAULT_CHARGE_LIMIT) else DEFAULT_CHARGE_LIMIT
     /** Box settings are currently applied (on and not suspended by the escape gesture). */
     private val applied get() = prefs.getBoolean("applied", false)
+    /** On but not applied right now: the escape window, or after it until the screen goes off. What the iPhone is told
+     *  (the window's end alone said "active" while the screen, power key and AOD were still the phone's own). */
+    val pausedNow get() = on && !applied
     /** The power button is blocked while box settings are applied (the daemon re-grabs it after a restart). */
     val blocksPowerKey get() = ::app.isInitialized && applied
 
@@ -77,13 +77,13 @@ object Box {
             addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_SCREEN_OFF)
         })
         setChargeLimit(chargeLimit)
-        if (on && !suspended) apply() else if (on) main.postDelayed(resume, suspendedUntil - System.currentTimeMillis())
+        if (on && !suspended) apply() else if (on) scheduleResume(suspendedUntil - System.currentTimeMillis())
         Log.i(TAG, "box mode ${if (on) "on" else "off"}${if (suspended) " (suspended)" else ""}, charge limit $chargeLimit%")
     }
 
     fun set(enable: Boolean) {
         prefs.edit().putBoolean("on", enable).putLong("suspended_until", 0).apply()
-        main.removeCallbacks(resume)
+        WakeAlarm.cancel(app, RESUME_ALARM)
         if (enable) apply() else restore()
         onChange()
     }
@@ -91,7 +91,30 @@ object Box {
     fun setChargeLimit(percent: Int) {
         val p = percent.coerceIn(50, 100)
         prefs.edit().putInt("charge_limit", p).apply()
-        Daemon.charge(p) { ok -> chargeSupported = ok; main.post(onChange) }
+        Daemon.charge(p)
+    }
+
+    /** Main: simrelayd answered a CHARGE (now or after it came back). */
+    fun chargeAnswered(ok: Boolean) {
+        if (!ready) return
+        val changed = ok != chargeSupported
+        chargeSupported = ok
+        if (!ok) reportChargeNodes()
+        if (changed) onChange()
+    }
+
+    /**
+     * No charge node simrelayd knows on this phone: the names of the battery nodes it has (no values), once per
+     * firmware, so the next ones are added from real phones rather than guessed (31 Oct 2026; box.c CAP/CUT_NODES).
+     */
+    private fun reportChargeNodes() {
+        val key = "charge_nodes_${android.os.Build.FINGERPRINT}"
+        if (prefs.getBoolean(key, false) || !Diag.enabled) return
+        prefs.edit().putBoolean(key, true).apply()
+        Bg.single("charge-nodes").execute {
+            val r = Root.sh("for d in /sys/class/power_supply/* /sys/class/qcom-battery; do [ -d \"\$d\" ] && echo \"\${d##*/}: \$(ls \"\$d\" | tr '\\n' ' ')\"; done", 10_000)
+            if (r.ok) Diag.event("charge_unsupported", org.json.JSONObject().put("nodes", r.out.take(3000)), withLog = false)
+        }
     }
 
     /** Escape gesture (from simrelayd): screen usable for 10 minutes. */
@@ -100,7 +123,7 @@ object Box {
         Log.i(TAG, "box mode suspended for ${ESCAPE_MS / 60000} min (escape gesture)")
         prefs.edit().putLong("suspended_until", System.currentTimeMillis() + ESCAPE_MS).apply()
         restore()
-        main.removeCallbacks(resume); main.postDelayed(resume, ESCAPE_MS)
+        scheduleResume(ESCAPE_MS)
         onChange()
         // Whoever used the gesture wants to look at the host: show the setup checklist.
         runCatching {
@@ -120,7 +143,10 @@ object Box {
     fun callScreenHidden(): Boolean =
         app.getSystemService(TelecomManager::class.java).defaultDialerPackage == app.packageName
 
-    // Back on at the first screen-off after the escape window (or at once if the screen is already off).
+    // Back on at the first screen-off after the escape window (or at once if the screen is already off). On a WakeAlarm:
+    // a main-thread timer stopped in deep sleep, and box mode stayed off for hours past the window (audit, 1 Nov 2026).
+    private const val RESUME_ALARM = "box-resume"
+    private fun scheduleResume(ms: Long) = WakeAlarm.set(app, RESUME_ALARM, ms.coerceAtLeast(0)) { resume.run() }
     private val resume = Runnable {
         if (!on || suspended || Retire.running) return@Runnable
         if (app.getSystemService(PowerManager::class.java).isInteractive) return@Runnable  // wait for SCREEN_OFF

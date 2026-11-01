@@ -143,6 +143,7 @@ class BleLink(
                     Log.i(TAG, "Bluetooth turning off: GATT server down")
                     runCatching { gatt?.close() }; gatt = null
                     advSet = null; registered = false; starting = false; replacing = false; enableTries = 0; failures = 0; advDisabled = false   // the radio drops it
+                    advStatus = null
                     readers.clear(); queues.clear(); inFlight.clear(); mtu.clear(); notifyFails.clear()
                 }
                 android.bluetooth.BluetoothAdapter.STATE_OFF -> radioBack()
@@ -188,6 +189,8 @@ class BleLink(
     // (15 ms steps). A short interval cuts audio transit time and burstiness; BALANCED saves battery when idle.
     private val clients = ConcurrentHashMap<String, BluetoothGatt>()
     @Volatile private var wantHigh = false
+    /** Disconnects ignored because the stack still listed the link: looked at again when our client role goes. */
+    private val ignoredDown: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     fun setCallPriority(high: Boolean) {
         if (wantHigh == high) return
@@ -211,6 +214,13 @@ class BleLink(
                     Log.i(TAG, "client role up; connection priority ${if (wantHigh) "HIGH" else "BALANCED"} -> ${g.requestConnectionPriority(p)}")
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                     clients.remove(d.address); g.close()
+                    // Our own client role was what kept the link listed: the iPhone's disconnect was real. Ignored, it left
+                    // the host serving a dead link, advertising off and the iPhone in the room unserved (5 times, 20-24
+                    // Oct 2026, after calls)
+                    if (ignoredDown.remove(d.address) && bt.getConnectedDevices(BluetoothProfile.GATT).none { it.address == d.address }) {
+                        Log.i(TAG, "BLE ${d.address}: down after all (our client role was holding the link)")
+                        linkDown(d)
+                    }
                 }
             }
             // Hidden in the SDK stubs but invoked by the framework (same signature = override at runtime).
@@ -270,6 +280,12 @@ class BleLink(
         inFlight.remove(address)
     }
 
+    private fun linkDown(d: BluetoothDevice) {
+        resetStream(d.address)
+        onLink(d, false)
+        restartAdvertising()
+    }
+
     /** Our GATT service is registered: notifications can reach clients from now on. */
     var onServiceReady: (() -> Unit)? = null
 
@@ -282,17 +298,18 @@ class BleLink(
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 Log.i(TAG, "BLE connected ${device.address} bond=${device.bondState}")
+                ignoredDown.remove(device.address)
                 resetStream(device.address)
                 gatt?.setPreferredPhy(device, BluetoothDevice.PHY_LE_2M_MASK, BluetoothDevice.PHY_LE_2M_MASK,
                     BluetoothDevice.PHY_OPTION_NO_PREFERRED)
                 return
             }
+            // A false DISCONNECTED comes from a short duplicate connection while the real link stays up (M1 spike)
             val stillUp = bt.getConnectedDevices(BluetoothProfile.GATT).any { it.address == device.address }
             Log.i(TAG, "BLE disconnected ${device.address} status=$status (stack says ${if (stillUp) "STILL UP, ignored" else "down"})")
-            if (stillUp) return
-            resetStream(device.address)
-            onLink(device, false)
-            restartAdvertising()
+            if (stillUp) { ignoredDown.add(device.address); return }
+            ignoredDown.remove(device.address)
+            linkDown(device)
         }
 
         // Hidden in the SDK stubs but invoked by the framework: the link's actual connection parameters.
@@ -312,7 +329,11 @@ class BleLink(
                 val on = value.isNotEmpty() && value[0].toInt() and 1 == 1
                 setSubscribed(device.address, on)
                 Log.i(TAG, "CTRL_TX notify=$on for ${device.address}")
-                if (on) { resetStream(device.address); onLink(device, true) }
+                if (on) {
+                    resetStream(device.address); onLink(device, true)
+                    // Subscribed during a call: the fast interval applies to it too (it was only asked for on a change)
+                    if (wantHigh) applyPriority(device)
+                }
             }
             if (responseNeeded) gatt?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
         }
@@ -358,9 +379,17 @@ class BleLink(
     private var advDisabled = false              // the controller can't advertise as we need: reported, not retried
     private val reportedAdv = HashSet<Int>()
 
+    /** Android's last answer to our advertising: null before any (or while Bluetooth is off), ADVERTISE_SUCCESS, or the
+     *  failure status. The setup screen shows this, the only real test: we run one advertising set, which every
+     *  Bluetooth LE controller can do since Android 8; isMultipleAdvertisementSupported (several sets at once) said
+     *  nothing about it and turned away older chips that work (1 Nov 2026). */
+    @Volatile var advStatus: Int? = null
+        private set
+
     private val advCallback = object : AdvertisingSetCallback() {
         override fun onAdvertisingSetStarted(set: AdvertisingSet?, txPower: Int, status: Int) {
             starting = false
+            advStatus = status
             if (status == ADVERTISE_SUCCESS) { advSet = set; registered = true; failures = 0; enableTries = 0; Log.i(TAG, "advertising"); return }
             failures++
             Log.w(TAG, "advertising failed $status (try $failures)")
@@ -375,7 +404,7 @@ class BleLink(
         }
         override fun onAdvertisingEnabled(set: AdvertisingSet?, enable: Boolean, status: Int) {
             if (!enable) return
-            if (status == ADVERTISE_SUCCESS) { enableTries = 0; Log.i(TAG, "advertising again (same address)"); return }
+            if (status == ADVERTISE_SUCCESS) { enableTries = 0; advStatus = status; Log.i(TAG, "advertising again (same address)"); return }
             // Right after a disconnect the controller can still refuse (status 18 on the Redmi, 19 Oct): retry the same
             // set a few times (its address is what an unbonded iPhone knows), then replace it.
             enableTries++

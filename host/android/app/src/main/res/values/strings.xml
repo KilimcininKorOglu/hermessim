@@ -12,7 +12,7 @@
 
     <!-- can't be used -->
     <string name="cant_title">This phone can\'t be a host</string>
-    <string name="cant_32bit">It runs 32-bit Android; TosbiSim needs a 64-bit system.</string>
+    <string name="cant_cpu">Its processor type isn\'t supported; TosbiSim needs an ARM phone.</string>
     <string name="cant_unsupported">%s</string>
     <string name="cant_unsupported_generic">Its bootloader can\'t be unlocked, so it can\'t be rooted.</string>
     <string name="cant_alt">Look up another spare phone in the TosbiSim app: Host → Check a phone.</string>
@@ -127,6 +127,11 @@
     <string name="ble_ok">On; your iPhone can find this phone</string>
     <string name="ble_off">Off</string>
     <string name="ble_no">This phone can\'t advertise over Bluetooth LE, so your iPhone can\'t connect to it.</string>
+    <string name="ble_none">This phone has no Bluetooth LE, so your iPhone can\'t connect to it.</string>
+    <string name="ble_present">On; checked again once TosbiSim runs</string>
+    <string name="ble_starting">Starting…</string>
+    <string name="ble_busy">Another app is using this phone\'s only Bluetooth advertising slot; trying again every minute.</string>
+    <string name="ble_retrying">Android refused Bluetooth advertising (code %1$d); trying again.</string>
     <string name="c_iphone">Your iPhone</string>
     <string name="iphone_none">Not paired</string>
     <string name="iphone_connected">%s, connected</string>

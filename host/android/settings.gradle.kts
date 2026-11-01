@@ -5,4 +5,4 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = "simrelay-host"
-include(":app")
+include(":app", ":hidden-stubs")

@@ -45,12 +45,52 @@ object Sims {
         return all.filter { it.simSlotIndex >= 0 && (!it.isEmbedded || it.subscriptionId in activeIds) }.sortedBy { it.simSlotIndex }
     }
 
-    /** SIM inserted/removed/switched, or default data SIM moved. */
-    fun watch(ctx: Context, changed: () -> Unit) {
+    /**
+     * SIM inserted/removed/switched, or default data SIM moved ([changed]); a SIM's carrier config (re)loaded: VoLTE
+     * again; a SIM's signal level or roaming changed ([radioChanged]).
+     */
+    fun watch(ctx: Context, changed: () -> Unit, radioChanged: () -> Unit) {
+        ctx.registerReceiver(object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context, i: android.content.Intent) = volteOn(ctx)
+        }, android.content.IntentFilter(android.telephony.CarrierConfigManager.ACTION_CARRIER_CONFIG_CHANGED))
+        listenRadio(ctx, radioChanged)
         ctx.getSystemService(SubscriptionManager::class.java).addOnSubscriptionsChangedListener(
             ctx.mainExecutor, object : SubscriptionManager.OnSubscriptionsChangedListener() {
-                override fun onSubscriptionsChanged() = changed()
+                override fun onSubscriptionsChanged() { listenRadio(ctx, radioChanged); changed() }
             })
+    }
+
+    /**
+     * A SIM losing or getting back service, or starting or stopping roaming: pushed at once. They reached the iPhone only
+     * with the next unrelated status (about hourly on a charge-capped host), and its automatic hotspot waits on them
+     * ("no mobile signal", roaming with data roaming off; audit, 1 Nov 2026). Signal steps in between are not pushed: each
+     * would wake the iPhone over Bluetooth, and they ride along with the next status. Main thread. PhoneStateListener:
+     * one path on Android 11 to 16.
+     */
+    @Suppress("DEPRECATION")
+    private val radio = mutableListOf<Pair<TelephonyManager, android.telephony.PhoneStateListener>>()
+
+    @Suppress("DEPRECATION")
+    private fun listenRadio(ctx: Context, changed: () -> Unit) {
+        radio.forEach { (t, l) -> t.listen(l, android.telephony.PhoneStateListener.LISTEN_NONE) }
+        radio.clear()
+        val tm = ctx.getSystemService(TelephonyManager::class.java)
+        for (sub in active(ctx)) runCatching {
+            val t = tm.createForSubscriptionId(sub.subscriptionId)
+            val l = object : android.telephony.PhoneStateListener(ctx.mainExecutor) {
+                var noSignal: Boolean? = null
+                var roaming: Boolean? = null
+                override fun onSignalStrengthsChanged(s: android.telephony.SignalStrength) {
+                    val none = s.level == 0
+                    if (none != noSignal) { noSignal = none; changed() }
+                }
+                override fun onServiceStateChanged(s: android.telephony.ServiceState) {
+                    if (s.roaming != roaming) { roaming = s.roaming; changed() }
+                }
+            }
+            t.listen(l, android.telephony.PhoneStateListener.LISTEN_SIGNAL_STRENGTHS or android.telephony.PhoneStateListener.LISTEN_SERVICE_STATE)
+            radio += t to l
+        }.onFailure { Log.w(TAG, "signal/roaming updates for SIM ${sub.simSlotIndex}: $it") }
     }
 
     fun log(ctx: Context) = Log.i(TAG, "SIMs: " + status(ctx).joinToString("; ") {
@@ -217,6 +257,40 @@ object Sims {
             Log.i(TAG, "mobile data now on SIM slot ${s.slot}")
         }
         return null
+    }
+
+    private val volteExec = Bg.single("volte")
+
+    /**
+     * VoLTE on, once per SIM card, where the carrier offers it but the phone's switch is unset or off. MIUI/MediaTek read
+     * an unset switch (siminfo volte_vt_enabled = -1) as off where AOSP falls back to the carrier default: the Redmi
+     * on Vodafone TR called over 2G/3G and lost data during calls until it was switched on by hand (19 Oct 2026). Set
+     * through the Settings API (ImsMmTelManager.setAdvancedCallingSettingEnabled, MODIFY_PHONE_STATE), which
+     * re-registers IMS. The raw switch is read as root, so off the caller's thread. A carrier config that isn't
+     * loaded yet (right after boot) says "no VoLTE": not remembered, tried again when it loads.
+     */
+    fun volteOn(ctx: Context) = volteExec.execute {
+        val prefs = ctx.getSharedPreferences("sims", Context.MODE_PRIVATE)
+        for (info in active(ctx)) runCatching {
+            val key = "volte_${cardId(info)}"
+            if (prefs.getBoolean(key, false)) return@runCatching
+            val sub = info.subscriptionId
+            val cc = ctx.getSystemService(android.telephony.CarrierConfigManager::class.java).getConfigForSubId(sub)
+            if (cc?.getBoolean(android.telephony.CarrierConfigManager.KEY_CARRIER_VOLTE_AVAILABLE_BOOL) != true) return@runCatching
+            val raw = Regex("volte_vt_enabled=(-?\\d+)").find(Root.sh("content query --uri content://telephony/siminfo " +
+                "--projection volte_vt_enabled --where _id=$sub", 10_000).out)?.groupValues?.get(1)?.toIntOrNull()
+            val cls = Class.forName("android.telephony.ims.ImsMmTelManager")
+            val mgr = cls.getMethod("createForSubscriptionId", Int::class.java).invoke(null, sub)
+            val on = cls.getMethod("isAdvancedCallingSettingEnabled").invoke(mgr) as Boolean
+            if (raw == null || (raw == 1 && on)) {           // switched on already (or the switch can't be read: leave it)
+                if (raw != null) prefs.edit().putBoolean(key, true).apply()
+                return@runCatching
+            }
+            cls.getMethod("setAdvancedCallingSettingEnabled", Boolean::class.javaPrimitiveType).invoke(mgr, true)
+            prefs.edit().putBoolean(key, true).apply()
+            Log.i(TAG, "SIM slot ${info.simSlotIndex}: VoLTE switched on (switch was $raw, setting said $on)")
+            Diag.event("volte_switched_on", org.json.JSONObject().put("switch", raw).put("setting", on), withLog = false)
+        }.onFailure { Log.w(TAG, "VoLTE switch, SIM slot ${info.simSlotIndex}: ${it.cause ?: it}") }
     }
 
     /** Data roaming off for SIMs never seen before (off by default, per-SIM switch). */

@@ -23,6 +23,7 @@ class CallMonitor : InCallService() {
     override fun onCallAdded(call: Call) {
         val cb = object : Call.Callback() {
             override fun onStateChanged(c: Call, state: Int) = CallRegistry.changed(c)
+            override fun onConnectionEvent(c: Call, event: String, extras: android.os.Bundle?) = CallRegistry.connectionEvent(c, event)
         }
         call.registerCallback(cb)
         callbacks[call] = cb

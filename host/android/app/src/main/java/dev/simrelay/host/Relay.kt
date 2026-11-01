@@ -60,6 +60,7 @@ object Relay {
     private val main = Handler(Looper.getMainLooper())
     private val seq = AtomicInteger()
     private val trusted = ConcurrentHashMap.newKeySet<String>()   // peer ids that passed Hello
+    private val rejected = ConcurrentHashMap.newKeySet<String>()  // links told NOT_PAIRED since they connected
     private val droppedOnce = ConcurrentHashMap.newKeySet<String>()   // links already dropped for a missing Hello
     @Volatile private var pairingUntil = 0L
     private var kaN = 0
@@ -115,7 +116,7 @@ object Relay {
         DataUsage.init(app, statusChanged)
         Hotspot.watch(app, statusChanged)
         HostWifi.start(app, near = ::bleNear, inCall = { CallRegistry.snapshot().any { it.state != CallEvent.State.ENDED } },
-            paired = { pinned() != null }, hotspotOn = { Hotspot.isOn(app) }, changed = statusChanged)
+            paired = { pinned() != null }, hotspotOn = { Hotspot.isOnOrStarting(app) }, changed = statusChanged)
         // Pairing window open: accept Bluetooth pairing by ourselves (headless hosts can't tap "Pair"). Also the paired
         // iPhone pairing again after iOS dropped its keys (accessory removed, network settings reset): with no screen,
         // nobody could tap "Pair" and the iPhone hung at "Connecting" (19 Oct). The Hello pin still decides who is
@@ -131,12 +132,20 @@ object Relay {
             }
         }, android.content.IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST).apply { priority = 1000 })
         Sims.protectNewSims(app)
+        Sims.volteOn(app)
         Sims.log(app)
-        Sims.watch(app) { Sims.protectNewSims(app); Sims.log(app); statusChanged() }
+        Sims.watch(app, changed = { Sims.protectNewSims(app); Sims.volteOn(app); Sims.log(app); statusChanged() }, radioChanged = statusChanged)
         Sims.attemptsKnown = { main.post { statusChanged() } }
         main.postDelayed(keepAlive, KEEPALIVE_MS)
         scheduleHeartbeat()
         main.postDelayed({ guardSmsRole(); guardDialerRole() }, 20_000)   // after the daemon is up (service.sh claims SMS 90 s after boot too)
+        // This process may have been started by the call or the text itself (the host app had died): they reached Relay
+        // before start(), when Push couldn't send yet, and the iPhone away never heard of them (audit, 1 Nov 2026).
+        main.post {
+            if (!bleNear()) CallRegistry.snapshot().filter { it.incoming && it.state == CallEvent.State.RINGING }.forEach(Push::call)
+            val recent = System.currentTimeMillis() - 120_000
+            SmsStore.pending(app).filter { it.receivedMs > recent }.forEach(Push::sms)
+        }
         Log.i(TAG, "relay up; pinned client=${pinned() ?: "none"}")
     }
 
@@ -144,6 +153,9 @@ object Relay {
     fun pairedClient(): String? = pinned()?.let {
         app.getSharedPreferences("relay", Context.MODE_PRIVATE).getString("client_model", null) ?: "iPhone"
     }
+    /** For the setup screen: Android's last answer to our advertising ([BleLink.advStatus]; null: none yet). */
+    fun advertisingStatus(): Int? = if (::ble.isInitialized) ble.advStatus else null
+
     /** The paired client is here on Bluetooth (said Hello on a subscribed link). */
     private fun bleNear(): Boolean = ::ble.isInitialized && ble.subscribers().any { it.address in trusted }
 
@@ -237,8 +249,21 @@ object Relay {
     // ------------------------------------------------------------- client -> host
 
     private fun onLink(d: BluetoothDevice, up: Boolean) {
-        if (!up) { trusted.remove(d.address); Log.i(TAG, "client ${d.address} gone"); main.post { HostWifi.evaluate("Bluetooth gone") } }
-        else Log.i(TAG, "client ${d.address} subscribed; waiting for Hello")
+        rejected.remove(d.address)
+        if (!up) {
+            val wasServed = trusted.remove(d.address)
+            Log.i(TAG, "client ${d.address} gone")
+            main.post {
+                HostWifi.evaluate("Bluetooth gone")
+                // The internet room serves now. What Bluetooth still had queued, or would have carried meanwhile, went with
+                // the link, and the iPhone, already in the room, says no new Hello there: a call's end or a text was lost
+                // until the next one (audit, 1 Nov 2026).
+                if (wasServed && targets().singleOrNull() === Peer.Internet) {
+                    Log.i(TAG, "Bluetooth gone, the internet room serves: sending it the state")
+                    replay(Peer.Internet)
+                }
+            }
+        } else Log.i(TAG, "client ${d.address} subscribed; waiting for Hello")
     }
 
     /** BLE frames arrive on binder threads: handle them on main, and never let one take the process down. */
@@ -405,6 +430,13 @@ object Relay {
         send(d, Envelope.newBuilder().setHello(Hello.newBuilder()
             .setProtocolVersion(PROTOCOL_VERSION).setAppVersion(BuildConfigInfo.version(app))
             .setDeviceModel("${Build.MANUFACTURER} ${Build.MODEL}")), env.seq)
+        // Also to an iPhone Bluetooth serves, saying Hello in the room for a call's audio: it ends the calls a Hello isn't
+        // followed by (its reconcile), and it takes the copies that come late (iOS 0.9.5 (29) drops stale ones).
+        replay(d)
+    }
+
+    /** All a client may have missed: the status, live calls, texts it hasn't stored yet. */
+    private fun replay(d: Peer) {
         send(d, Envelope.newBuilder().setHostStatus(status()))
         Updater.informed()
         CallRegistry.snapshot().forEach { send(d, Envelope.newBuilder().setCallEvent(it)) }
@@ -423,6 +455,7 @@ object Relay {
             targets().forEach { it.drop() }
             p.edit().remove("pinned_install_id").remove("client_model").remove("client_mac").apply()
             Push.setKey(ByteArray(0))
+            RemoteLink.configure(false, null)
             trusted.clear()
             if (::ble.isInitialized) runCatching { ble.stop() }
             Log.i(TAG, "RETIRED: the iPhone was told, pairing forgotten")
@@ -451,7 +484,10 @@ object Relay {
         val mac = p.getString("client_mac", null) ?: (d as? Peer.Ble)?.id
         send(d, Envelope.newBuilder().setUnpair(Unpair.getDefaultInstance()), replyTo)   // the iPhone waits for this
         p.edit().remove("pinned_install_id").remove("client_model").remove("client_mac").apply()
+        // Both keys go: a room key kept here kept the host in a room nobody holds a key for, and pushing calls and
+        // texts there (Push falls back to it) for a forgotten iPhone (audit, 1 Nov 2026)
         Push.setKey(ByteArray(0))
+        RemoteLink.configure(false, null)
         trusted.clear()
         pairableChanged()                                       // unpaired: ready for the next iPhone
         Log.i(TAG, "UNPAIRED: the iPhone forgot this host")
@@ -465,6 +501,7 @@ object Relay {
 
     private fun reject(d: Peer, replyTo: Int) {
         Log.w(TAG, "rejecting ${d.id}: not the paired client")
+        if (d is Peer.Ble) rejected.add(d.id)
         error(d, replyTo, Error.Code.NOT_PAIRED, "not paired; open the pairing window on the host")
         main.postDelayed({ d.drop() }, 500)
     }
@@ -550,12 +587,20 @@ object Relay {
      * we forgot its Hello, so ask for one rather than wait for it to speak (seen 16 Oct). Sent once the GATT
      * service is up and again with every keep-alive until the client answers.
      */
-    private fun askForHello() = ble.connectedDevices().filter { it.address !in trusted }.forEach { d ->
+    private fun askForHello() {
+        // Only the paired iPhone, and not after it was told it isn't paired: the phone's other LE links (a watch, a band)
+        // aren't ours to ask, and asking a rejected iPhone looped Hello / NOT_PAIRED every minute (29 Oct 2026, 23 times)
+        val ours = app.getSharedPreferences("relay", Context.MODE_PRIVATE).getString("client_mac", null)
+        if (pinned() == null || ours == null) return
+        ble.connectedDevices().filter { it.address == ours && it.address !in trusted && it.address !in rejected }.forEach { askForHello(it) }
+    }
+
+    private fun askForHello(d: BluetoothDevice) {
         Log.i(TAG, "link ${d.address} is up without a Hello: asking for one")
         error(Peer.Ble(d, ble), 0, Error.Code.HELLO_REQUIRED, "host restarted")
         // After an app restart the iPhone's subscription belongs to the old process: our request may never reach it
         // (18 Oct, after a self-update: 3 min of silence). No Hello in 5 s -> drop the link; it reconnects at once.
-        if (!droppedOnce.add(d.address)) return@forEach              // once per link after a restart, not every minute
+        if (!droppedOnce.add(d.address)) return                      // once per link after a restart, not every minute
         main.postDelayed({
             // Never during first pairing: a new iPhone may be in iOS's pairing dialog.
             if (d.address !in trusted && !pairingOpen() && d.bondState != BluetoothDevice.BOND_BONDING &&
@@ -601,21 +646,15 @@ object Relay {
      */
     @Volatile private var lastKeepAliveAt = 0L
     private const val HEARTBEAT_MS = 3 * 60_000L
-    fun heartbeat() = main.post {
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastKeepAliveAt > KEEPALIVE_MS + 30_000L) {
+    private fun heartbeat() {
+        if (SystemClock.elapsedRealtime() - lastKeepAliveAt > KEEPALIVE_MS + 30_000L) {
             Log.i(TAG, "heartbeat: keep-alive while asleep")
             main.removeCallbacks(keepAlive)
             keepAlive.run()
         }
         scheduleHeartbeat()
     }
-    private fun scheduleHeartbeat() = runCatching {
-        val am = app.getSystemService(android.app.AlarmManager::class.java)
-        val pi = android.app.PendingIntent.getBroadcast(app, 1, android.content.Intent(app, HeartbeatReceiver::class.java),
-            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
-        am.setAndAllowWhileIdle(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + HEARTBEAT_MS, pi)
-    }.onFailure { Log.w(TAG, "heartbeat alarm: $it") }
+    private fun scheduleHeartbeat() = WakeAlarm.set(app, "heartbeat", HEARTBEAT_MS, ::heartbeat)
 
     private val keepAlive = object : Runnable {
         override fun run() {
@@ -646,7 +685,7 @@ object Relay {
         b.setHotspotOn(hs.on).setHotspot(hs)
         b.addAllSims(Sims.status(app))
         b.setBox(dev.simrelay.protocol.v1.Box.newBuilder()
-            .setOn(Box.on).setSuspended(Box.suspended).setSuspendedUntilMs(if (Box.suspended) Box.suspendedUntil else 0)
+            .setOn(Box.on).setSuspended(Box.pausedNow).setSuspendedUntilMs(if (Box.pausedNow) Box.suspendedUntil else 0)
             .setChargeLimit(Box.chargeLimit).setChargeLimitSupported(Box.chargeSupported)
             .setCallScreenHidden(Box.callScreenHidden()))
         b.setRemote(Remote.newBuilder().setEnabled(RemoteLink.enabled).setOnline(RemoteLink.online))
@@ -662,9 +701,4 @@ object Relay {
 object BuildConfigInfo {
     fun version(ctx: Context): String =
         runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "?"
-}
-
-/** Relay's deep-sleep heartbeat (an alarm allowed while idle): the keep-alive runs even when the main timer can't. */
-class HeartbeatReceiver : android.content.BroadcastReceiver() {
-    override fun onReceive(c: android.content.Context, i: android.content.Intent) { Bg.guard("heartbeat") { Relay.heartbeat() } }
 }
