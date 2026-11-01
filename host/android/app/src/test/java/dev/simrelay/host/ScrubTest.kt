@@ -10,7 +10,7 @@ class ScrubTest {
     private fun clean(s: String) = Scrub.text(s)
 
     @Test fun phoneNumbersGo() {
-        for (n in listOf("+905551234567", "05551234567", "+44 7700 900123", "0544 958 9260")) {
+        for (n in listOf("+905551234567", "05551234567", "+44 7700 900123", "0555 123 4567")) {
             assertFalse(n, clean("dial $n now").contains(n.filter { it.isDigit() }.takeLast(7)))
         }
     }

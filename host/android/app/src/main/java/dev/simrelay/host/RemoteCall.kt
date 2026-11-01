@@ -45,9 +45,12 @@ object RemoteCall {
     private var credsUntil = 0L
 
     /** TURN REST credentials, reused until an hour before they expire (saves an HTTPS round trip per call). */
-    private fun credentials(ctx: Context): JSONObject {
+    private fun credentials(ctx: Context, crypto: RemoteCrypto): JSONObject {
         creds?.let { if (System.currentTimeMillis() < credsUntil) return it }
-        val c = Api.postJson("/turn", JSONObject().put("install_id", Api.installId(ctx))) ?: error("no TURN credentials")
+        // The room too (1 Nov 2026 audit): the server may come to give credentials only to rooms in use. Our install
+        // id marks the host's side of a call on the admin's Internet calls page.
+        val c = Api.postJson("/turn", JSONObject().put("install_id", Api.installId(ctx))
+            .put("room_token", RemoteCrypto.hex(crypto.roomToken))) ?: error("no TURN credentials")
         creds = c
         credsUntil = System.currentTimeMillis() + (c.optLong("ttl", 3600) - 3600).coerceAtLeast(60) * 1000
         return c
@@ -61,7 +64,7 @@ object RemoteCall {
             var turn: Turn? = null
             var daemon: LocalSocket? = null
             try {
-                val c = credentials(ctx)
+                val c = credentials(ctx, crypto)
                 val url = (0 until c.getJSONArray("urls").length()).map { c.getJSONArray("urls").getString(it) }
                     .first { it.endsWith("transport=udp") }
                 val hp = URI(url.substringBefore('?').replace("turn:", "turn://")).let { InetSocketAddress(InetAddress.getByName(it.host), it.port) }

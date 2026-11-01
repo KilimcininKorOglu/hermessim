@@ -5,8 +5,9 @@
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
-# --publish: hosts get it over the air (api.tosbisim.com). --github: a GitHub release on the public repo with the Magisk
-# zip, the file users download (tosbisim.com links to releases/latest/download/TosbiSim-Host-Magisk.zip).
+# --publish: hosts get it over the air (api.tosbisim.com). --github: the source to the public repo (publish-public.sh),
+# then a GitHub release there with the Magisk zip, the file users download (tosbisim.com links to
+# releases/latest/download/TosbiSim-Host-Magisk.zip).
 PUBLISH=0; GITHUB=0
 for a in "$@"; do case "$a" in --publish) PUBLISH=1;; --github) GITHUB=1;; *) echo "unknown option $a"; exit 2;; esac; done
 STAGE=""; GHSTAGE=""
@@ -58,6 +59,11 @@ OUT="$HERE/out/TosbiSim-Host-$VER.apk"
 cp "$HERE/android/app/build/outputs/apk/release/app-release.apk" "$OUT"
 APKSIGNER="$(ls "$HOME"/Library/Android/sdk/build-tools/*/apksigner | sort -V | tail -1)"
 "$APKSIGNER" verify --print-certs "$OUT" | grep -m1 "SHA-256"
+# Hosts install an update only when it has their app's signer: an APK signed with any other key would reach no one
+# (or, as a fresh Magisk install, start a second line of hosts that never update again). Stop here instead.
+CERT=08dafcad5f23c49dd44997fc036182fa7659273a500499b2c4c33879d4344d54
+"$APKSIGNER" verify --print-certs "$OUT" | grep -q "certificate SHA-256 digest: $CERT" \
+  || { echo "$OUT is not signed with the TosbiSim release key: not released"; exit 1; }
 (cd "$HERE/out" && shasum -a 256 "$(basename "$OUT")" > "$(basename "$OUT").sha256")
 echo "release: $OUT ($COMMIT)"
 
@@ -79,19 +85,27 @@ echo "magisk: $ZIP"
 # --github, first half: a draft (invisible to users) with both assets, checked before anything goes public.
 # The asset name never changes, so "latest" always serves the newest zip.
 if [ "$GITHUB" = 1 ]; then
+  # The source first, and the release's tag on the public commit that holds it: published after the release (as until
+  # 1 Nov 2026), the tag landed on the previous version's source.
+  "$ROOT/tools/publish-public.sh" "Host $VER"
+  PUBDIR="${TOSBISIM_PUBLIC_DIR:-$ROOT/../tosbisim-public}"
+  PUBSHA=$(git -C "$PUBDIR" rev-parse HEAD)
+  git -C "$PUBDIR" show "HEAD:host/android/app/build.gradle.kts" | grep -q "versionName = \"$VER\"" \
+    || { echo "the public repo's last commit isn't the source of $VER: not released"; exit 1; }
+  gh api "repos/$REPO/commits/$PUBSHA" --jq .sha >/dev/null || { echo "public commit $PUBSHA isn't on GitHub: not released"; exit 1; }
   GHSTAGE="$(mktemp -d)"
   cp "$ZIP" "$GHSTAGE/TosbiSim-Host-Magisk.zip"
   (cd "$GHSTAGE" && shasum -a 256 TosbiSim-Host-Magisk.zip > TosbiSim-Host-Magisk.zip.sha256)
-  python3 - "$NOTES" "$GHSTAGE/notes.md" "$COMMIT" <<'PYN'
+  python3 - "$NOTES" "$GHSTAGE/notes.md" "https://github.com/$REPO/tree/$PUBSHA" <<'PYN'
 import json, sys
 n = json.load(open(sys.argv[1], encoding="utf-8"))
 open(sys.argv[2], "w", encoding="utf-8").write(
     n["en"] + "\n\n**Install:** in Magisk, Modules → Install from storage → TosbiSim-Host-Magisk.zip → Reboot. "
     "Guide: https://tosbisim.com\n\n---\n\n" + n["tr"] +
     "\n\n**Kurulum:** Magisk → Modüller → Depolamadan yükle → TosbiSim-Host-Magisk.zip → Yeniden başlat. Rehber: https://tosbisim.com\n"
-    "\n---\n\nSource: commit `" + sys.argv[3] + "`\n")
+    "\n---\n\nSource: " + sys.argv[3] + "\n")
 PYN
-  gh release create "$TAG" --repo "$REPO" --title "TosbiSim Host $VER" --notes-file "$GHSTAGE/notes.md" --draft \
+  gh release create "$TAG" --repo "$REPO" --target "$PUBSHA" --title "TosbiSim Host $VER" --notes-file "$GHSTAGE/notes.md" --draft \
     "$GHSTAGE/TosbiSim-Host-Magisk.zip" "$GHSTAGE/TosbiSim-Host-Magisk.zip.sha256"
   assets=$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name')
   for f in TosbiSim-Host-Magisk.zip TosbiSim-Host-Magisk.zip.sha256; do

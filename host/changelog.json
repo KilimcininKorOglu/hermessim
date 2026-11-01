@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.17",
+    "code": 53,
+    "en": "A small security improvement in how internet calls get their relay.",
+    "tr": "İnternet aramalarının aktarma sunucusunu nasıl aldığına küçük bir güvenlik iyileştirmesi."
+  },
+  {
     "version": "0.12.16",
     "code": 52,
     "en": "TosbiSim Host now also installs on phones with 32-bit Android: cheaper models, and older phones on custom firmware. Setup also stops turning away phones whose older Bluetooth chip can host. And a call over Bluetooth now lets go of its audio the moment it ends.",
