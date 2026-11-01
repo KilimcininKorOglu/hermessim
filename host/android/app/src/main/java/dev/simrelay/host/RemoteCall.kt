@@ -82,7 +82,7 @@ object RemoteCall {
                 }
                 // Refresh on a timer, not on packet flow: a stalled capture must not let the allocation expire.
                 s.refresh = timers.scheduleWithFixedDelay({ if (s.alive) runCatching { s.turn.refresh() } }, REFRESH_S, REFRESH_S, TimeUnit.SECONDS)
-                Log.i(TAG, "remote audio: relay ${relay.port} bound to iPhone relay in ${System.currentTimeMillis() - t0} ms")
+                Log.i(TAG, "remote audio: relay ${relay.port} bound to the phone's relay in ${System.currentTimeMillis() - t0} ms")
                 answer(RemoteAudio.newBuilder().setRelayIp(relay.address.hostAddress ?: "").setRelayPort(relay.port).build())
                 Thread({ pump(s, crypto, answer) }, "remote-audio").start()
             } catch (e: Exception) {

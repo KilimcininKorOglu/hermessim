@@ -103,7 +103,7 @@ object Push {
     }
 
     private fun send(kind: String, env: ByteArray, collapseId: String?, what: String) {
-        val c = crypto ?: RemoteLink.crypto ?: run { Log.i(TAG, "push: $what not sent (no push key from the iPhone yet)"); return }
+        val c = crypto ?: RemoteLink.crypto ?: run { Log.i(TAG, "push: $what not sent (no push key from the phone yet)"); return }
         exec.execute {
             val body = JSONObject().put("room_token", RemoteCrypto.hex(c.roomToken)).put("kind", kind)
                 .put("sealed", Base64.encodeToString(c.sealPush(env), Base64.NO_WRAP))

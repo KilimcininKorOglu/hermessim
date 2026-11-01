@@ -71,7 +71,7 @@ object CallRegistry {
             own(call, id)
         } else if (key(call) in prefs.getStringSet("owned", emptySet()).orEmpty()) {
             owned.add(id)                                   // the iPhone's call, from before this process started
-            Log.i(TAG, "call $id: the iPhone's, from before a host restart")
+            Log.i(TAG, "call $id: the phone's, from before a host restart")
         }
         changed(call)
     }

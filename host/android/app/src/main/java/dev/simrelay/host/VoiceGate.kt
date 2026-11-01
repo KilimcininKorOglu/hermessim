@@ -102,6 +102,8 @@ object VoiceGate {
             !v.passed -> "not confirmed by the user"
             r == null -> "no measurement from the test call"
             r.voicedFrames < 50 -> "the caller's voice didn't reach the host's capture path"
+            // These two are matched word for word by both client apps (iPhone and Android), which show their own
+            // wording: wire identifiers, kept as they are
             r.playedFrames < 100 -> "no iPhone audio was played into the call"
             !v.callerHeardUs -> "the caller didn't hear the iPhone"
             v.echo -> "the caller heard an echo"

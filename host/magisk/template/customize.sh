@@ -20,7 +20,7 @@ if [ ! -f "$PRIV/SimRelayHost.apk" ]; then
 fi
 ui_print "- TosbiSim Host is installed."
 ui_print "- Restart the phone: TosbiSim starts by itself and opens"
-ui_print "  its screen, ready to pair with your iPhone."
+ui_print "  its screen, ready to pair with your phone."
 # Android keeps a parsed copy of system apps in /data/system/package_cache and, for files on the system
 # partition, only invalidates it on an OTA (mtime is ignored). Drop ours so an updated APK is re-read.
 rm -f /data/system/package_cache/*/SimRelayHost-*

@@ -7,7 +7,7 @@
     <string name="host_version">Ana cihaz uygulaması %s</string>
     <string name="progress">Adım %1$d / %2$d</string>
     <string name="subtitle_setup">Bu telefon SIM ana cihazınız olarak kuruluyor</string>
-    <string name="subtitle_host">Bu telefon SIM\'inizi iPhone\'unuz için taşıyor</string>
+    <string name="subtitle_host">Bu telefon SIM\'inizi telefonunuz için taşıyor</string>
     <string name="checking">Bu telefon kontrol ediliyor…</string>
 
     <string name="cant_title">Bu telefon ana cihaz olamaz</string>
@@ -61,12 +61,12 @@
     <string name="fix_sms">Varsayılan SMS uygulaması başka bir uygulama.</string>
     <string name="fix_battery">Telefon TosbiSim\'i uyutabilir.</string>
     <string name="fix_silence">Telefon henüz tam sessizlikte değil.</string>
-    <string name="fix_bluetooth">Bluetooth kapalı: iPhone\'unuz bu telefona Bluetooth ile ulaşır.</string>
+    <string name="fix_bluetooth">Bluetooth kapalı: telefonunuz bu telefona Bluetooth ile ulaşır.</string>
     <string name="fix_hint">Şimdi düzelt, bunları modülün açılışta yaptığı gibi geri getirir.</string>
     <string name="btn_fix">Şimdi düzelt</string>
     <string name="btn_fixing">Düzeltiliyor…</string>
-    <string name="pair_title">iPhone\'unuzu eşleştirin</string>
-    <string name="pair_body">iPhone\'unuzda: TosbiSim\'i kurup açın, Ana cihaz ekle\'ye dokunun, \"%1$s\" seçin ve iOS sorduğunda onaylayın.</string>
+    <string name="pair_title">Telefonunuzu eşleştirin</string>
+    <string name="pair_body">Telefonunuzda (iPhone ya da Android): TosbiSim\'i kurup açın, Ana cihaz ekle\'ye dokunun, \"%1$s\" seçin ve telefonunuz sorduğunda eşleştirmeyi onaylayın.</string>
     <string name="pair_open_left">Eşleştirme %s daha açık.</string>
     <string name="pair_closed">Eşleştirme kapalı.</string>
     <string name="c_lock">Ekran kilidi</string>
@@ -75,20 +75,20 @@
     <string name="lock_title">Ekran kilidini kaldırın</string>
     <string name="lock_body">PIN, desen veya şifre varken Android, her yeniden başlatma veya elektrik kesintisinden sonra telefonun kilidi açılana kadar TosbiSim\'i kilitli tutar; çantanızdaki ya da evde bıraktığınız bir telefonun kilidini de kimse açmaz. Ekran kilidini Yok (veya Kaydırma) yapın.</string>
     <string name="btn_lock_settings">Ekran kilidi ayarlarını aç</string>
-    <string name="pair_ready">Eşleştirmeye hazır: bu ana cihazı ilk ekleyen iPhone onu alır.</string>
+    <string name="pair_ready">Eşleştirmeye hazır: bu ana cihazı ilk ekleyen telefon onu alır.</string>
     <string name="btn_open_pairing">Eşleştirmeyi aç (5 dk)</string>
-    <string name="next_title">iPhone\'da devam edin</string>
-    <string name="next_test">%1$s ile eşleşti. Sıradaki adım, iPhone\'daki TosbiSim\'de: Ana cihaz → Arama sesi → Arama testini yap. Bir arkadaşınızı arayın ve ses çıkarıp çıkarmadığını duymak için bu telefonu yanınızda tutun.</string>
-    <string name="next_retest">Bu telefonun yazılımı arama testinden sonra değişti. Tam sesi yeniden açmak için iPhone\'da arama testini tekrar yapın.</string>
-    <string name="next_basic">%1$s ile eşleşti. Bu telefon Temel modda çalışır: mesajlar, arama kontrolü ve erişim noktası (arama sesi bu telefonda henüz desteklenmiyor). Sıradaki adım, iPhone\'da: Kutu modunu açın.</string>
-    <string name="next_box">%1$s ile eşleşti ve tam ses açık. Son adım, iPhone\'da: bu telefonun ekranı kapalı kalsın diye Kutu modunu açın.</string>
+    <string name="next_title">Telefonunuzda devam edin</string>
+    <string name="next_test">%1$s ile eşleşti. Sıradaki adım, telefonunuzdaki TosbiSim\'de: Ana cihaz → Arama sesi → Arama testini yap. Bir arkadaşınızı arayın ve ses çıkarıp çıkarmadığını duymak için bu telefonu yanınızda tutun.</string>
+    <string name="next_retest">Bu telefonun yazılımı arama testinden sonra değişti. Tam sesi yeniden açmak için telefonunuzdaki TosbiSim\'de arama testini tekrar yapın.</string>
+    <string name="next_basic">%1$s ile eşleşti. Bu telefon Temel modda çalışır: mesajlar, arama kontrolü ve erişim noktası (arama sesi bu telefonda henüz desteklenmiyor). Sıradaki adım, telefonunuzdaki TosbiSim\'de: Kutu modunu açın.</string>
+    <string name="next_box">%1$s ile eşleşti ve tam ses açık. Son adım, telefonunuzdaki TosbiSim\'de: bu telefonun ekranı kapalı kalsın diye Kutu modunu açın.</string>
     <string name="sim_title">SIM takın</string>
     <string name="sim_body">SIM bulunamadı. Bir SIM takın (iyi oturduğundan emin olun); TosbiSim onu kendiliğinden algılar.</string>
-    <string name="sim_locked">SIM %d kilitli: PIN\'ini iPhone\'daki TosbiSim\'de girin (Ana cihaz → SIM).</string>
+    <string name="sim_locked">SIM %d kilitli: PIN\'ini telefonunuzdaki TosbiSim\'de girin (Ana cihaz → SIM).</string>
     <string name="done_title">Bu telefon hazır</string>
     <string name="done_body">Şarjlı tutun; yanınızda taşıyın (çanta olur) ya da evde bırakın. Bu ekranı tekrar görmek için Ses Açma\'ya 3 kez, ardından Ses Kısma\'ya 3 kez basın.</string>
-    <string name="btn_pair_other">Başka bir iPhone eşleştir…</string>
-    <string name="pair_other_confirm">%1$s, önümüzdeki 5 dakika içinde başka bir iPhone bağlanana kadar eşli kalır; bağlanan onun yerini alır. Devam edilsin mi?</string>
+    <string name="btn_pair_other">Başka bir telefon eşleştir…</string>
+    <string name="pair_other_confirm">%1$s, önümüzdeki 5 dakika içinde başka bir telefon bağlanana kadar eşli kalır; bağlanan onun yerini alır. Devam edilsin mi?</string>
     <string name="btn_continue">Devam</string>
     <string name="btn_cancel">Vazgeç</string>
 
@@ -118,18 +118,18 @@
     <string name="c_permissions">İzinler ve roller</string>
     <string name="perm_ok">Telefon, SMS, Bluetooth; varsayılan telefon ve SMS uygulaması; asla uyutulmaz; tam sessizlik</string>
     <string name="c_bluetooth">Bluetooth</string>
-    <string name="ble_ok">Açık; iPhone\'unuz bu telefonu bulabilir</string>
+    <string name="ble_ok">Açık; telefonunuz bu telefonu bulabilir</string>
     <string name="ble_off">Kapalı</string>
-    <string name="ble_no">Bu telefon Bluetooth LE ile görünür olamıyor, bu yüzden iPhone\'unuz ona bağlanamaz.</string>
-    <string name="ble_none">Bu telefonda Bluetooth LE yok, bu yüzden iPhone\'unuz ona bağlanamaz.</string>
+    <string name="ble_no">Bu telefon Bluetooth LE ile görünür olamıyor, bu yüzden telefonunuz ona bağlanamaz.</string>
+    <string name="ble_none">Bu telefonda Bluetooth LE yok, bu yüzden telefonunuz ona bağlanamaz.</string>
     <string name="ble_present">Açık; TosbiSim çalışınca yeniden denetlenir</string>
     <string name="ble_starting">Başlatılıyor…</string>
     <string name="ble_busy">Başka bir uygulama bu telefonun tek Bluetooth duyuru yuvasını kullanıyor; her dakika yeniden deneniyor.</string>
     <string name="ble_retrying">Android Bluetooth duyurusunu reddetti (kod %1$d); yeniden deneniyor.</string>
-    <string name="c_iphone">iPhone\'unuz</string>
-    <string name="iphone_none">Eşleşmedi</string>
-    <string name="iphone_connected">%s, bağlı</string>
-    <string name="iphone_away">%s, eşli, şu an Bluetooth menzilinde değil</string>
+    <string name="c_client">Telefonunuz</string>
+    <string name="client_none">Eşleşmedi</string>
+    <string name="client_connected">%s, bağlı</string>
+    <string name="client_away">%s, eşli, şu an Bluetooth menzilinde değil</string>
     <string name="c_sim">SIM</string>
     <string name="sim_none">SIM yok</string>
     <string name="sim_line">SIM %1$d: %2$s</string>
@@ -142,11 +142,11 @@
     <string name="no">hayır</string>
     <string name="c_audio">Arama sesi</string>
     <string name="audio_full">Tam ses: arama testi bu telefonda geçti</string>
-    <string name="audio_untested">Arama testine hazır (iPhone\'dan başlatın)</string>
+    <string name="audio_untested">Arama testine hazır (telefonunuzdaki TosbiSim\'den başlatın)</string>
     <string name="audio_basic">Temel mod: bu telefonda henüz arama sesi yok</string>
     <string name="c_box">Kutu modu</string>
     <string name="box_on">Açık; şarj sınırı %%%d</string>
-    <string name="box_off">Kapalı (kurulum bitince iPhone\'dan açın)</string>
+    <string name="box_off">Kapalı (kurulum bitince telefonunuzdaki TosbiSim\'den açın)</string>
 
     <string name="error_title">Bu ekranda bir sorun oluştu</string>
     <string name="error_body">Ana cihaz çalışmaya devam ediyor. TosbiSim\'i kapatıp yeniden açın; sorun tekrar ederse düzeltebilmemiz için aşağıdan bir rapor gönderin.</string>
@@ -159,12 +159,12 @@
     <string name="report_failed">Şu an gönderilemedi; telefon internete bağlanınca gönderilir.</string>
     <!-- stop using as a host (Retire) -->
     <string name="retire_title">Bu telefonu ana cihaz olarak kullanmayı bırak</string>
-    <string name="retire_note">Telefonu normal kullanıma geri verir: sesleri, titreşimi, ekranı ve tuşları, kendi telefon ve mesaj uygulamaları ve Wi-Fi geri gelir, iPhone\'unuz onu unutur ve TosbiSim kaldırılır. Sonunda telefon yeniden başlar. Magisk ve kilidi açılmış önyükleyici kalır.</string>
+    <string name="retire_note">Telefonu normal kullanıma geri verir: sesleri, titreşimi, ekranı ve tuşları, kendi telefon ve mesaj uygulamaları ve Wi-Fi geri gelir, telefonunuz onu unutur ve TosbiSim kaldırılır. Sonunda telefon yeniden başlar. Magisk ve kilidi açılmış önyükleyici kalır.</string>
     <string name="retire_btn">Ana cihaz olarak kullanmayı bırak…</string>
     <string name="retire_confirm_title">TosbiSim bu telefondan kaldırılsın mı?</string>
-    <string name="retire_confirm_body">iPhone\'unuza bu SIM\'in aramaları ve mesajları artık gelmez. Telefonu daha sonra yeniden ana cihaz yapmak için TosbiSim-Host-Magisk.zip dosyasını Magisk → Modüller\'den kurup yeniden eşleştirin.\n\nMagisk (root) ve kilidi açık önyükleyici kalır: bunlar TosbiSim\'den önce kurulmuştu. Telefonu tamamen fabrika yazılımına döndürmek için ardından Magisk\'i kendi uygulamasından kaldırın.</string>
+    <string name="retire_confirm_body">Telefonunuza bu SIM\'in aramaları ve mesajları artık gelmez. Telefonu daha sonra yeniden ana cihaz yapmak için TosbiSim-Host-Magisk.zip dosyasını Magisk → Modüller\'den kurup yeniden eşleştirin.\n\nMagisk (root) ve kilidi açık önyükleyici kalır: bunlar TosbiSim\'den önce kurulmuştu. Telefonu tamamen fabrika yazılımına döndürmek için ardından Magisk\'i kendi uygulamasından kaldırın.</string>
     <string name="retire_confirm_yes">Kaldır ve yeniden başlat</string>
-    <string name="retire_step_iphone">iPhone\'unuza bildiriliyor…</string>
+    <string name="retire_step_client">Telefonunuza bildiriliyor…</string>
     <string name="retire_step_settings">Telefonun ayarları geri veriliyor…</string>
     <string name="retire_step_restart">TosbiSim kaldırılıyor. Telefon birazdan yeniden başlayacak.</string>
     <string name="retire_failed">Kaldırma başlatılamadı; bu telefon eskisi gibi yine ana cihaz. Tekrar deneyin; başarısız olmaya devam ederse Magisk → Modüller\'i açın, TosbiSim Host\'u kaldırın ve telefonu yeniden başlatın.</string>
@@ -185,12 +185,12 @@
     <string name="perm_hotspot">erişim noktası</string>
     <string name="perm_other">diğerleri</string>
     <string name="sim_locked_title">SIM kilidini açın</string>
-    <string name="sim_locked_puk">SIM %d bloke: PUK kodunu (SIM\'in kartında ya da operatörünüzden) ve yeni bir PIN\'i iPhone\'daki TosbiSim\'de girin (Ana cihaz → SIM).</string>
-    <string name="sim_locked_carrier">Bu telefon başka bir operatöre kilitli ve SIM %d kartını kabul etmiyor. Bu kilit iPhone\'dan açılamaz: telefonun geldiği operatörden kilidi açmasını isteyin ya da o operatörün bir SIM\'ini kullanın.</string>
+    <string name="sim_locked_puk">SIM %d bloke: PUK kodunu (SIM\'in kartında ya da operatörünüzden) ve yeni bir PIN\'i telefonunuzdaki TosbiSim\'de girin (Ana cihaz → SIM).</string>
+    <string name="sim_locked_carrier">Bu telefon başka bir operatöre kilitli ve SIM %d kartını kabul etmiyor. Bu kilit TosbiSim\'den açılamaz: telefonun geldiği operatörden kilidi açmasını isteyin ya da o operatörün bir SIM\'ini kullanın.</string>
     <string name="sim_locked_perm">SIM %d kalıcı olarak bloke (çok fazla yanlış PUK kodu). Operatörünüzden yeni bir SIM isteyin.</string>
     <string name="sim_perm_disabled">kalıcı olarak bloke</string>
     <string name="sim_off_title">SIM kapalı</string>
-    <string name="sim_switched_off">iPhone\'daki TosbiSim\'den açın (Ana cihaz → SIM): kapalıyken arama ve mesaj gelmez.</string>
+    <string name="sim_switched_off">Telefonunuzdaki TosbiSim\'den açın (Ana cihaz → SIM): kapalıyken arama ve mesaj gelmez.</string>
     <string name="box_on_plain">Açık</string>
     <string name="box_paused">%s saatine kadar duraklatıldı (tuş hareketi); ondan sonra ekran kapanınca yeniden açılır</string>
     <string name="pair_open_minutes">Eşleştirme yaklaşık %d dk daha açık.</string>
@@ -203,6 +203,6 @@
     <string name="retire_in_call">Bir arama sürüyor, bu yüzden hiçbir şey değiştirilmedi. Arama bitince tekrar deneyin.</string>
     <string name="retire_no_root">Root reddedildi, bu yüzden hiçbir şey değiştirilmedi. Magisk → Süper kullanıcı bölümünde TosbiSim Ana Cihaz\'a izin verin ve tekrar deneyin.</string>
     <string name="retire_prepare_failed">Kaldırma hazırlanamadı, bu yüzden hiçbir şey değiştirilmedi. Tekrar deneyin; başarısız olmaya devam ederse aşağıdan bir rapor gönderin.</string>
-    <string name="retire_unpaired">iPhone\'unuza zaten bildirildi ve bu ana cihazı unuttu: kullanmaya devam etmek için iPhone\'da yeniden ekleyin (Ana cihaz ekle).</string>
+    <string name="retire_unpaired">Telefonunuza zaten bildirildi ve bu ana cihazı unuttu: kullanmaya devam etmek için telefonunuzdaki TosbiSim\'de yeniden ekleyin (Ana cihaz ekle).</string>
     <string name="retire_failed_title">TosbiSim kaldırılmadı</string>
 </resources>

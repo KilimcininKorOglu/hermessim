@@ -70,7 +70,7 @@ object Updater {
         if (state == Update.State.READY && !prefs().getBoolean("informed_${available?.optInt("code")}", false)) {
             prefs().edit().putBoolean("informed_${available?.optInt("code")}", true)
                 .putLong("informed_at_${available?.optInt("code")}", System.currentTimeMillis()).apply()
-            Log.i(TAG, "update ${available?.optString("version")}: the iPhone has been told")
+            Log.i(TAG, "update ${available?.optString("version")}: the phone has been told")
         }
     }
 

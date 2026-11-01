@@ -114,7 +114,7 @@ object Retire {
             Diag.event("host_removed", JSONObject().put("what", "user"), withLog = false, force = true)
 
             touched = true
-            progress(R.string.retire_step_iphone)
+            progress(R.string.retire_step_client)
             if (Relay.started()) {
                 unpaired = Relay.pairedClient() != null
                 await { done -> Relay.retire(done) }

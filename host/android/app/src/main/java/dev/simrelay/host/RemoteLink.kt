@@ -114,7 +114,7 @@ object RemoteLink {
     private fun setPeer(v: Boolean, wasThere: Boolean = false) {
         if (peerPresent == v) return
         peerPresent = v
-        Log.i(TAG, "remote: iPhone ${if (v) "in the room" else "left"}")
+        Log.i(TAG, "remote: phone ${if (v) "in the room" else "left"}")
         onPeer(v, wasThere)
     }
 
@@ -148,11 +148,13 @@ object RemoteLink {
                 if (!online) { w.close(1000, "subscription failed") }
             }
             "pusher_internal:subscription_succeeded" -> {
+                // "ios" is the room's member id for the client phone, iPhone or Android alike (a wire name that
+                // predates the Android app; the backend allows host|ios)
                 backoffMs = 2000
                 setOnline(true)
                 val ids = data(m).optJSONObject("presence")?.optJSONArray("ids")
                 val ios = ids != null && (0 until ids.length()).any { ids.optString(it) == "ios" }
-                Log.i(TAG, "remote: in the room (iPhone ${if (ios) "there" else "not there"})")
+                Log.i(TAG, "remote: in the room (phone ${if (ios) "there" else "not there"})")
                 setPeer(ios, wasThere = true)
             }
             "pusher_internal:member_added" -> if (data(m).optString("user_id") == "ios") setPeer(true)

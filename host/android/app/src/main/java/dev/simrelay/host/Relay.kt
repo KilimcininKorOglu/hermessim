@@ -88,7 +88,7 @@ object Relay {
         RemoteLink.start(app, { bytes -> main.post { runCatching { onPeerFrame(Peer.Internet, bytes) }.onFailure { Log.e(TAG, "remote frame failed: $it") } } }) { present, wasThere ->
             main.post {
                 // A room blip mid-call doesn't touch the call's audio (TURN carries it); it ends with the call.
-                if (!present) { trusted.remove(Peer.Internet.id); if (CallRegistry.snapshot().none { it.state != CallEvent.State.ENDED }) RemoteCall.close("iPhone left the room") }
+                if (!present) { trusted.remove(Peer.Internet.id); if (CallRegistry.snapshot().none { it.state != CallEvent.State.ENDED }) RemoteCall.close("the phone left the room") }
                 // The iPhone was already in the room when we (re)joined: it said Hello to an earlier us. A joining
                 // iPhone says Hello by itself, so no request then (that doubled every Hello, 17 Oct).
                 else if (wasThere && Peer.Internet.id !in trusted && pinned() != null) error(Peer.Internet, 0, Error.Code.HELLO_REQUIRED, "host restarted")
@@ -127,7 +127,7 @@ object Relay {
                 val mac = dev.address
                 val known = pinned() != null && mac == app.getSharedPreferences("relay", Context.MODE_PRIVATE).getString("client_mac", null)
                 if (!pairable() && !known) return
-                if (known && !pairable()) Log.i(TAG, "pairing request from the paired iPhone (its keys were reset): accepting")
+                if (known && !pairable()) Log.i(TAG, "pairing request from the paired phone (its keys were reset): accepting")
                 pairExec.execute { RootBt.confirm(app, mac) }
             }
         }, android.content.IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST).apply { priority = 1000 })
@@ -151,7 +151,7 @@ object Relay {
 
     /** For the setup screen: paired client model (null = not paired), connected now, pairing window open. */
     fun pairedClient(): String? = pinned()?.let {
-        app.getSharedPreferences("relay", Context.MODE_PRIVATE).getString("client_model", null) ?: "iPhone"
+        app.getSharedPreferences("relay", Context.MODE_PRIVATE).getString("client_model", null) ?: "your phone"
     }
     /** For the setup screen: Android's last answer to our advertising ([BleLink.advStatus]; null: none yet). */
     fun advertisingStatus(): Int? = if (::ble.isInitialized) ble.advStatus else null
@@ -458,7 +458,7 @@ object Relay {
             RemoteLink.configure(false, null)
             trusted.clear()
             if (::ble.isInitialized) runCatching { ble.stop() }
-            Log.i(TAG, "RETIRED: the iPhone was told, pairing forgotten")
+            Log.i(TAG, "RETIRED: the phone was told, pairing forgotten")
             pairExec.execute { if (mac != null) RootBt.unbond(app, mac); done() }
         }, 1500)                                               // time for the Unpair to reach the iPhone
     }
@@ -490,7 +490,7 @@ object Relay {
         RemoteLink.configure(false, null)
         trusted.clear()
         pairableChanged()                                       // unpaired: ready for the next iPhone
-        Log.i(TAG, "UNPAIRED: the iPhone forgot this host")
+        Log.i(TAG, "UNPAIRED: the phone forgot this host")
         Diag.event("unpaired", org.json.JSONObject().put("what", "client_forgot"), withLog = false)
         main.postDelayed({
             d.drop()
@@ -613,7 +613,7 @@ object Relay {
                 main.postDelayed({
                     if (d.address !in trusted && ble.connectedDevices().any { it.address == d.address } &&
                         CallRegistry.snapshot().none { it.state != CallEvent.State.ENDED }) {
-                        Log.i(TAG, "link ${d.address} still up without a Hello: resetting Bluetooth so the iPhone reconnects")
+                        Log.i(TAG, "link ${d.address} still up without a Hello: resetting Bluetooth so the phone reconnects")
                         // Detached: if this app dies in those 2 s, Bluetooth must still come back on
                         Root.background("setsid sh -c 'svc bluetooth disable; sleep 2; svc bluetooth enable' </dev/null >/dev/null 2>&1 &")
                     }

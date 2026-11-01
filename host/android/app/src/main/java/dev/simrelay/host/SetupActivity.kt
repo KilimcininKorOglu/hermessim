@@ -248,9 +248,9 @@ class SetupActivity : Activity() {
                 if (permsOk) getString(R.string.perm_ok) else problems(runtimeMissing, sms, dialer, battery, silent, true).joinToString(" ")),
             bluetoothCheck(btOn),
             Check(getString(R.string.c_lock), if (locked) Mark.WARN else Mark.OK, getString(if (locked) R.string.lock_on else R.string.lock_off)),
-            Check(getString(R.string.c_iphone), if (paired != null && Relay.clientConnected()) Mark.OK else Mark.WARN,
-                when { paired == null -> getString(R.string.iphone_none); Relay.clientConnected() -> getString(R.string.iphone_connected, paired)
-                    else -> getString(R.string.iphone_away, paired) }),
+            Check(getString(R.string.c_client), if (paired != null && Relay.clientConnected()) Mark.OK else Mark.WARN,
+                when { paired == null -> getString(R.string.client_none); Relay.clientConnected() -> getString(R.string.client_connected, paired)
+                    else -> getString(R.string.client_away, paired) }),
             // A switched-off SIM isn't fine either (it showed as OK; audit, 20 Oct 2026)
             Check(getString(R.string.c_sim), when { sims.isEmpty() -> Mark.FAIL; sims.any { it.lock != Sim.Lock.UNLOCKED || !it.enabled } -> Mark.WARN; else -> Mark.OK },
                 if (sims.isEmpty()) getString(R.string.sim_none) else sims.joinToString("\n") { simLine(it) }),

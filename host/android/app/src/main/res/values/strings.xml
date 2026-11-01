@@ -7,7 +7,7 @@
     <string name="host_version">Host app %s</string>
     <string name="progress">Step %1$d of %2$d</string>
     <string name="subtitle_setup">Setting up this phone as your SIM host</string>
-    <string name="subtitle_host">This phone holds your SIM for your iPhone</string>
+    <string name="subtitle_host">This phone holds your SIM for your phone</string>
     <string name="checking">Checking this phone…</string>
 
     <!-- can't be used -->
@@ -66,12 +66,12 @@
     <string name="fix_sms">Another app is the default SMS app.</string>
     <string name="fix_battery">The phone may put TosbiSim to sleep.</string>
     <string name="fix_silence">The phone isn\'t in total silence yet.</string>
-    <string name="fix_bluetooth">Bluetooth is off: your iPhone reaches this phone over Bluetooth.</string>
+    <string name="fix_bluetooth">Bluetooth is off: your phone reaches this one over Bluetooth.</string>
     <string name="fix_hint">Fix now puts these back as the module does at start-up.</string>
     <string name="btn_fix">Fix now</string>
     <string name="btn_fixing">Fixing…</string>
-    <string name="pair_title">Pair your iPhone</string>
-    <string name="pair_body">On your iPhone: install TosbiSim, open it, tap Add host, choose \"%1$s\", then tap Pair when iOS asks.</string>
+    <string name="pair_title">Pair your phone</string>
+    <string name="pair_body">On your phone (iPhone or Android): install TosbiSim, open it, tap Add host, choose \"%1$s\", then tap Pair when your phone asks.</string>
     <string name="pair_open_left">Pairing is open for %s.</string>
     <string name="pair_closed">Pairing is closed.</string>
     <string name="c_lock">Screen lock</string>
@@ -80,20 +80,20 @@
     <string name="lock_title">Remove the screen lock</string>
     <string name="lock_body">With a PIN, pattern or password, Android keeps TosbiSim locked after every restart or power cut until someone unlocks the phone, and nobody will on a phone in your bag or left at home. Set the screen lock to None (or Swipe).</string>
     <string name="btn_lock_settings">Open screen lock settings</string>
-    <string name="pair_ready">Ready to pair: the first iPhone that adds this host gets it.</string>
+    <string name="pair_ready">Ready to pair: the first phone that adds this host gets it.</string>
     <string name="btn_open_pairing">Open pairing (5 min)</string>
-    <string name="next_title">Continue on your iPhone</string>
-    <string name="next_test">Paired with %1$s. Next, in TosbiSim on the iPhone: Host → Call audio → Run the call test. Call a friend, and keep this phone next to you to hear whether it makes any sound.</string>
-    <string name="next_retest">This phone\'s software changed since its call test. Run the call test again on the iPhone to turn full voice back on.</string>
-    <string name="next_basic">Paired with %1$s. This phone runs in Basic mode: texts, call control and the hotspot (call audio isn\'t supported on it yet). Next, on the iPhone: turn Box mode on.</string>
-    <string name="next_box">Paired with %1$s and full voice is on. Last step, on the iPhone: turn Box mode on, so this phone\'s screen stays off.</string>
+    <string name="next_title">Continue on your phone</string>
+    <string name="next_test">Paired with %1$s. Next, in TosbiSim on your phone: Host → Call audio → Run the call test. Call a friend, and keep this phone next to you to hear whether it makes any sound.</string>
+    <string name="next_retest">This phone\'s software changed since its call test. Run the call test again in TosbiSim on your phone to turn full voice back on.</string>
+    <string name="next_basic">Paired with %1$s. This phone runs in Basic mode: texts, call control and the hotspot (call audio isn\'t supported on it yet). Next, in TosbiSim on your phone: turn Box mode on.</string>
+    <string name="next_box">Paired with %1$s and full voice is on. Last step, in TosbiSim on your phone: turn Box mode on, so this phone\'s screen stays off.</string>
     <string name="sim_title">Insert a SIM</string>
     <string name="sim_body">No SIM found. Insert one (check it is seated well); TosbiSim picks it up by itself.</string>
-    <string name="sim_locked">SIM %d is locked: enter its PIN in TosbiSim on the iPhone (Host → SIM).</string>
+    <string name="sim_locked">SIM %d is locked: enter its PIN in TosbiSim on your phone (Host → SIM).</string>
     <string name="done_title">This phone is set up</string>
     <string name="done_body">Keep it charged and take it with you (a bag is fine) or leave it at home. To see this screen again, press Volume Up 3 times, then Volume Down 3 times.</string>
-    <string name="btn_pair_other">Pair a different iPhone…</string>
-    <string name="pair_other_confirm">%1$s stays paired until another iPhone connects in the next 5 minutes; that one then replaces it. Continue?</string>
+    <string name="btn_pair_other">Pair a different phone…</string>
+    <string name="pair_other_confirm">%1$s stays paired until another phone connects in the next 5 minutes; that one then replaces it. Continue?</string>
     <string name="btn_continue">Continue</string>
     <string name="btn_cancel">Cancel</string>
 
@@ -124,18 +124,18 @@
     <string name="c_permissions">Permissions and roles</string>
     <string name="perm_ok">Phone, SMS, Bluetooth; default phone and SMS app; never put to sleep; total silence</string>
     <string name="c_bluetooth">Bluetooth</string>
-    <string name="ble_ok">On; your iPhone can find this phone</string>
+    <string name="ble_ok">On; your phone can find this one</string>
     <string name="ble_off">Off</string>
-    <string name="ble_no">This phone can\'t advertise over Bluetooth LE, so your iPhone can\'t connect to it.</string>
-    <string name="ble_none">This phone has no Bluetooth LE, so your iPhone can\'t connect to it.</string>
+    <string name="ble_no">This phone can\'t advertise over Bluetooth LE, so your phone can\'t connect to it.</string>
+    <string name="ble_none">This phone has no Bluetooth LE, so your phone can\'t connect to it.</string>
     <string name="ble_present">On; checked again once TosbiSim runs</string>
     <string name="ble_starting">Starting…</string>
     <string name="ble_busy">Another app is using this phone\'s only Bluetooth advertising slot; trying again every minute.</string>
     <string name="ble_retrying">Android refused Bluetooth advertising (code %1$d); trying again.</string>
-    <string name="c_iphone">Your iPhone</string>
-    <string name="iphone_none">Not paired</string>
-    <string name="iphone_connected">%s, connected</string>
-    <string name="iphone_away">%s, paired, not in Bluetooth range now</string>
+    <string name="c_client">Your phone</string>
+    <string name="client_none">Not paired</string>
+    <string name="client_connected">%s, connected</string>
+    <string name="client_away">%s, paired, not in Bluetooth range now</string>
     <string name="c_sim">SIM</string>
     <string name="sim_none">No SIM</string>
     <string name="sim_line">SIM %1$d: %2$s</string>
@@ -148,11 +148,11 @@
     <string name="no">no</string>
     <string name="c_audio">Call audio</string>
     <string name="audio_full">Full voice: the call test passed on this phone</string>
-    <string name="audio_untested">Ready for the call test (run it from the iPhone)</string>
+    <string name="audio_untested">Ready for the call test (run it from TosbiSim on your phone)</string>
     <string name="audio_basic">Basic mode: no call audio on this phone yet</string>
     <string name="c_box">Box mode</string>
     <string name="box_on">On; charge limit %d%%</string>
-    <string name="box_off">Off (turn it on from the iPhone when setup is done)</string>
+    <string name="box_off">Off (turn it on from TosbiSim on your phone when setup is done)</string>
 
     <string name="error_title">This screen hit a problem</string>
     <string name="error_body">The host keeps working. Close and reopen TosbiSim; if this comes back, send a report below so we can fix it.</string>
@@ -166,12 +166,12 @@
     <string name="report_failed">Couldn\'t send it now; it goes out when the phone is online.</string>
     <!-- stop using as a host (Retire) -->
     <string name="retire_title">Stop using this phone as a host</string>
-    <string name="retire_note">Gives the phone back for normal use: its sounds, vibration, screen and buttons, its own phone and messaging apps and Wi-Fi come back, your iPhone forgets it, and TosbiSim is removed. The phone restarts at the end. Magisk and the unlocked bootloader stay.</string>
+    <string name="retire_note">Gives the phone back for normal use: its sounds, vibration, screen and buttons, its own phone and messaging apps and Wi-Fi come back, your phone forgets it, and TosbiSim is removed. The phone restarts at the end. Magisk and the unlocked bootloader stay.</string>
     <string name="retire_btn">Stop using as a host…</string>
     <string name="retire_confirm_title">Remove TosbiSim from this phone?</string>
-    <string name="retire_confirm_body">Your iPhone will stop getting this SIM\'s calls and messages. To use the phone as a host again later, install TosbiSim-Host-Magisk.zip in Magisk → Modules and pair it again.\n\nMagisk (root) and the unlocked bootloader stay: they were set up before TosbiSim. To make the phone fully stock, uninstall Magisk from its own app afterwards.</string>
+    <string name="retire_confirm_body">Your phone will stop getting this SIM\'s calls and messages. To use the phone as a host again later, install TosbiSim-Host-Magisk.zip in Magisk → Modules and pair it again.\n\nMagisk (root) and the unlocked bootloader stay: they were set up before TosbiSim. To make the phone fully stock, uninstall Magisk from its own app afterwards.</string>
     <string name="retire_confirm_yes">Remove and restart</string>
-    <string name="retire_step_iphone">Telling your iPhone…</string>
+    <string name="retire_step_client">Telling your phone…</string>
     <string name="retire_step_settings">Giving back the phone\'s settings…</string>
     <string name="retire_step_restart">Removing TosbiSim. The phone restarts in a moment.</string>
     <string name="retire_failed">Couldn\'t start the removal, so this phone is a host again, as before. Try again; if it keeps failing, open Magisk → Modules, remove TosbiSim Host and restart the phone.</string>
@@ -192,12 +192,12 @@
     <string name="perm_hotspot">hotspot</string>
     <string name="perm_other">others</string>
     <string name="sim_locked_title">Unlock the SIM</string>
-    <string name="sim_locked_puk">SIM %d is blocked: enter its PUK code (on the SIM\'s card, or from your operator) and a new PIN in TosbiSim on the iPhone (Host → SIM).</string>
-    <string name="sim_locked_carrier">This phone is locked to another carrier and refuses SIM %d. That can\'t be unlocked from the iPhone: ask the carrier the phone came from to unlock it, or use one of its SIMs.</string>
+    <string name="sim_locked_puk">SIM %d is blocked: enter its PUK code (on the SIM\'s card, or from your operator) and a new PIN in TosbiSim on your phone (Host → SIM).</string>
+    <string name="sim_locked_carrier">This phone is locked to another carrier and refuses SIM %d. That can\'t be unlocked from TosbiSim: ask the carrier the phone came from to unlock it, or use one of its SIMs.</string>
     <string name="sim_locked_perm">SIM %d is blocked for good (too many wrong PUK codes). Ask your operator for a new SIM.</string>
     <string name="sim_perm_disabled">blocked for good</string>
     <string name="sim_off_title">The SIM is switched off</string>
-    <string name="sim_switched_off">Switch it on in TosbiSim on the iPhone (Host → SIM): calls and texts can\'t arrive meanwhile.</string>
+    <string name="sim_switched_off">Switch it on in TosbiSim on your phone (Host → SIM): calls and texts can\'t arrive meanwhile.</string>
     <string name="box_on_plain">On</string>
     <string name="box_paused">Paused until %s (the button gesture); back on when the screen goes off after that</string>
     <string name="pair_open_minutes">Pairing is open for about %d min.</string>
@@ -210,6 +210,6 @@
     <string name="retire_in_call">A call is on, so nothing was changed. Try again once it has ended.</string>
     <string name="retire_no_root">Root was refused, so nothing was changed. In Magisk → Superuser, allow TosbiSim Host, then try again.</string>
     <string name="retire_prepare_failed">Couldn\'t prepare the removal, so nothing was changed. Try again; if it keeps failing, send a report below.</string>
-    <string name="retire_unpaired">Your iPhone was already told and forgot this host: to keep using it, add it again on the iPhone (Add host).</string>
+    <string name="retire_unpaired">Your phone was already told and forgot this host: to keep using it, add it again in TosbiSim on your phone (Add host).</string>
     <string name="retire_failed_title">TosbiSim wasn\'t removed</string>
 </resources>

@@ -3,4 +3,4 @@ name=TosbiSim Host
 version=0.8.0-rollout
 versionCode=21
 author=TosbiSim
-description=Turns this phone into a TosbiSim host: its SIM's calls, texts and data reach your iPhone. Silent; starts by itself after a restart.
+description=Turns this phone into a TosbiSim host: its SIM's calls, texts and data reach your phone (iPhone or Android). Silent; starts by itself after a restart.

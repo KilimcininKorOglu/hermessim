@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.18",
+    "code": 54,
+    "en": "TosbiSim now has an Android app too: this phone's screens and messages speak of your phone, iPhone or Android, instead of only an iPhone.",
+    "tr": "TosbiSim'in artık bir Android uygulaması da var: bu telefonun ekranları ve mesajları yalnızca iPhone'dan değil, iPhone ya da Android telefonunuzdan söz ediyor."
+  },
+  {
     "version": "0.12.17",
     "code": 53,
     "en": "A small security improvement in how internet calls get their relay.",

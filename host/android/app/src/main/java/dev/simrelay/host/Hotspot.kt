@@ -172,7 +172,7 @@ object Hotspot {
         val left = if (unusedSince == 0L) offUnusedMs else offUnusedMs - (now - unusedSince)
         if (unusedSince != 0L && left <= 0) {
             offUnusedMs = 0
-            Log.i(TAG, "hotspot off: unused for ${(now - unusedSince) / 1000} s (the iPhone is on another Wi-Fi)")
+            Log.i(TAG, "hotspot off: unused for ${(now - unusedSince) / 1000} s (the phone is on another Wi-Fi)")
             set(ctx, false) { _, _ -> }
             return
         }

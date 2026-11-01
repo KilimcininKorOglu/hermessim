@@ -48,7 +48,7 @@ message Envelope {
     WifiForget wifi_forget = 60;        // client -> host, Bluetooth only
     DiagnosticsRequest diagnostics_request = 61; // client -> host: the host's side of a problem report
     Diagnostics diagnostics = 62;                // host -> client (reply)
-    Unpair unpair = 63;                          // client -> host: "forget this host" on the iPhone (host -> client: its answer, or unasked: the host was removed)
+    Unpair unpair = 63;                          // client -> host: "forget this host" on the phone (host -> client: its answer, or unasked: the host was removed)
     PushSetup push_setup = 64;                   // client -> host, over Bluetooth only: the push wake-up key
   }
 }
@@ -134,16 +134,16 @@ message VoiceTestHostResult {
   int32 silence_controls = 2;    // host amp/earpiece controls held silent (0 = none known for this phone)
   int32 captured_frames = 3;     // 10 ms frames read from the call downlink
   int32 voiced_frames = 4;       // ... with speech-level audio (the friend talking)
-  int32 sent_frames = 5;         // ... sent to the iPhone
-  int32 played_frames = 6;       // iPhone audio frames played into the call uplink
+  int32 sent_frames = 5;         // ... sent to the client phone
+  int32 played_frames = 6;       // client audio frames played into the call uplink
   int32 peak = 7;                // loudest downlink sample
   string profile_id = 8;
   string profile_source = 9;
 }
 
 message VoiceTestVerdict {
-  bool heard_caller = 1;         // iPhone heard the friend (also measured)
-  bool caller_heard_us = 2;      // the friend heard the iPhone user clearly
+  bool heard_caller = 1;         // the client heard the friend (also measured)
+  bool caller_heard_us = 2;      // the friend heard the client user clearly
   bool echo = 3;                 // the friend heard an echo / the host's surroundings
   HostSound host_sound = 4;
   bool passed = 5;
@@ -185,7 +185,7 @@ message Hotspot {
   Usage usage = 13;              // data shared through the hotspot, counted on the host (status only)
   bool starting = 14;            // turning on right now (status only): show "Starting", not off
   string gateway = 15;           // the hotspot's own IPv4 address while on (status only): lets the client tell
-                                 // it's on this hotspot without reading Wi-Fi names (iOS hides them)
+                                 // it's on this hotspot without reading Wi-Fi names (iOS hides them; Android needs location for them)
 
   enum Band { BAND_UNSPECIFIED = 0; BAND_2GHZ = 1; BAND_5GHZ = 2; BAND_6GHZ = 3; BAND_AUTO = 4; BAND_DUAL_2_5 = 5; }
   enum Security { SECURITY_UNSPECIFIED = 0; OPEN = 1; WPA2 = 2; WPA3_TRANSITION = 3; WPA3 = 4; }
@@ -250,7 +250,7 @@ message CallAction {
 message Dial {
   string number = 1;             // as dialled; host normalises
   int32 slot = 2;                // -1 = host default
-  string client_call_uuid = 3;   // CallKit UUID, echoed in CallEvent
+  string client_call_uuid = 3;   // the client's call UUID (CallKit / Telecom), echoed in CallEvent
   bool voice_test = 4;           // the guided call test: relay audio even though full voice isn't on yet
 }
 
@@ -279,7 +279,7 @@ message SmsSendResult {
 }
 
 // on = false with off_when_unused_s > 0: the host turns its hotspot off itself once no device has used it for that
-// long (the iPhone moved to another Wi-Fi and may be asleep when that moment comes). Any later SetHotspot cancels it.
+// long (the phone moved to another Wi-Fi and may be asleep when that moment comes). Any later SetHotspot cancels it.
 // Only sent to hosts whose Hotspot.Capabilities.off_when_unused is set: older hosts would turn the hotspot off at once.
 message SetHotspot { bool on = 1; int32 off_when_unused_s = 2; }
 
@@ -399,8 +399,8 @@ message Uplink {
 
 // Problem reports (anonymous): the host's recent log, scrubbed on the host before it leaves (no phone numbers,
 // hardware addresses, network names, ids or message text), plus the facts that identify the phone model and setup.
-// The iPhone forgets this host: the host forgets the iPhone too (its pin and its Bluetooth bond), so both sides
-// start clean and another iPhone can pair.
+// The phone forgets this host: the host forgets the phone too (its pin and its Bluetooth bond), so both sides
+// start clean and another phone can pair.
 message Unpair {}
 
 // The key for push wake-ups, apart from remote mode's: pushes work with Internet mode off. Empty = forget it.
