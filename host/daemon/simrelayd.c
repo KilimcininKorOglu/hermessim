@@ -20,7 +20,7 @@
 //   NEIGH <iface>    -> OK <n> <mac>,<ip>;...      (hotspot devices from the kernel ARP table; Android 13
 //                                                   withholds TetheredClient details without NETWORK_SETTINGS)
 //   SET keys: capture, rec_config, inject.1, inject.2, mute.tx, mute.rx, mute.vsid, mute.ramp
-//   HAS <control>  -> OK count=n | ERR       (auto profiles: confirm a control exists on this card)
+//   HAS <control>  -> OK count=n [items=a|b|c] | ERR   (auto profiles: a control on this card, an enum's options)
 //   TUNE [p k per] -> OK prime= keep= period=   (jitter-buffer frames, inject PCM period; live)
 //   AUDIO?         -> OK call= session= silence= cap= voiced= sent= played= peak=   (call test totals)
 //   Box mode (box.c): SCREEN_OFF | WAKE | POWERKEY 1|0 | ROLE <role> <pkg> | CHARGE <percent> | CHARGE? -> OK <node>|ERR
@@ -121,6 +121,20 @@ static int ctl_read_t(unsigned numid, long long *out, unsigned count, int enumer
     return 0;
 }
 
+// An enum control's item names, "a|b|c" (the first 64), as ELEM_INFO gives them one index at a time.
+static void enum_items(const struct snd_ctl_elem_info *in, char *out, size_t len) {
+    size_t used = 0;
+    out[0] = 0;
+    for (unsigned k = 0; k < in->value.enumerated.items && k < 64; k++) {
+        struct snd_ctl_elem_info e = *in;
+        e.value.enumerated.item = k;
+        if (ioctl(g_ctl, SNDRV_CTL_IOCTL_ELEM_INFO, &e) != 0) continue;
+        int n = snprintf(out + used, len - used, "%s%s", k ? "|" : "", e.value.enumerated.name);
+        if (n < 0 || (size_t)n >= len - used) { out[used] = 0; return; }     // cut at an item, never inside one
+        used += (size_t)n;
+    }
+}
+
 // ------------------------------------------------------------------ hardware inventory
 // -1: no mixer, -2: the file couldn't be written (nothing replaced).
 // Every mixer control's description (ELEM_LIST + ELEM_INFO, enum item names): never a value read or write, so it can't
@@ -155,13 +169,10 @@ static int inventory(const char *path) {
         if (in.type == SNDRV_CTL_ELEM_TYPE_INTEGER) fprintf(f, "%ld..%ld", in.value.integer.min, in.value.integer.max);
         else if (in.type == SNDRV_CTL_ELEM_TYPE_INTEGER64) fprintf(f, "%lld..%lld", (long long)in.value.integer64.min, (long long)in.value.integer64.max);
         else if (in.type == SNDRV_CTL_ELEM_TYPE_ENUMERATED) {
-            unsigned items = in.value.enumerated.items;
-            for (unsigned k = 0; k < items && k < 64; k++) {
-                struct snd_ctl_elem_info e = in;
-                e.value.enumerated.item = k;
-                if (ioctl(g_ctl, SNDRV_CTL_IOCTL_ELEM_INFO, &e) == 0) fprintf(f, "%s%s", k ? "|" : "", e.value.enumerated.name);
-            }
-            if (items > 64) fprintf(f, "|...(%u)", items);
+            char items[64 * NAME_LEN];
+            enum_items(&in, items, sizeof(items));
+            fputs(items, f);
+            if (in.value.enumerated.items > 64) fprintf(f, "|...(%u)", in.value.enumerated.items);
         }
         fputc('\n', f);
         n++;
@@ -731,7 +742,11 @@ static void handle_line(int fd, char *line) {
     } else if (strcmp(cmd, "HAS") == 0) {               // does this mixer control exist? (auto profiles)
         char *name = strtok(NULL, "");
         struct snd_ctl_elem_info info;
-        if (name && ctl_info(name, &info) == 0) reply(fd, "OK count=%u", info.count); else reply(fd, "ERR no such control");
+        if (!name || ctl_info(name, &info) != 0) { reply(fd, "ERR no such control"); return; }
+        // An enum's items too: an auto profile picks a route by the option's name, its number comes from this card
+        char items[1500] = "";
+        if (info.type == SNDRV_CTL_ELEM_TYPE_ENUMERATED) enum_items(&info, items, sizeof(items));
+        reply(fd, "OK count=%u%s%s", info.count, *items ? " items=" : "", items);
     } else if (strcmp(cmd, "AUDIO?") == 0) {            // call test: did audio flow both ways
         char t[160];
         audio_totals(t, sizeof(t));

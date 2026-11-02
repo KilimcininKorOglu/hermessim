@@ -1,7 +1,7 @@
 {
-  "comment": "TosbiSim support table, hand-written part. tools/corpus/gen_support.py merges it with the AndroidDumps corpus into profiles/support.json (do not edit that one). Tiers: verified = measured by us; expected = its own firmware shows our auto profile builds (same family as a verified phone), or every Android 11+ phone with its chip does; experimental = our family, but its files need a hand-made profile, or its chip's phones aren't all known to build; not_yet = an audio family we can't drive yet (Basic mode: SMS, call control, hotspot); unsupported = rules below (can't be rooted). Full voice still needs the in-app call test on every phone.",
-  "version": 2,
-  "updated": "2026-10-31",
+  "comment": "TosbiSim support table, hand-written part. tools/corpus/gen_support.py merges it with the AndroidDumps corpus into profiles/support.json (do not edit that one). Tiers: verified = measured by us; expected = its own firmware shows our auto profile builds (same family as a verified phone), or every Android 11+ phone with its chip does; experimental = our family, but its files need a hand-made profile, or its chip's phones aren't all known to build, or its call route isn't proven on any phone yet; not_yet = an audio family we can't drive yet (Basic mode: SMS, call control, hotspot); unsupported = rules below (can't be rooted). Full voice still needs the in-app call test on every phone.",
+  "version": 3,
+  "updated": "2026-11-02",
   "phones": [
     {
       "name": "Galaxy S20 FE",
@@ -280,6 +280,25 @@
       "note_tr": "Exynos 9611. Exynos arama sesi henüz desteklenmiyor; üzerinde çalıştığımız bir sonraki aile. Temel mod (SMS, arama yönetimi, erişim noktası) çalışır.",
       "source": "docs/desk-study/galaxy-a51.md",
       "family": "exynos-abox"
+    },
+    {
+      "name": "Galaxy J7 Prime",
+      "brand": "Samsung",
+      "models": [
+        "SM-G610F",
+        "SM-G610M",
+        "SM-G610Y"
+      ],
+      "devices": [
+        "on7xelte"
+      ],
+      "soc": "Exynos 7870",
+      "tier": "experimental",
+      "profile": null,
+      "note": "Exynos 7870. Samsung's updates stop at Android 8.1, so it needs a custom ROM with Android 11 or newer, and custom ROMs have no VoLTE: calls go over 2G/3G. A host on such a ROM sent its sound hardware on 2 Nov 2026: it has every switch of Samsung's digital call route, which the host builds by itself. Not proven on a call yet: the call test decides.",
+      "note_tr": "Exynos 7870. Samsung'un güncellemeleri Android 8.1'de bitiyor; bu yüzden Android 11 veya daha yeni bir özel ROM gerekir ve özel ROM'larda VoLTE yok: aramalar 2G/3G üzerinden yapılır. Böyle bir ROM'daki bir ana cihaz 2 Kasım 2026'da ses donanımını gönderdi: Samsung'un dijital arama yolunun bütün anahtarları var ve ana cihaz bu yolu kendisi kuruyor. Henüz bir aramada kanıtlanmadı: arama testi karar verir.",
+      "source": "anonymous host hardware inventory, 2 Nov 2026; tools/corpus/research/exynos-audmixer.md",
+      "family": "exynos-audmixer"
     },
     {
       "name": "Galaxy A31",
@@ -817,9 +836,18 @@
       "name": "Samsung Exynos",
       "name_tr": "Samsung Exynos",
       "router": false,
-      "about": "Galaxy phones with Exynos chips. Samsung's own firmware has a digital call route (phone as call modem) on every Exynos Galaxy we checked; it needs a test phone before we turn it on. Until then: Basic mode (SMS, call control, hotspot) if the phone can be rooted.",
-      "about_tr": "Exynos işlemcili Galaxy telefonlar. Samsung'un kendi yazılımında, incelediğimiz her Exynos Galaxy'de dijital bir arama yolu (telefonu arama modemi olarak kullanma) var; açmadan önce bir test telefonunda denememiz gerekiyor. O zamana kadar: telefon root'lanabiliyorsa Temel mod (SMS, arama kontrolü, erişim noktası).",
+      "about": "Galaxy phones with newer Exynos chips (2018 on). Samsung's own firmware has a digital call route (phone as call modem) on every Exynos Galaxy we checked; it needs a test phone before we turn it on. Until then: Basic mode (SMS, call control, hotspot) if the phone can be rooted.",
+      "about_tr": "Daha yeni Exynos işlemcili (2018 ve sonrası) Galaxy telefonlar. Samsung'un kendi yazılımında, incelediğimiz her Exynos Galaxy'de dijital bir arama yolu (telefonu arama modemi olarak kullanma) var; açmadan önce bir test telefonunda denememiz gerekiyor. O zamana kadar: telefon root'lanabiliyorsa Temel mod (SMS, arama kontrolü, erişim noktası).",
       "research": "tools/corpus/research/exynos-abox.md"
+    },
+    "exynos-audmixer": {
+      "name": "Samsung Exynos (older: 7870/7570)",
+      "name_tr": "Samsung Exynos (eski: 7870/7570)",
+      "router": true,
+      "status": "experimental",
+      "about": "Older Galaxy phones with an Exynos 7870 or 7570 chip (J7 Prime, J7 Pro, J7 Nxt, J6, J4, A6, M10…). Samsung's updates stop at Android 10, so they need a custom ROM with Android 11 or newer, and custom ROMs have no VoLTE: calls go over 2G/3G where the operator still runs them. The host builds Samsung's own digital call route (phone as call modem) on the phone itself. Not proven on a call yet: the call test decides.",
+      "about_tr": "Exynos 7870 ya da 7570 işlemcili eski Galaxy telefonlar (J7 Prime, J7 Pro, J7 Nxt, J6, J4, A6, M10…). Samsung'un güncellemeleri Android 10'da bitiyor; bu yüzden Android 11 veya daha yeni bir özel ROM gerekir ve özel ROM'larda VoLTE yok: aramalar, operatör hâlâ sunuyorsa 2G/3G üzerinden yapılır. Ana cihaz, Samsung'un kendi dijital arama yolunu (telefonu arama modemi olarak kullanma) telefonun üzerinde kendisi kurar. Henüz bir aramada kanıtlanmadı: arama testi karar verir.",
+      "research": "tools/corpus/research/exynos-audmixer.md"
     },
     "qcom-agm": {
       "name": "Qualcomm (new audio, 2022+)",

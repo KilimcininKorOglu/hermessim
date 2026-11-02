@@ -117,10 +117,14 @@ object Compat {
     /**
      * The table's verdict corrected by what the host found on this phone: a call-audio profile that fits its own card
      * (Daemon) is what "expected" means, whatever the table guessed from the model or the chip; the call test still
-     * decides. Reports keep the table's tier (with the profile's source next to it).
+     * decides. A route no phone has proven on a call yet (the profile says "experimental": Samsung's pre-ABOX Exynos)
+     * stays experimental. Reports keep the table's tier (with the profile's source next to it).
      */
-    fun onThisPhone(v: Verdict, profile: Profile?): Verdict =
-        if (profile != null && v.tier in setOf(Tier.EXPERIMENTAL, Tier.NOT_YET, Tier.UNKNOWN)) v.copy(tier = Tier.EXPECTED) else v
+    fun onThisPhone(v: Verdict, profile: Profile?): Verdict = when {
+        profile == null || v.tier !in setOf(Tier.EXPERIMENTAL, Tier.NOT_YET, Tier.UNKNOWN) -> v
+        profile.json.optBoolean("experimental") -> v.copy(tier = Tier.EXPERIMENTAL)
+        else -> v.copy(tier = Tier.EXPECTED)
+    }
 
     /** "note" / "reason" in the phone's language: support.json carries a Turkish "<key>_tr". */
     private fun local(o: JSONObject, key: String): String =

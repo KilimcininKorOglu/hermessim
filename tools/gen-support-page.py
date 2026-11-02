@@ -73,25 +73,25 @@ a { color:var(--accent); }
 const DATA = __DATA__;
 const T = {
   en: { title: "Which phones work with TosbiSim?",
-    lead: "TosbiSim turns a spare rooted Android phone into a SIM box for your iPhone. Every phone runs a short call test before call audio turns on; texts, call control and the hotspot work in Basic mode on most rootable Android 11+ phones.",
+    lead: "TosbiSim turns a spare rooted Android phone into a SIM box for your iPhone or Android phone. Every phone runs a short call test before call audio turns on; texts, call control and the hotspot work in Basic mode on most rootable Android 11+ phones.",
     search: "Search a model, e.g. A52 or Redmi Note 10",
     tiers: { verified: "Verified", expected: "Expected to work", experimental: "Experimental", not_yet: "Not yet", unsupported: "Not supported", unknown: "Not researched yet" },
     legend: { verified: "Measured by us on a live call.", expected: "Its own firmware matches a verified phone's audio family.",
               experimental: "Our audio family, not confirmed yet.", not_yet: "Audio family we can't drive yet: Basic mode only.",
               unsupported: "Can't be used as a host." },
-    familiesTitle: "Audio families", famYes: "supported", famNo: "not yet",
+    familiesTitle: "Audio families", famYes: "supported", famExp: "experimental", famNo: "not yet",
     corpus: n => `Search for your phone: over 45,000 models are listed with their state, ${n} of them checked against their firmware.`,
     oldAndroid: v => `Checked on Android ${v} firmware: the host needs Android 11 or newer.`,
     rulesTitle: "Never supported", none: "Not in the list yet: Basic mode should work; Qualcomm and MediaTek phones can also try the call test.",
     footer: "Same table as the TosbiSim apps", updated: "updated" },
   tr: { title: "TosbiSim hangi telefonlarla çalışır?",
-    lead: "TosbiSim, root'lu yedek bir Android telefonu iPhone'unuz için bir SIM kutusuna dönüştürür. Her telefonda arama sesi kısa bir arama testinden sonra açılır; root'lanabilen çoğu Android 11+ telefonda mesajlar, arama yönetimi ve erişim noktası Temel modda çalışır.",
+    lead: "TosbiSim, root'lu yedek bir Android telefonu iPhone'unuz ya da Android telefonunuz için bir SIM kutusuna dönüştürür. Her telefonda arama sesi kısa bir arama testinden sonra açılır; root'lanabilen çoğu Android 11+ telefonda mesajlar, arama yönetimi ve erişim noktası Temel modda çalışır.",
     search: "Model arayın, ör. A52 veya Redmi Note 10",
     tiers: { verified: "Doğrulandı", expected: "Çalışması bekleniyor", experimental: "Deneysel", not_yet: "Henüz değil", unsupported: "Desteklenmiyor", unknown: "Henüz incelenmedi" },
     legend: { verified: "Canlı aramada bizim tarafımızdan ölçüldü.", expected: "Kendi yazılımı doğrulanmış bir telefonun ses ailesiyle uyuşuyor.",
               experimental: "Bizim ses ailemiz, henüz doğrulanmadı.", not_yet: "Henüz yönetemediğimiz ses ailesi: yalnızca Temel mod.",
               unsupported: "Ana cihaz olarak kullanılamaz." },
-    familiesTitle: "Ses aileleri", famYes: "destekleniyor", famNo: "henüz değil",
+    familiesTitle: "Ses aileleri", famYes: "destekleniyor", famExp: "deneysel", famNo: "henüz değil",
     corpus: n => `Telefonunuzu arayın: 45.000'den fazla model durumuyla listeleniyor, ${n} tanesi yazılımına göre incelendi.`,
     oldAndroid: v => `Android ${v} yazılımında incelendi: ana cihaz için Android 11 veya daha yenisi gerekir.`,
     rulesTitle: "Hiçbir zaman desteklenmeyenler", none: "Henüz listede yok: Temel mod çalışmalı; Qualcomm ve MediaTek telefonlar arama testini de deneyebilir.",
@@ -163,8 +163,10 @@ function render() {
                         lang === "tr" ? (p.note_tr || p.note) : p.note);
   }
   if (!q) html += `<p class="empty">${t.corpus(DATA.phones.filter(p => p.source === "corpus").length)}</p>`;
+  // A family with a router no call has proven yet ("status": "experimental") isn't shown as supported
+  const famState = f => !f.router ? ["not_yet", t.famNo] : f.status === "experimental" ? ["experimental", t.famExp] : ["verified", t.famYes];
   html += `<h2>${t.familiesTitle}</h2>` + Object.values(fams).map(f => `<div class="phone"><div class="top"><span class="name">${esc(lang === "tr" ? (f.name_tr || f.name) : f.name)}</span>
-    <span class="badge" style="color:var(--${f.router ? "verified" : "not_yet"});border:1px solid var(--${f.router ? "verified" : "not_yet"})">${f.router ? t.famYes : t.famNo}</span></div>
+    <span class="badge" style="color:var(--${famState(f)[0]});border:1px solid var(--${famState(f)[0]})">${famState(f)[1]}</span></div>
     <div class="note">${esc(lang === "tr" ? (f.about_tr || f.about) : f.about)}</div></div>`).join("");
   $("#list").innerHTML = html || `<p class="empty">${t.none}</p>`;
   $("#rules").innerHTML = DATA.rules.map(r => `<li>${esc(lang === "tr" ? (r.reason_tr || r.reason) : r.reason)}</li>`).join("");

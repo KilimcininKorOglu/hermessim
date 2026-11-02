@@ -1,0 +1,134 @@
+1	AudioMixer RMIX1_LVL	int	1	0..7
+2	AudioMixer RMIX2_LVL	int	1	0..7
+3	AudioMixer MIX1_LVL	int	1	0..7
+4	AudioMixer MIX2_LVL	int	1	0..7
+5	AudioMixer MIX3_LVL	int	1	0..7
+6	AudioMixer MIX4_LVL	int	1	0..7
+7	AudioMixer ALC NG HYS	int	1	0..3
+8	AudioMixer ALC Max Gain	int	1	0..48
+9	AudioMixer ALC Min Gain	int	1	0..108
+10	AudioMixer ALC Start Gain Left	int	1	0..48
+11	AudioMixer ALC Start Gain Right	int	1	0..48
+12	AudioMixer ALC LVL Left	int	1	0..31
+13	AudioMixer ALC LVL Right	int	1	0..31
+14	AudioMixer ALC Noise Gate Threshold	int	1	0..31
+15	AudioMixer CH1 Master PCM Sample Rate	enum	1	8KHz|16KHz|24KHz|32KHz
+16	AudioMixer CH2 Master PCM Sample Rate	enum	1	8KHz|16KHz|24KHz|32KHz
+17	AudioMixer CH3 Master PCM Sample Rate	enum	1	8KHz|16KHz|24KHz|32KHz
+18	AudioMixer CH1 Master PCM Slot	enum	1	1 slot|2 slots|3 slots|4 slots
+19	AudioMixer CH2 Master PCM Slot	enum	1	1 slot|2 slots|3 slots|4 slots
+20	AudioMixer CH3 Master PCM Slot	enum	1	1 slot|2 slots|3 slots|4 slots
+21	AudioMixer CH1 BCLK Polarity	enum	1	Normal|Inverted
+22	AudioMixer CH2 BCLK Polarity	enum	1	Normal|Inverted
+23	AudioMixer CH3 BCLK Polarity	enum	1	Normal|Inverted
+24	AudioMixer CH1 LRCLK Polarity	enum	1	Normal|Inverted
+25	AudioMixer CH2 LRCLK Polarity	enum	1	Normal|Inverted
+26	AudioMixer CH3 LRCLK Polarity	enum	1	Normal|Inverted
+27	AudioMixer CH1 Input Audio Mode	enum	1	I2S|PCM
+28	AudioMixer CH2 Input Audio Mode	enum	1	I2S|PCM
+29	AudioMixer CH3 Input Audio Mode	enum	1	I2S|PCM
+30	AudioMixer CH1 XFS	enum	1	32fs|48fs|64fs|64fs
+31	AudioMixer CH2 XFS	enum	1	32fs|48fs|64fs|64fs
+32	AudioMixer CH3 XFS	enum	1	32fs|48fs|64fs|64fs
+33	AudioMixer CH1 I2S Format	enum	1	I2S|Left-Justified|Right-Justified|Invalid
+34	AudioMixer CH2 I2S Format	enum	1	I2S|Left-Justified|Right-Justified|Invalid
+35	AudioMixer CH3 I2S Format	enum	1	I2S|Left-Justified|Right-Justified|Invalid
+36	AudioMixer CH1 I2S Data Length	enum	1	16-bit|18-bit|20-bit|24-bit
+37	AudioMixer CH2 I2S Data Length	enum	1	16-bit|18-bit|20-bit|24-bit
+38	AudioMixer CH3 I2S Data Length	enum	1	16-bit|18-bit|20-bit|24-bit
+39	AudioMixer CH1 PCM DAD	enum	1	1 bck|0 bck|2 bck||3 bck||4 bck|
+40	AudioMixer CH2 PCM DAD	enum	1	1 bck|0 bck|2 bck||3 bck||4 bck|
+41	AudioMixer CH3 PCM DAD	enum	1	1 bck|0 bck|2 bck||3 bck||4 bck|
+42	AudioMixer CH1 PCM Data Format	enum	1	||||Short Frame||||||||Long Frame
+43	AudioMixer CH2 PCM Data Format	enum	1	||||Short Frame||||||||Long Frame
+44	AudioMixer CH3 PCM Data Format	enum	1	||||Short Frame||||||||Long Frame
+45	AudioMixer CH3 Rec En	enum	1	Off|On
+46	AudioMixer MCKO En	enum	1	Off|On
+47	AudioMixer RMIX1 En	enum	1	Off|On
+48	AudioMixer RMIX2 En	enum	1	Off|On
+49	AudioMixer BCK4 Output Selection	enum	1	Normal BCK|MCKO
+50	AudioMixer HQ En	enum	1	Off|On
+51	AudioMixer CH1 DOUT Select	enum	1	DMIX_OUT|AIF4IN|RMIX_OUT
+52	AudioMixer CH2 DOUT Select	enum	1	DMIX_OUT|AIF4IN|AIF3IN
+53	AudioMixer CH3 DOUT Select	enum	1	DMIX_OUT|AIF4IN|AIF2IN
+54	AudioMixer CH1 Mixer En	enum	1	Off|On
+55	AudioMixer CH2 Mixer En	enum	1	Off|On
+56	AudioMixer CH3 Mixer En	enum	1	Off|On
+57	AudioMixer CH4 Mixer En	enum	1	Off|On
+58	AudioMixer Mixer En	enum	1	Off|On
+59	AudioMixer AP0 En	enum	1	Off|On
+60	AudioMixer AP1 En	enum	1	Off|On
+61	AudioMixer CP1 En	enum	1	Off|On
+62	AudioMixer SRC2 En	enum	1	Off|On
+63	AudioMixer SRC3 En	enum	1	Off|On
+64	AudioMixer ALC Window Length	enum	1	fs600|fs1200|fs2400|fs300
+65	AudioMixer ALC Mode	enum	1	Stereo|Right|Left|Independent
+66	AudioMixer ALC En	enum	1	Off|On
+67	AudioMixer ALC Limiter Mode En	enum	1	Off|On
+68	AudioMixer ALC Start Gain En	enum	1	Off|On
+69	AudioMixer ALC Hold Time	int	1	0..31
+70	AudioMixer ALC Attack Time	int	1	0..31
+71	AudioMixer ALC Decay Time	int	1	0..31
+72	AudioMixer ALC Path	enum	1	ADC|Mixer
+73	AudioMixer ALC Noise Gate En	enum	1	Off|On
+74	MIC1 Boost Volume	int	1	0..3
+75	MIC1 Volume	int	1	0..31
+76	MIC2 Boost Volume	int	1	0..3
+77	MIC2 Volume	int	1	0..31
+78	MIC3 Boost Volume	int	1	0..3
+79	MIC3 Volume	int	1	0..31
+80	Headphone Volume	int	2	0..63
+81	Earphone Volume	int	1	0..15
+82	Speaker Volume	int	1	0..15
+83	ADC Left Gain	int	1	0..151
+84	ADC Right Gain	int	1	0..151
+85	DAC Gain	int	2	0..151
+86	DNC Min Gain	int	1	0..6
+87	DNC Max Gain	int	1	0..30
+88	DNC Level Left	int	1	0..7
+89	DNC Level Right	int	1	0..7
+90	DNC ZCD Timeout	int	1	0..127
+91	DNC ZCD Enable	enum	1	Off|On
+92	MonoMix Mode	enum	1	Disable|R|L|LR-Invert|(L+R)/2|L+R
+93	Chargepump Mode	enum	1	VDD|HALF-VDD|CLASS-G-D|CLASS-G-A
+94	DAC Soft Mute	int	1	0..100
+95	SPK Mixer DACL Switch	bool	1	
+96	SPK Mixer DACR Switch	bool	1	
+97	SPK Mixer ADCL Switch	bool	1	
+98	SPK Mixer ADCR Switch	bool	1	
+99	EP Mixer DACL Switch	bool	1	
+100	EP Mixer DACR Switch	bool	1	
+101	EP Mixer ADCL Switch	bool	1	
+102	EP Mixer ADCR Switch	bool	1	
+103	HPR Mixer DACL Switch	bool	1	
+104	HPR Mixer DACR Switch	bool	1	
+105	HPR Mixer ADCL Switch	bool	1	
+106	HPR Mixer ADCR Switch	bool	1	
+107	HPL Mixer DACL Switch	bool	1	
+108	HPL Mixer DACR Switch	bool	1	
+109	HPL Mixer ADCL Switch	bool	1	
+110	HPL Mixer ADCR Switch	bool	1	
+111	ADCR Mixer MIC1R Switch	bool	1	
+112	ADCR Mixer MIC2R Switch	bool	1	
+113	ADCR Mixer MIC3R Switch	bool	1	
+114	ADCR Mixer LINELR Switch	bool	1	
+115	ADCR Mixer LINERR Switch	bool	1	
+116	ADCR Mixer MIC1R Bypass	bool	1	
+117	ADCR Mixer MIC2R Bypass	bool	1	
+118	ADCR Mixer MIC3R Bypass	bool	1	
+119	ADCL Mixer MIC1L Switch	bool	1	
+120	ADCL Mixer MIC2L Switch	bool	1	
+121	ADCL Mixer MIC3L Switch	bool	1	
+122	ADCL Mixer LINELL Switch	bool	1	
+123	ADCL Mixer LINERL Switch	bool	1	
+124	ADCL Mixer MIC1L Bypass	bool	1	
+125	ADCL Mixer MIC2L Bypass	bool	1	
+126	ADCL Mixer MIC3L Bypass	bool	1	
+127	FM Link	enum	1	None|FM On
+128	LINEIN LINEIN On	bool	1	
+129	MIC3 MIC3 On	bool	1	
+130	MIC2 MIC2 On	bool	1	
+131	MIC1 MIC1 On	bool	1	
+132	EP EP On	bool	1	
+133	HP HP On	bool	1	
+134	SPK SPK On	bool	1	

@@ -181,22 +181,35 @@ object VendorAudio {
 object AutoProfile {
     private const val TAG = "SimRelayHost"
 
-    fun build(has: (String) -> Boolean): Profile? = runCatching {
+    /** Why the last [build] found nothing (or what it built), for the auto_profile report; empty when no builder said. */
+    @Volatile var why = ""; private set
+
+    /** [ask]: simrelayd's reply to "HAS <control>" (null when the daemon didn't answer). */
+    fun build(ask: (String) -> String?): Profile? = runCatching {
+        why = ""
+        val has = { n: String -> ask(n)?.startsWith("OK") == true }
         val files = VendorAudio.files()
         files.firstOrNull { it.name == "audio_device.xml" }?.let { return@runCatching MtkAutoProfile.build(it.readText(), has) }
+        // Samsung's pre-ABOX Exynos (custom ROMs only): known by its kernel controls, whatever the ROM's audio files say
+        val (samsung, said) = SamsungMixerAutoProfile.build(Build.DEVICE, ask, AsoundPcm::byName)
+        if (said.isNotEmpty()) {
+            why = said
+            Log.i(TAG, "auto profile: $said")
+            return@runCatching samsung
+        }
         val pcmIds = VendorAudio.incallMusicPcmIds(files)
         val mixers = VendorAudio.mixers(files)
-        val inj1 = VendorAudio.incallRoute(mixers, false) ?: run { Log.i(TAG, "auto profile: no incall music control in the vendor paths"); return null }
+        val inj1 = VendorAudio.incallRoute(mixers, false) ?: run { why = "no incall music control in the vendor paths"; Log.i(TAG, "auto profile: $why"); return null }
         // The PCM: the platform-info id when the vendor lists one, else by name. The route names its front end
         // ("Incall_Music Audio Mixer MultiMedia9" -> PCM "MultiMedia9"): 9 of 29 legacy phones in the AndroidDumps
         // corpus list no id (the HAL then uses its built-in default), 19 Oct.
         val fe = Regex("""Audio Mixer (MultiMedia\d+)""").find(inj1)?.groupValues?.get(1)
         val pcm = pcmIds.singleOrNull() ?: fe?.let { AsoundPcm.byName()[it] }
-            ?: run { Log.i(TAG, "auto profile: incall music PCM ids $pcmIds, front end $fe not found by name"); return null }
+            ?: run { why = "incall music PCM ids $pcmIds, front end $fe not found by name"; Log.i(TAG, "auto profile: $why"); return null }
         val inj2 = VendorAudio.incallRoute(mixers, true) ?: inj1.replace("Incall_Music ", "Incall_Music_2 ")
         val names = listOf("MultiMedia1 Mixer VOC_REC_DL", inj1, inj2, "Voice Tx Device Mute", "Voice Rx Device Mute")
         val missing = names.filterNot(has)
-        if (missing.isNotEmpty()) { Log.i(TAG, "auto profile: missing controls $missing"); return null }
+        if (missing.isNotEmpty()) { why = "missing controls $missing"; Log.i(TAG, "auto profile: $why"); return null }
         // The record channel count (1 = mono, 2 = DL+UL): only newer msm-pcm-voice kernels have it; older ones
         // (msm8953, sdm660, msm8996, sdm710: 14 of 34 sampled kernels, tools/corpus/out/kernels.md) always record mono.
         val recConfig = "Voc Rec Config".takeIf(has).orEmpty()

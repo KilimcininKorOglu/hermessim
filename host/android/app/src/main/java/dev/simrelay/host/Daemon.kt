@@ -94,7 +94,7 @@ object Daemon {
     /** Build the automatic profile now (debug: on a phone that has a shipped one too) and log it. */
     fun tryAutoProfile(done: (Profile?) -> Unit) = exec.execute {
         connect()
-        val p = AutoProfile.build { n -> runCatching { send("HAS $n") }.getOrNull()?.startsWith("OK") == true }
+        val p = AutoProfile.build { n -> runCatching { send("HAS $n") }.getOrNull() }
         main.post { done(p) }
     }
 
@@ -174,11 +174,11 @@ object Daemon {
             // No shipped profile (or none that fits): try one from the phone's own audio files once (the call test still decides).
             if (profile == null && !autoTried) {
                 autoTried = true
-                profile = AutoProfile.build { n -> send("HAS $n")?.startsWith("OK") == true }
+                profile = AutoProfile.build { n -> send("HAS $n") }
                 Log.i(TAG, "profile: ${profile?.let { "${it.id} (auto)" } ?: "none, Basic mode"}")
                 // What the auto profile found (or why not) is the one thing we can't learn from firmware dumps
                 Diag.event("auto_profile", org.json.JSONObject().put("what", if (profile != null) "built" else "none")
-                    .put("profile", profile?.json ?: org.json.JSONObject.NULL).put("audio", Discovery.audio()))
+                    .put("profile", profile?.json ?: org.json.JSONObject.NULL).put("why", AutoProfile.why).put("audio", Discovery.audio()))
             }
             profile?.daemonSetLines()?.forEach { send(it) }
             if (Box.blocksPowerKey) send("POWERKEY 1")      // a restarted daemon has let go of the power key
