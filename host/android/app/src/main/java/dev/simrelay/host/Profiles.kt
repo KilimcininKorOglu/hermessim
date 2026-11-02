@@ -149,8 +149,21 @@ object Profiles {
  */
 object VendorAudio {
     private val DIRS = listOf("/vendor/etc", "/odm/etc", "/vendor/etc/audio")
+    private val SKU_PARENTS = listOf("/vendor/etc/audio", "/odm/etc/audio")
 
-    fun files(): List<java.io.File> = DIRS.flatMap { d -> java.io.File(d).listFiles().orEmpty().toList() }
+    /**
+     * Qualcomm's per-SKU folders, which the HAL reads first on newer builds (Xiaomi 11T Pro, Android 13: mixer_paths
+     * and audio_platform_info only in /vendor/etc/audio/sku_lahaina; 2 Nov 2026). This chip's only: one vendor image
+     * carries several SoCs' (sku_lahaina, sku_shima, sku_yupik).
+     */
+    fun skuDirs(): List<java.io.File> {
+        val plat = Compat.prop("ro.board.platform").lowercase()
+        if (plat.isEmpty()) return emptyList()
+        return SKU_PARENTS.flatMap { d -> java.io.File(d).listFiles().orEmpty().filter { it.isDirectory && (it.name == "sku_$plat" || it.name.startsWith("sku_${plat}_")) } }
+    }
+
+    /** This chip's SKU folder first (what the HAL uses), then the classic places. */
+    fun files(): List<java.io.File> = (skuDirs() + DIRS.map { java.io.File(it) }).flatMap { d -> d.listFiles().orEmpty().filter { it.isFile } }
     private fun text(f: java.io.File) = runCatching { f.readText() }.getOrDefault("")
     fun platformInfos(files: List<java.io.File>) = files.filter { it.name.startsWith("audio_platform_info") && it.name.endsWith(".xml") }
     fun mixers(files: List<java.io.File>) = files.filter { it.name.startsWith("mixer_paths") && it.name.endsWith(".xml") }.map(::text)
@@ -259,6 +272,10 @@ object Discovery {
                 .findAll(t).map { it.groupValues[1] }.distinct().toList()))
         }
         o.put("vendor_files", org.json.JSONArray(files.map { it.name }.filter { it.startsWith("mixer_paths") || it.startsWith("audio_") }.sorted()))
+        // Where the audio files are, when they aren't in the usual places (folders only; e.g. sku_lahaina)
+        o.put("vendor_audio_dirs", org.json.JSONArray(listOf("/vendor/etc/audio", "/odm/etc/audio").flatMap { d ->
+            java.io.File(d).listFiles().orEmpty().filter { it.isDirectory }.map { "${it.parentFile?.path}/${it.name}" } }.sorted()))
+        o.put("sku_dirs", org.json.JSONArray(VendorAudio.skuDirs().map { it.path }))
         o.put("incall_music_prop", Compat.prop("vendor.audio.feature.incall_music.enable"))
         o.put("board_platform", Compat.prop("ro.board.platform"))
         o.put("sound_cards", runCatching { java.io.File("/proc/asound/cards").readText().trim() }.getOrDefault(""))

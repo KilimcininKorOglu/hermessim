@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.21",
+    "code": 57,
+    "en": "Newer Qualcomm phones that keep their audio files in a per-chip folder (e.g. Xiaomi 11T Pro on Android 13) can now take the call test.",
+    "tr": "Ses dosyalarını işlemciye özel bir klasörde tutan yeni Qualcomm telefonlar (ör. Android 13'teki Xiaomi 11T Pro) artık arama testini yapabiliyor."
+  },
+  {
     "version": "0.12.20",
     "code": 56,
     "en": "After an update, older Galaxy phones with an Exynos 7870 or 7570 chip offer the call test right away, without a restart.",
