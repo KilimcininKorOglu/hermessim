@@ -98,8 +98,12 @@ object Daemon {
         main.post { done(p) }
     }
 
-    /** The daemon (re)started: reconnect now so silence controls and the charge limit are re-applied. */
-    fun reconnect() = exec.execute { if (started) { close(); request("STATUS") } }
+    /**
+     * The daemon (re)started: reconnect now so silence controls and the charge limit are re-applied. Without a profile,
+     * the new daemon gets its own auto profile try: after an app update the first try met the old build, whose HAS
+     * didn't list an enum's options yet (2 Nov 2026), and the route stayed off until the next reboot.
+     */
+    fun reconnect() = exec.execute { if (started) { if (profile == null) autoTried = false; close(); request("STATUS") } }
 
     fun screenOff() = exec.execute { request("SCREEN_OFF") }
     fun powerKey(block: Boolean) = exec.execute { request("POWERKEY ${if (block) 1 else 0}") }
@@ -176,6 +180,7 @@ object Daemon {
                 autoTried = true
                 profile = AutoProfile.build { n -> send("HAS $n") }
                 Log.i(TAG, "profile: ${profile?.let { "${it.id} (auto)" } ?: "none, Basic mode"}")
+                if (profile != null) Relay.voiceChanged()          // the phone's Host tab offers the call test now
                 // What the auto profile found (or why not) is the one thing we can't learn from firmware dumps
                 Diag.event("auto_profile", org.json.JSONObject().put("what", if (profile != null) "built" else "none")
                     .put("profile", profile?.json ?: org.json.JSONObject.NULL).put("why", AutoProfile.why).put("audio", Discovery.audio()))

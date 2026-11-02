@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.20",
+    "code": 56,
+    "en": "After an update, older Galaxy phones with an Exynos 7870 or 7570 chip offer the call test right away, without a restart.",
+    "tr": "Exynos 7870 ya da 7570 işlemcili eski Galaxy telefonlar, güncellemeden sonra yeniden başlatmaya gerek kalmadan arama testini hemen sunuyor."
+  },
+  {
     "version": "0.12.19",
     "code": 55,
     "en": "Older Galaxy phones with an Exynos 7870 or 7570 chip (J7 Prime, J7 Pro, J6, J4, A6, M10…) running a custom ROM can now try the call test for full voice. It is experimental: no one has passed it on these phones yet.",

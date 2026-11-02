@@ -56,10 +56,12 @@ object SamsungMixerAutoProfile {
      */
     fun build(device: String, ask: (String) -> String?, pcms: () -> Map<String, Int>): Pair<Profile?, String> {
         fun reply(n: String) = ask(n)?.takeIf { it.startsWith("OK") }
-        if (reply(MARKER) == null) return null to ""
+        val marker = reply(MARKER) ?: return null to ""
         ABOX.firstOrNull { reply(it) != null }?.let { return null to "Samsung AudioMixer: an ABOX control ($it) too" }
         fun count(r: String) = Regex("\\bcount=(\\d+)").find(r)?.groupValues?.get(1)?.toIntOrNull() ?: 0
         fun items(r: String) = r.substringAfter(" items=", "").takeIf { it.isNotEmpty() }?.split('|').orEmpty()
+        // A daemon from before 0.12.19 answers HAS without the options: the new one, swapped in after an app update, will
+        if (items(marker).isEmpty()) return null to "Samsung AudioMixer: simrelayd lists no options (an older build)"
 
         val controls = JSONObject()
         val outputs = OUTPUTS.filter { n -> reply(n)?.let { count(it) == 1 && items(it).isEmpty() } == true }

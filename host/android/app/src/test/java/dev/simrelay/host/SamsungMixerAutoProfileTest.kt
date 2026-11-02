@@ -76,6 +76,14 @@ class SamsungMixerAutoProfileTest {
         assertTrue(build(noRecordMix).second, build(noRecordMix).first == null && "RMIX_OUT" in build(noRecordMix).second)
     }
 
+    @Test fun anOlderDaemonIsNamedNotGuessedAround() {
+        // simrelayd before 0.12.19 answered "OK count=1" only: the host retries once the new build is swapped in
+        val old: (String) -> String? = { n -> card(j7)(n)?.substringBefore(" items=") }
+        val (p, why) = SamsungMixerAutoProfile.build("on7xelte", old, { j7Pcms })
+        assertNull(p)
+        assertTrue(why, "older build" in why)
+    }
+
     @Test fun anUnprovenRouteStaysExperimental() {
         fun v(t: Compat.Tier) = Compat.Verdict(t, "phone", "")
         val p = build().first

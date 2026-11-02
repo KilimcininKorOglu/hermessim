@@ -164,6 +164,9 @@ object Relay {
 
     /** Remote link up/down: the client's Host tab shows it. */
     fun remoteChanged() = main.post(pushStatus)
+    /** A call-audio profile appeared (built after a daemon restart): the client can offer the call test. Before
+     *  [start] there is no one to tell: the Hello's status carries it. */
+    fun voiceChanged() { if (started()) main.post(pushStatus) }
     fun pairingOpen(): Boolean = SystemClock.elapsedRealtime() < pairingUntil
     fun pairingSecondsLeft(): Int = ((pairingUntil - SystemClock.elapsedRealtime()) / 1000).coerceAtLeast(0).toInt()
 
