@@ -5,7 +5,7 @@
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
-# --publish: hosts get it over the air (api.hermessim.com). --github: the source to the public repo (publish-public.sh),
+# --publish: hosts get it over the air from hermessim.keremgok.tr. --github: the source to the public repo (publish-public.sh),
 # then a GitHub release there with the Magisk zip, the file users download (hermessim.com links to
 # releases/latest/download/HermesSIM-Host-Magisk.zip).
 PUBLISH=0; GITHUB=0
@@ -14,7 +14,7 @@ STAGE=""; GHSTAGE=""
 trap 'rm -rf "$STAGE" "$GHSTAGE"' EXIT
 VER=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' "$HERE/android/app/build.gradle.kts")
 CODE=$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' "$HERE/android/app/build.gradle.kts")
-REPO=Mert-Eren-Karabulut/hermessim; TAG="host-v$VER"
+REPO=KilimcininKorOglu/hermessim; TAG="host-v$VER"
 
 # Every check before anything is built or published: a release that stops half-way must not have gone out half-way
 # (--publish used to push the OTA build before the GitHub check could refuse it; audit, 20 Oct 2026).
@@ -27,14 +27,16 @@ if [ "$PUBLISH" = 1 ] || [ "$GITHUB" = 1 ]; then
 fi
 COMMIT=$(git -C "$ROOT" rev-parse --short HEAD)
 if [ "$PUBLISH" = 1 ]; then
-  # The server's address and site path live outside this script, which is published in a public repo
+  # The release token lives outside this script, which is published in a public repo:
+  # ~/.hermessim/release.env sets HERMESSIM_RELEASE_TOKEN and optionally HERMESSIM_URL.
   ENV="$HOME/.hermessim/release.env"
-  [ -f "$ENV" ] || { echo "no $ENV (HERMESSIM_SRV=user@host, HERMESSIM_SITE=/path/to/api.hermessim.com)"; exit 1; }
+  [ -f "$ENV" ] || { echo "no $ENV (HERMESSIM_RELEASE_TOKEN=...)"; exit 1; }
   # shellcheck disable=SC1090
   . "$ENV"
-  [ -n "${HERMESSIM_SRV:-}" ] && [ -n "${HERMESSIM_SITE:-}" ] || { echo "$ENV must set HERMESSIM_SRV and HERMESSIM_SITE"; exit 1; }
-  ssh -o BatchMode=yes -o ConnectTimeout=10 "$HERMESSIM_SRV" "test -f '$HERMESSIM_SITE/artisan'" \
-    || { echo "$HERMESSIM_SRV: no $HERMESSIM_SITE/artisan (or no ssh)"; exit 1; }
+  [ -n "${HERMESSIM_RELEASE_TOKEN:-}" ] || { echo "$ENV must set HERMESSIM_RELEASE_TOKEN"; exit 1; }
+  HERMESSIM_URL="${HERMESSIM_URL:-https://hermessim.keremgok.tr}"
+  HERMESSIM_URL="${HERMESSIM_URL%/}"
+  command -v curl >/dev/null || { echo "no curl"; exit 1; }
 fi
 if [ "$GITHUB" = 1 ]; then
   command -v gh >/dev/null || { echo "no gh"; exit 1; }
@@ -113,11 +115,19 @@ PYN
   done
 fi
 
-# --publish: hand it to api.hermessim.com, where hosts pick it up (they ask the iPhone before installing).
+# --publish: hand it to hermessim.keremgok.tr, where hosts pick it up (they ask the phone before installing).
 if [ "$PUBLISH" = 1 ]; then
-  scp -q "$OUT" "$NOTES" "$HERMESSIM_SRV:/tmp/"
-  ssh "$HERMESSIM_SRV" "chown hermessim-api /tmp/$(basename "$OUT") /tmp/$(basename "$NOTES") && cd '$HERMESSIM_SITE' && sudo -u hermessim-api php8.4 artisan hermessim:release host '$VER' $CODE /tmp/$(basename "$NOTES") --apk=/tmp/$(basename "$OUT") && rm -f /tmp/$(basename "$OUT") /tmp/$(basename "$NOTES")"
-  echo "ota: $VER ($CODE) published"
+  NOTES_EN=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["en"])' "$NOTES")
+  NOTES_TR=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["tr"])' "$NOTES")
+  curl -fsS -X POST "$HERMESSIM_URL/api/v1/releases/publish" \
+    -H "Authorization: Bearer $HERMESSIM_RELEASE_TOKEN" \
+    --form-string "platform=host" \
+    --form-string "version=$VER" \
+    --form-string "code=$CODE" \
+    --form-string "notes_en=$NOTES_EN" \
+    --form-string "notes_tr=$NOTES_TR" \
+    -F "apk=@$OUT" >/dev/null
+  echo "ota: $VER ($CODE) published to $HERMESSIM_URL"
 fi
 
 # --github, second half: the checked draft goes public as the latest release.
