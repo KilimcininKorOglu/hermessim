@@ -1,4 +1,4 @@
-// simrelayd box mode helpers. Copyright (C) 2026 SIM Relay authors. GPL-3.0-or-later.
+// hermessimd box mode helpers. Copyright (C) 2026 SIM Relay authors. GPL-3.0-or-later.
 //
 // Root-only pieces of "box mode" (the host as a silent, screen-off box). Everything phone-specific is
 // probed, not hard-coded:
@@ -29,15 +29,15 @@
 
 #include "box.h"
 
-#define TAG "simrelayd"
+#define TAG "hermessimd"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
 
 extern char **environ;
 
 #define ESCAPE_WINDOW_NS 5000000000LL
-#define ESCAPE_ACTION "dev.simrelay.host.BOX_ESCAPE"
-#define ESCAPE_RECEIVER "dev.simrelay.host/.DaemonEventReceiver"
+#define ESCAPE_ACTION "com.keremgok.hermessim.host.BOX_ESCAPE"
+#define ESCAPE_RECEIVER "com.keremgok.hermessim.host/.DaemonEventReceiver"
 
 // Charge cap nodes, most specific first. Each takes a percentage.
 static const char *CAP_NODES[] = {
@@ -125,7 +125,7 @@ static const struct { const char *path; int stop; } CUT_NODES[] = {
     { "/sys/class/power_supply/battery/charging_enabled", 0 },          // 0 = don't charge
 };
 #define BATT_CAPACITY "/sys/class/power_supply/battery/capacity"
-#define LIMIT_DIR "/data/adb/tosbisim"
+#define LIMIT_DIR "/data/adb/hermessim"
 #define LIMIT_FILE LIMIT_DIR "/charge_limit"
 #define MIN_ON_BATTERY 15
 
@@ -287,7 +287,7 @@ void box_uevent(int fd) {
 // data" doesn't touch Play services' foreground-service processes, so: our own iptables/ip6tables chain matched on
 // the app's uid. Not persistent across reboot by design: box mode re-applies it at boot, and box-off removes it.
 
-#define NB_CHAIN "tosbisim_block"
+#define NB_CHAIN "hermessim_block"
 
 // The rules change runs as a detached script: iptables waits for the system's xtables lock (-w 5 per call, a dozen
 // calls), which inside the main loop could stall the socket, the keys and the escape gesture for up to a minute
@@ -457,8 +457,8 @@ static void broadcast(const char *action) {
 
 // Persistent log: logcat's ring buffer (5 MiB) rolls over within hours on a busy day, losing the host's side of
 // a trip (16 Oct 2026). logcat itself writes a rotated copy (2 MiB x 5) of our tags + call/voice/hotspot tags.
-#define LOG_FILE "/data/adb/tosbisim/logs/host.log"
-#define LOG_PIDF "/data/adb/tosbisim/logs/logcat.pid"
+#define LOG_FILE "/data/adb/hermessim/logs/host.log"
+#define LOG_PIDF "/data/adb/hermessim/logs/logcat.pid"
 
 // The capture's logcat (pid file; a pattern match would find itself), or 0 if it no longer runs.
 static int log_pid(void) {
@@ -485,7 +485,7 @@ static void log_spawn(const char *since) {
     const char *head[] = { "/system/bin/logcat", "-b", "main,system,crash", "-v", "time", "-f", LOG_FILE, "-r", "2048", "-n", "5" };
     for (size_t i = 0; i < sizeof(head) / sizeof(head[0]); i++) argv[a++] = (char *)head[i];
     if (since) { argv[a++] = "-T"; argv[a++] = (char *)since; }
-    const char *tags[] = { "-s", "SimRelayHost:I", "simrelayd:I", "voice:D", "Telecom:I", "SemWifiApTimeOutImpl:I", "Tethering:W",
+    const char *tags[] = { "-s", "HermesSimHost:I", "hermessimd:I", "voice:D", "Telecom:I", "SemWifiApTimeOutImpl:I", "Tethering:W",
         "AndroidRuntime:E" };
     for (size_t i = 0; i < sizeof(tags) / sizeof(tags[0]); i++) argv[a++] = (char *)tags[i];
     argv[a] = NULL;
@@ -498,8 +498,8 @@ static void log_spawn(const char *since) {
 }
 
 void box_log_capture(void) {
-    mkdir("/data/adb/tosbisim", 0700);
-    mkdir("/data/adb/tosbisim/logs", 0700);
+    mkdir("/data/adb/hermessim", 0700);
+    mkdir("/data/adb/hermessim/logs", 0700);
     log_stop();
     log_spawn(NULL);
 }
@@ -543,7 +543,7 @@ void box_log_watch(void) {
     log_spawn(since[0] ? since : NULL);
 }
 
-void box_announce(void) { broadcast("dev.simrelay.host.DAEMON_UP"); }
+void box_announce(void) { broadcast("com.keremgok.hermessim.host.DAEMON_UP"); }
 
 static void escape(void) {
     box_power_block(0);                  // the person at the phone gets their buttons back at once

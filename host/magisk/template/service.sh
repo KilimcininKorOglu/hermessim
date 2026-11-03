@@ -1,27 +1,27 @@
 #!/system/bin/sh
-# SIM Relay host — late_start service (root, magisk context). GPL-3.0-or-later.
+# HermesSIM host — late_start service (root, magisk context). GPL-3.0-or-later.
 MODDIR=${0%/*}
-PKG=dev.simrelay.host
-LOG=/data/local/tmp/simrelay-service.log
+PKG=com.keremgok.hermessim.host
+LOG=/data/local/tmp/hermessim-service.log
 until [ "$(getprop sys.boot_completed)" = 1 ]; do sleep 2; done
 [ "$(stat -c %s "$LOG" 2>/dev/null || echo 0)" -gt 1000000 ] && mv -f "$LOG" "$LOG.1"     # one generation kept
 {
   echo "$(date) service.sh start (module $(grep ^version= "$MODDIR/module.prop"))"
 
   # Our logs must show: MediaTek ROMs set log.tag=M, which hides app logs (Redmi Note 8 Pro, 18 Oct).
-  setprop log.tag.SimRelayHost I; setprop log.tag.simrelayd I
+  setprop log.tag.HermesSimHost I; setprop log.tag.hermessimd I
 
-  # What the phone had before TosbiSim changed anything, once: the host app's "Stop using this phone as a host" puts it
-  # back. A phone that already ran this script has only TosbiSim's values left, so it records none (Android's defaults
+  # What the phone had before HermesSIM changed anything, once: the host app's "Stop using this phone as a host" puts it
+  # back. A phone that already ran this script has only HermesSIM's values left, so it records none (Android's defaults
   # are used then).
-  ORIG=/data/adb/tosbisim/original-settings.txt
+  ORIG=/data/adb/hermessim/original-settings.txt
   if [ ! -e "$ORIG" ]; then
-    # TosbiSim ran here before: its folder (the daemon makes it) or earlier runs of this script in the log
-    if [ -e /data/adb/tosbisim ] || [ -e "$LOG.1" ] || [ "$(grep -c 'service.sh start' "$LOG" 2>/dev/null)" -gt 1 ]; then
-      mkdir -p /data/adb/tosbisim
+    # HermesSIM ran here before: its folder (the daemon makes it) or earlier runs of this script in the log
+    if [ -e /data/adb/hermessim ] || [ -e "$LOG.1" ] || [ "$(grep -c 'service.sh start' "$LOG" 2>/dev/null)" -gt 1 ]; then
+      mkdir -p /data/adb/hermessim
       echo "# set up before snapshots: defaults" > "$ORIG"
     else
-      mkdir -p /data/adb/tosbisim
+      mkdir -p /data/adb/hermessim
       for k in system/vibrate_when_ringing system/haptic_feedback_enabled system/sound_effects_enabled \
                system/lockscreen_sounds_enabled system/dtmf_tone system/call_end_tone system/call_conn_tone \
                system/volume_waiting_tone global/zen_mode secure/sms_default_application secure/dialer_default_application \
@@ -59,11 +59,11 @@ until [ "$(getprop sys.boot_completed)" = 1 ]; do sleep 2; done
   [ "$SDK" -ge 31 ] && for p in BLUETOOTH_ADVERTISE BLUETOOTH_CONNECT; do pm grant $PKG android.permission.$p; done
   [ "$SDK" -ge 33 ] && pm grant $PKG android.permission.POST_NOTIFICATIONS
   # Default SMS app (SMS arrive via SMS_DELIVER to us): the app claims and guards the role itself (Relay
-  # guardSmsRole, through simrelayd's time-limited ROLE), once the role service is up.
+  # guardSmsRole, through hermessimd's time-limited ROLE), once the role service is up.
   dumpsys deviceidle whitelist +$PKG
   appops set $PKG WRITE_SETTINGS allow                 # box mode: AOD / wake-gesture keys live in Settings.System
 
-  # simrelayd: only the host app's uid (and root) may talk to it; restart if it ever exits.
+  # hermessimd: only the host app's uid (and root) may talk to it; restart if it ever exits.
   # (not /data/data/$PKG: that folder only appears after the app first runs)
   # Digits only, or nothing: an empty --uid became uid 0 in the daemon (audit, 20 Oct 2026).
   app_uid() {
@@ -101,26 +101,26 @@ until [ "$(getprop sys.boot_completed)" = 1 ]; do sleep 2; done
       uid=$new
       t0=$(date +%s)
       SAFE=""; [ $fails -ge 5 ] && SAFE=--safe
-      if [ -n "$uid" ]; then "$MODDIR/simrelayd" --uid "$uid" $SAFE; else "$MODDIR/simrelayd" $SAFE; fi; rc=$?
+      if [ -n "$uid" ]; then "$MODDIR/hermessimd" --uid "$uid" $SAFE; else "$MODDIR/hermessimd" $SAFE; fi; rc=$?
       # 10: a restart for an update (SIGUSR1). The old daemon left the charge cut held for the new one; not a failure.
       if [ $rc -eq 10 ]; then
         fails=0; delay=2
-        echo "$(date) simrelayd restarting for an update"
+        echo "$(date) hermessimd restarting for an update"
         sleep 1
         continue
       fi
       release_charge
       if [ $(( $(date +%s) - t0 )) -lt 30 ]; then fails=$((fails + 1)); else fails=0; delay=2; fi
-      if [ $fails -eq 3 ] && [ -x "$MODDIR/simrelayd.prev" ] && ! cmp -s "$MODDIR/simrelayd.prev" "$MODDIR/simrelayd"; then
+      if [ $fails -eq 3 ] && [ -x "$MODDIR/hermessimd.prev" ] && ! cmp -s "$MODDIR/hermessimd.prev" "$MODDIR/hermessimd"; then
         # The rejected build's sha256, for the app's updater: it must not install that build again
-        bad=$(sha256sum "$MODDIR/simrelayd" 2>/dev/null | cut -d' ' -f1)
-        cp "$MODDIR/simrelayd.prev" "$MODDIR/simrelayd.tmp" && chmod 755 "$MODDIR/simrelayd.tmp" && mv -f "$MODDIR/simrelayd.tmp" "$MODDIR/simrelayd" \
-          && echo "$(date) simrelayd keeps failing: back to the previous build (rejected $bad)" \
-          && [ -n "$bad" ] && mkdir -p /data/adb/tosbisim \
-          && echo "$bad" > /data/adb/tosbisim/daemon-rolled-back.tmp && mv -f /data/adb/tosbisim/daemon-rolled-back.tmp /data/adb/tosbisim/daemon-rolled-back
+        bad=$(sha256sum "$MODDIR/hermessimd" 2>/dev/null | cut -d' ' -f1)
+        cp "$MODDIR/hermessimd.prev" "$MODDIR/hermessimd.tmp" && chmod 755 "$MODDIR/hermessimd.tmp" && mv -f "$MODDIR/hermessimd.tmp" "$MODDIR/hermessimd" \
+          && echo "$(date) hermessimd keeps failing: back to the previous build (rejected $bad)" \
+          && [ -n "$bad" ] && mkdir -p /data/adb/hermessim \
+          && echo "$bad" > /data/adb/hermessim/daemon-rolled-back.tmp && mv -f /data/adb/hermessim/daemon-rolled-back.tmp /data/adb/hermessim/daemon-rolled-back
       fi
       [ $fails -gt 1 ] && delay=$(( delay * 2 > 60 ? 60 : delay * 2 ))
-      echo "$(date) simrelayd exited $rc (quick failures: $fails), restarting in $delay s"
+      echo "$(date) hermessimd exited $rc (quick failures: $fails), restarting in $delay s"
       sleep $delay
     done ) &
   # Start the host app ourselves, and keep it running: some OEMs (MIUI) block boot broadcasts to apps without their own

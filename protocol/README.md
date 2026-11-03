@@ -1,7 +1,7 @@
-# SIM Relay protocol v1 (MIT)
+# HermesSIM protocol v1 (MIT)
 
 Shared by the host (`sim-relay`, GPL-3.0) and the client (`sim-relay-client`, proprietary).
-Schema: `simrelay.proto`. Lessons it encodes come from the M1 spike (`spikes/m1/RESULTS.md`).
+Schema: `hermessim.proto`. Lessons it encodes come from the M1 spike (`spikes/m1/RESULTS.md`).
 
 ## Transport
 Host = BLE peripheral (advertises the service UUID), client = central.
@@ -41,7 +41,7 @@ notifications or writes (MTU is typically 185-517 on iOS, 517 on Android). Reset
 Used when Bluetooth is out of range and the user switched Remote mode on. Bluetooth always wins when both are up.
 
 **Key.** The client makes 32 random bytes `K` and sends `RemoteSetup{enabled, key}` **over Bluetooth only** (the host
-ignores it on the internet path). Derived keys, all HKDF-SHA256 with salt `"tosbisim-remote-v1"`, 32 bytes:
+ignores it on the internet path). Derived keys, all HKDF-SHA256 with salt `"hermessim-remote-v1"`, 32 bytes:
 
 | info | use |
 | --- | --- |
@@ -58,7 +58,7 @@ Android: a wire name from before the Android app). An envelope travels as client
 120 s or whose nonce they have already seen. The session rules are the same as over Bluetooth (Hello first; the
 host serves only the pinned install_id).
 
-**Audio.** Each side takes a TURN allocation on the TosbiSim relay (`POST /api/v1/turn {install_id}` gives short-lived
+**Audio.** Each side takes a TURN allocation on the HermesSIM relay (`POST /api/v1/turn {install_id}` gives short-lived
 REST credentials), the client offers its relay address in `RemoteAudio`, the host answers with its own, and each side
 ChannelBinds (channel 0x4000) the other's relay address. One UDP datagram carries one audio packet:
 `nonce12 || ChaCha20-Poly1305(audio key, nonce, [u16 seq LE][u8 flags][opus])`, AAD `"h2c"` / `"c2h"`, the same
@@ -68,7 +68,7 @@ channels re-bound every 4 minutes while a call lasts; `RemoteAudio{close}` or th
 ## Push
 
 When the client can't hear the host (its system closed the app, or it is away from Bluetooth), the host has
-api.tosbisim.com push a sealed envelope: through APNs to an iPhone, through Firebase Cloud Messaging to an Android phone
+hermessim.keremgok.tr push a sealed envelope: through APNs to an iPhone, through Firebase Cloud Messaging to an Android phone
 (the server picks by what the room registered; the host sends the same request either way). Push has its own key `P`: the client makes 32 random bytes and sends
 `PushSetup{key}` over Bluetooth only whenever the host's `HostStatus.push_key_id` (first 8 bytes of sha256(P)) isn't
 its own; Internet mode can be off. A host that never reports `push_key_id` (older than 0.12.10) uses remote mode's
@@ -94,7 +94,7 @@ An Android app the user force-stopped gets no push until it is opened again (And
 `GET /api/v1/releases/host?since=<versionCode>` lists the host releases newer than `since` (newest first: version,
 code, notes `{en, tr}`, apk `{url, sha256, size}`); `/releases/ios` the same for the iPhone app (no file; `store_url`
 once it is in the App Store) and `/releases/android` for the Android app (with its APK, which the app installs itself;
-tosbisim.com/android serves the newest). The host checks daily and on `UpdateAction{CHECK}`, downloads the newest APK, checks its
+the Android release channel serves the newest). The host checks daily and on `UpdateAction{CHECK}`, downloads the newest APK, checks its
 sha256 and that it is signed with the installed app's key, and reports `HostStatus.update`. It installs on
 `INSTALL_NOW`, or between 02:00 and 05:00 host time once a client has been shown the update and no call is up, unless
 `LATER` set `deferred_until_ms` (one day). Every release carries notes in English and Turkish.

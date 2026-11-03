@@ -7,15 +7,15 @@ plugins {
     id("com.google.protobuf")
 }
 
-// Release signing: the key lives outside the repo (~/.tosbisim/signing.properties + release.jks). Every
+// Release signing: the key lives outside the repo (~/.hermessim/signing.properties + release.jks). Every
 // update must be signed with it, or phones refuse to install it over the previous version. Back it up.
 val signingProps = Properties().apply {
-    val f = file("${System.getProperty("user.home")}/.tosbisim/signing.properties")
+    val f = file("${System.getProperty("user.home")}/.hermessim/signing.properties")
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
 android {
-    namespace = "dev.simrelay.host"
+    namespace = "com.keremgok.hermessim.host"
     compileSdk = 36
     signingConfigs {
         create("release") {
@@ -35,7 +35,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "dev.simrelay.host"
+        applicationId = "com.keremgok.hermessim.host"
         minSdk = 30
         targetSdk = 33   // TODO(M6): 34+ needs foregroundServiceType declarations
         versionCode = 57
@@ -49,7 +49,7 @@ android {
         // Shared host<->client protocol (repo-root protocol/, MIT)
         proto { srcDir("$rootDir/../../protocol") }
     }
-    // Not for the phone: the device index (~4 MB, served by api.tosbisim.com) and the table's hand-written source.
+    // Not for the phone: the support page's own table and its hand-written source.
     // Appended to aapt's default ignore pattern.
     androidResources.ignoreAssetsPattern =
         "!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~:!devices.json:!support.src.json"
@@ -89,7 +89,7 @@ tasks.matching { it.name.startsWith("process") && it.name.endsWith("MainManifest
     doLast {
         val manifest = outputs.files.asFileTree.matching { include("**/AndroidManifest.xml") }.files.firstOrNull() ?: return@doLast
         val requested = Regex("""uses-permission[^>]*android:name="([^"]+)"""").findAll(manifest.readText()).map { it.groupValues[1] }.toSet()
-        val allowlist = rootProject.file("../magisk/template/system/etc/permissions/privapp-permissions-dev.simrelay.host.xml")
+        val allowlist = rootProject.file("../magisk/template/system/etc/permissions/privapp-permissions-com.keremgok.hermessim.host.xml")
         val privileged = Regex("""permission name="([^"]+)"""").findAll(allowlist.readText()).map { it.groupValues[1] }.toSet()
         val unknown = requested - privileged - ordinaryPermissions
         if (unknown.isNotEmpty()) throw GradleException(

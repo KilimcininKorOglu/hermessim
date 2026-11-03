@@ -1,4 +1,4 @@
-// simrelayd audio pump (M5). Copyright (C) 2026 SIM Relay authors. GPL-3.0-or-later.
+// hermessimd audio pump (M5). Copyright (C) 2026 SIM Relay authors. GPL-3.0-or-later.
 //
 // While a call is up, two directions run on the sound card's own clock (no sleeps):
 //   caller -> client : capture PCM (VOC_REC_DL, 16 kHz mono, 10 ms) -> Opus encode -> audio client
@@ -34,13 +34,13 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-#define TAG "simrelayd"
+#define TAG "hermessimd"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 // ---- PCM I/O through the phone's own libtinyalsa (dlopen) ----
-// Upstream tinyalsa 2.0.0, compiled in, misbehaved on SM8250 (15 Oct 2026): in-call capture faulted with
+// Stock tinyalsa 2.0.0, compiled in, misbehaved on SM8250 (15 Oct 2026): in-call capture faulted with
 // EFAULT or free-ran at 30x real time, and Incall_Music playback consumed ~20 kHz instead of 48 kHz with
 // correct negotiated params. The system's own libtinyalsa.so (what stock tinycap/tinyplay use) runs
 // both in real time with 10 ms periods and 0 errors. Its pcm_config layout matches; I/O is byte-based.
@@ -120,19 +120,19 @@ static int ta_load(void) {
                                    "/system_ext/" LIBDIR "/libtinyalsa.so", "/odm/" LIBDIR "/libtinyalsa.so" };
     void *h = NULL;
     for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]) && !h; i++) h = dlopen(paths[i], RTLD_NOW);
-    if (!h) { __android_log_print(ANDROID_LOG_ERROR, "simrelayd", "dlopen libtinyalsa: %s", dlerror()); return -1; }
+    if (!h) { __android_log_print(ANDROID_LOG_ERROR, "hermessimd", "dlopen libtinyalsa: %s", dlerror()); return -1; }
     ta.open = dlsym(h, "pcm_open"); ta.is_ready = dlsym(h, "pcm_is_ready"); ta.get_error = dlsym(h, "pcm_get_error");
     ta.read = dlsym(h, "pcm_read"); ta.write = dlsym(h, "pcm_write"); ta.close = dlsym(h, "pcm_close");
     ta.prepare = dlsym(h, "pcm_prepare");
     ta.stop = dlsym(h, "pcm_stop");
     if (!ta.open || !ta.is_ready || !ta.get_error || !ta.read || !ta.write || !ta.close || !ta.prepare) {
-        __android_log_print(ANDROID_LOG_ERROR, "simrelayd", "libtinyalsa: missing symbols");
+        __android_log_print(ANDROID_LOG_ERROR, "hermessimd", "libtinyalsa: missing symbols");
         ta.open = NULL; return -1;
     }
     return 0;
 }
 
-#define SOCK_NAME "simrelayd-audio"
+#define SOCK_NAME "hermessimd-audio"
 #define CAP_RATE 16000
 #define CAP_FRAME 160          // 10 ms at 16 kHz (one Opus frame)
 #define CAP_PERIOD CAP_FRAME   // 10 ms periods, one per read (one Opus frame)

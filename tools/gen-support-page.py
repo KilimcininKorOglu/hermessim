@@ -16,8 +16,8 @@ PAGE = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TosbiSim phones</title>
-<meta name="description" content="Which Android phones work as a TosbiSim host: verified, expected and experimental models.">
+<title>HermesSIM phones</title>
+<meta name="description" content="Which Android phones work as a HermesSIM host: verified, expected and experimental models.">
 <style>
 :root { --bg:#f6f7f4; --card:#fff; --text:#1c1f1a; --muted:#5d6458; --line:#e3e6df; --accent:#5f8f2f;
   --verified:#2e7d32; --expected:#1565c0; --experimental:#b26a00; --not_yet:#5e35b1; --unsupported:#c62828; --unknown:#6b6b6b; }
@@ -67,13 +67,13 @@ a { color:var(--accent); }
   <h2 data-t="rulesTitle"></h2>
   <ul class="rules" id="rules"></ul>
   <footer><span data-t="footer"></span> · <span id="updated"></span> ·
-    <a href="https://github.com/Mert-Eren-Karabulut/tosbisim">GitHub</a></footer>
+    <a href="https://github.com/Mert-Eren-Karabulut/hermessim">GitHub</a></footer>
 </main>
 <script>
 const DATA = __DATA__;
 const T = {
-  en: { title: "Which phones work with TosbiSim?",
-    lead: "TosbiSim turns a spare rooted Android phone into a SIM box for your iPhone or Android phone. Every phone runs a short call test before call audio turns on; texts, call control and the hotspot work in Basic mode on most rootable Android 11+ phones.",
+  en: { title: "Which phones work with HermesSIM?",
+    lead: "HermesSIM turns a spare rooted Android phone into a SIM box for your iPhone or Android phone. Every phone runs a short call test before call audio turns on; texts, call control and the hotspot work in Basic mode on most rootable Android 11+ phones.",
     search: "Search a model, e.g. A52 or Redmi Note 10",
     tiers: { verified: "Verified", expected: "Expected to work", experimental: "Experimental", not_yet: "Not yet", unsupported: "Not supported", unknown: "Not researched yet" },
     legend: { verified: "Measured by us on a live call.", expected: "Its own firmware matches a verified phone's audio family.",
@@ -83,9 +83,9 @@ const T = {
     corpus: n => `Search for your phone: over 45,000 models are listed with their state, ${n} of them checked against their firmware.`,
     oldAndroid: v => `Checked on Android ${v} firmware: the host needs Android 11 or newer.`,
     rulesTitle: "Never supported", none: "Not in the list yet: Basic mode should work; Qualcomm and MediaTek phones can also try the call test.",
-    footer: "Same table as the TosbiSim apps", updated: "updated" },
-  tr: { title: "TosbiSim hangi telefonlarla çalışır?",
-    lead: "TosbiSim, root'lu yedek bir Android telefonu iPhone'unuz ya da Android telefonunuz için bir SIM kutusuna dönüştürür. Her telefonda arama sesi kısa bir arama testinden sonra açılır; root'lanabilen çoğu Android 11+ telefonda mesajlar, arama yönetimi ve erişim noktası Temel modda çalışır.",
+    footer: "Same table as the HermesSIM apps", updated: "updated" },
+  tr: { title: "HermesSIM hangi telefonlarla çalışır?",
+    lead: "HermesSIM, root'lu yedek bir Android telefonu iPhone'unuz ya da Android telefonunuz için bir SIM kutusuna dönüştürür. Her telefonda arama sesi kısa bir arama testinden sonra açılır; root'lanabilen çoğu Android 11+ telefonda mesajlar, arama yönetimi ve erişim noktası Temel modda çalışır.",
     search: "Model arayın, ör. A52 veya Redmi Note 10",
     tiers: { verified: "Doğrulandı", expected: "Çalışması bekleniyor", experimental: "Deneysel", not_yet: "Henüz değil", unsupported: "Desteklenmiyor", unknown: "Henüz incelenmedi" },
     legend: { verified: "Canlı aramada bizim tarafımızdan ölçüldü.", expected: "Kendi yazılımı doğrulanmış bir telefonun ses ailesiyle uyuşuyor.",
@@ -95,13 +95,13 @@ const T = {
     corpus: n => `Telefonunuzu arayın: 45.000'den fazla model durumuyla listeleniyor, ${n} tanesi yazılımına göre incelendi.`,
     oldAndroid: v => `Android ${v} yazılımında incelendi: ana cihaz için Android 11 veya daha yenisi gerekir.`,
     rulesTitle: "Hiçbir zaman desteklenmeyenler", none: "Henüz listede yok: Temel mod çalışmalı; Qualcomm ve MediaTek telefonlar arama testini de deneyebilir.",
-    footer: "TosbiSim uygulamalarıyla aynı tablo", updated: "güncelleme" } };
+    footer: "HermesSIM uygulamalarıyla aynı tablo", updated: "güncelleme" } };
 const ORDER = ["verified", "expected", "experimental", "not_yet"];
 let lang = (navigator.language || "en").toLowerCase().startsWith("tr") ? "tr" : "en";
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-// The full phone index (~46k phones) lives on api.tosbisim.com; this page's own table answers instantly and offline.
-const API = "https://api.tosbisim.com/api/v1/devices?q=";
+// The full phone index (~46k phones) lives on api.hermessim.com; this page's own table answers instantly and offline.
+const API = "https://api.hermessim.com/api/v1/devices?q=";
 let remote = null, remoteFor = "", timer = null;
 function search() {
   const q = $("#q").value.trim();
