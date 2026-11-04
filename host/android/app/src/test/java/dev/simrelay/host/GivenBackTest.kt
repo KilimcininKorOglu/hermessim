@@ -1,6 +1,7 @@
 // SIM Relay host. Copyright (C) 2026 SIM Relay authors. GPL-3.0-or-later.
 package dev.simrelay.host
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -8,19 +9,17 @@ import org.junit.Test
 /** After "Stop using this phone as a host" (Retire.Mark) and for calls the host doesn't relay (BasicSilence.wanted). */
 class GivenBackTest {
     @Test fun noMarkIsAWorkingHost() {
-        assertFalse(Retire.Mark.current(null, 12))
-        assertFalse(Retire.Mark.current("", 12))
+        assertEquals(Retire.Mark.State.NONE, Retire.Mark.state(null))
+        assertEquals(Retire.Mark.State.NONE, Retire.Mark.state(""))
     }
 
-    @Test fun theMarkHoldsUntilTheRestart() {
-        assertTrue(Retire.Mark.current("12", 12))
-        assertFalse(Retire.Mark.current("12", 13))          // restarted: the module is gone, or was kept on purpose
+    @Test fun theScriptsMarkWaitsForTheRestart() {
+        assertEquals(Retire.Mark.State.RESTART_PENDING, Retire.Mark.state("12"))
+        assertEquals(Retire.Mark.State.RESTART_PENDING, Retire.Mark.state("null"))   // a phone without a boot count
     }
 
-    @Test fun withoutABootCountTheMarkHoldsTillTheBootScriptDropsIt() {
-        assertTrue(Retire.Mark.current("null", -1))
-        assertTrue(Retire.Mark.current("12", -1))
-        assertTrue(Retire.Mark.current("null", 12))
+    @Test fun aRestartThatLeftTheAppStaysGivenBack() {
+        assertEquals(Retire.Mark.State.STILL_INSTALLED, Retire.Mark.state("13:after"))
     }
 
     @Test fun theClientsCallsStaySilencedWhoeverIsThePhoneApp() {

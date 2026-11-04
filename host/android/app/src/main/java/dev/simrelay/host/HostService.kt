@@ -64,8 +64,8 @@ class HostService : Service() {
             Log.i(TAG, "not installed as the host yet; service stays off")
             stopSelf(); return
         }
-        if (Retire.givenBack(this)) {             // the removal ran, its restart is still to come: no host any more
-            Log.i(TAG, "given back to its owner, removal waits for a restart; service stays off")
+        if (Retire.givenBack(this)) {             // the removal ran: no host any more, until the app is gone
+            Log.i(TAG, "given back to its owner (${Retire.givenBackState(this)}); service stays off")
             stopSelf(); return
         }
         Log.i(TAG, "host service up; silence: zen_mode=${Settings.Global.getInt(contentResolver, "zen_mode", -1)} " +

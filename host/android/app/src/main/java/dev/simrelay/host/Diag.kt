@@ -66,7 +66,7 @@ object Diag {
         p.edit().putLong("last_$key", now).putLong("day", day).putInt("today", sentToday + if (dump) 0 else 1).apply()
         val body = facts(kind).put("payload", JSONObject()
             .put("event", name).put("detail", detail)
-            .put("android", Build.VERSION.RELEASE)
+            .put("android", Build.VERSION.RELEASE).put("root", Compat.rootKind(app).id)
             .apply { if (withLog) put("log", recentLog(LOG_BYTES)) })
         passed?.let { body.put("passed", it) }
         File(dir(), "q-$now-${name.take(30)}.json").writeText(body.toString())
@@ -168,7 +168,7 @@ object Diag {
                 val now = System.currentTimeMillis()
                 val body = facts("event").put("payload", JSONObject()
                     .put("event", "user_report").put("detail", detail)
-                    .put("android", Build.VERSION.RELEASE).put("log", recentLog(LOG_BYTES)))
+                    .put("android", Build.VERSION.RELEASE).put("root", Compat.rootKind(app).id).put("log", recentLog(LOG_BYTES)))
                 val code = Api.postStatus("/reports", body).first
                 report = when {
                     code in 200..299 -> Report.SENT
