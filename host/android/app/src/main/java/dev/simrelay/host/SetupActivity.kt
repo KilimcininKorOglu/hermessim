@@ -138,6 +138,7 @@ class SetupActivity : Activity() {
     // ------------------------------------------------------------------ the journey
 
     private fun model(): Model {
+        if (Retire.givenBack(this)) return givenBackModel()
         val m = if (host) hostModel() else setupModel()
         if (Retire.failed == 0) return m
         // The removal stopped (nothing changed, or rolled back to a working host): say why, offer it again
@@ -145,6 +146,10 @@ class SetupActivity : Activity() {
         return m.copy(step = 0, steps = 0, card = Card(getString(R.string.retire_failed_title), body.joinToString("\n\n"), Mark.FAIL,
             Btn(getString(R.string.btn_retry), Act.RETIRE), Btn(getString(R.string.btn_close), Act.RETIRE_DISMISS)))
     }
+
+    /** The removal ran but the phone didn't restart ([Retire.givenBack]): the restart finishes it. No root calls here. */
+    private fun givenBackModel() = Model(getString(R.string.subtitle_given_back), 0, 0, Card(getString(R.string.given_back_title),
+        getString(R.string.given_back_body), Mark.WARN, Btn(getString(R.string.btn_restart), Act.RESTART), magiskBtn()), emptyList())
 
     /** Magisk's own app, when it can be opened (a hidden Magisk has another package name). */
     private fun magiskIntent(): Intent? = runCatching { packageManager.getLaunchIntentForPackage("com.topjohnwu.magisk") }.getOrNull()
@@ -472,16 +477,19 @@ class SetupActivity : Activity() {
             root.addView(text(m.subtitle, 15f, c.secondary).apply { setPadding(0, dp(2), 0, dp(14)) })
             if (m.steps > 0) root.addView(progress(m.step, m.steps))
             root.addView(card(m.card))
-            root.addView(text(getString(R.string.checks_title), 13f, c.secondary, bold = true).apply { setPadding(dp(4), dp(22), 0, dp(6)) })
-            root.addView(LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                background = rounded(c.card, 16)
-                setPadding(dp(14), dp(6), dp(14), dp(6))
-                m.checks.forEach { addView(row(it)) }
-            })
+            if (m.checks.isNotEmpty()) {
+                root.addView(text(getString(R.string.checks_title), 13f, c.secondary, bold = true).apply { setPadding(dp(4), dp(22), 0, dp(6)) })
+                root.addView(LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    background = rounded(c.card, 16)
+                    setPadding(dp(14), dp(6), dp(14), dp(6))
+                    m.checks.forEach { addView(row(it)) }
+                })
+            }
             root.addView(diagnostics(), lp(top = 14))
-            // Whenever root works, a broken host too (module turned off, service down): it must be removable
-            if (host || Onboarding.root == Onboarding.Root.OK) root.addView(retireCard(), lp(top = 14))
+            // Whenever root works, a broken host too (module turned off, service down): it must be removable. Not once
+            // the removal ran: only its restart is left.
+            if ((host || Onboarding.root == Onboarding.Root.OK) && !Retire.givenBack(this)) root.addView(retireCard(), lp(top = 14))
             root.addView(text(getString(R.string.host_version, BuildConfigInfo.version(this)), 12f, c.secondary).apply { setPadding(dp(4), dp(16), 0, 0) })
         }
         updateCountdown()

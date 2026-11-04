@@ -205,4 +205,7 @@
     <string name="retire_prepare_failed">Kaldırma hazırlanamadı, bu yüzden hiçbir şey değiştirilmedi. Tekrar deneyin; başarısız olmaya devam ederse aşağıdan bir rapor gönderin.</string>
     <string name="retire_unpaired">Telefonunuza zaten bildirildi ve bu ana cihazı unuttu: kullanmaya devam etmek için telefonunuzdaki TosbiSim\'de yeniden ekleyin (Ana cihaz ekle).</string>
     <string name="retire_failed_title">TosbiSim kaldırılmadı</string>
+    <string name="subtitle_given_back">Bu telefon yeniden sizin</string>
+    <string name="given_back_title">Kaldırmayı bitirmek için yeniden başlatın</string>
+    <string name="given_back_body">TosbiSim bu telefonu size geri verdi ama telefon yeniden başlamadı; kaldırma bu yeniden başlatmayla tamamlanır. O zamana kadar TosbiSim devreye girmez: telefonu sessize almaz, aramalarınıza ve mesajlarınıza karışmaz.\n\nYeniden başlattıktan sonra TosbiSim hâlâ duruyorsa Magisk → Modüller\'den kaldırıp telefonu yeniden başlatın.</string>
 </resources>

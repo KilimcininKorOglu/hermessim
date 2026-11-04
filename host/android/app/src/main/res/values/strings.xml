@@ -212,4 +212,7 @@
     <string name="retire_prepare_failed">Couldn\'t prepare the removal, so nothing was changed. Try again; if it keeps failing, send a report below.</string>
     <string name="retire_unpaired">Your phone was already told and forgot this host: to keep using it, add it again in TosbiSim on your phone (Add host).</string>
     <string name="retire_failed_title">TosbiSim wasn\'t removed</string>
+    <string name="subtitle_given_back">This phone is yours again</string>
+    <string name="given_back_title">Restart to finish removing TosbiSim</string>
+    <string name="given_back_body">TosbiSim gave this phone back, but the phone didn\'t restart, and the removal ends with that restart. Until then TosbiSim stays out of the way: it doesn\'t silence the phone or touch your calls and messages.\n\nIf TosbiSim is still here after the restart, remove it in Magisk → Modules and restart again.</string>
 </resources>

@@ -117,8 +117,8 @@ object Compat {
     /**
      * The table's verdict corrected by what the host found on this phone: a call-audio profile that fits its own card
      * (Daemon) is what "expected" means, whatever the table guessed from the model or the chip; the call test still
-     * decides. A route no phone has proven on a call yet (the profile says "experimental": Samsung's pre-ABOX Exynos)
-     * stays experimental. Reports keep the table's tier (with the profile's source next to it).
+     * decides. A route no phone has proven on a call yet (a profile saying "experimental": a new family's first
+     * release) stays experimental. Reports keep the table's tier (with the profile's source next to it).
      */
     fun onThisPhone(v: Verdict, profile: Profile?): Verdict = when {
         profile == null || v.tier !in setOf(Tier.EXPERIMENTAL, Tier.NOT_YET, Tier.UNKNOWN) -> v

@@ -7,6 +7,7 @@ import android.content.Intent
 import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.provider.Telephony
 import android.telecom.TelecomManager
 import android.util.Log
@@ -27,6 +28,8 @@ import java.util.concurrent.TimeUnit
  * default apps back, turns Wi-Fi on, revokes root and the battery exemption, marks the module for removal, uninstalls
  * the app, deletes TosbiSim's files and restarts the phone (a Magisk module only goes away with a restart). Magisk and
  * the unlocked bootloader stay: they are the user's, not ours.
+ * The script's first act marks this boot as given back ([givenBack]): until the restart, nothing makes the app a host
+ * again.
  */
 object Retire {
     private const val TAG = "SimRelayHost"
@@ -37,6 +40,32 @@ object Retire {
 
     /** Giving the phone back: guards (SMS role, box mode, silence) must not undo it meanwhile. */
     @Volatile var running = false; private set
+
+    /**
+     * The removal script ran this boot: the phone is its owner's again and only the restart that takes the module away
+     * is left. Until then the app is no host, whatever starts it again (a call, an alarm, the module's watchdog, its
+     * screen): a removal that stopped short of its restart left the app running, and it took the phone and SMS roles
+     * back, put Do Not Disturb back on and muted a call its owner answered (Mi 11 Pro, 4 Nov 2026). Unlike [running]
+     * this outlives the process, and the app's data too (uninstalling an update wipes it): the script's own root write
+     * in Settings.Global, which the restart makes stale.
+     */
+    fun givenBack(ctx: Context): Boolean = Mark.current(
+        Settings.Global.getString(ctx.contentResolver, Mark.KEY),
+        Settings.Global.getInt(ctx.contentResolver, Settings.Global.BOOT_COUNT, -1))
+
+    /** The script's mark: the boot count it ran in. Apart from [Retire]: unit tests load it without Android. */
+    object Mark {
+        const val KEY = "tosbisim_given_back"
+        /** A one-shot boot script drops the mark after the restart; till then a mark from another boot means nothing. */
+        const val CLEANER = "/data/adb/service.d/tosbisim-given-back.sh"
+
+        /** [mark]: the boot count when the script ran ("null": the phone keeps none); [boot]: now (-1: none). */
+        fun current(mark: String?, boot: Int): Boolean = when {
+            mark.isNullOrEmpty() -> false
+            boot < 0 || mark == "null" -> true            // no boot count to tell: until the boot script drops it
+            else -> mark == boot.toString()
+        }
+    }
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("retire", Context.MODE_PRIVATE)
 
@@ -215,6 +244,16 @@ object Retire {
             |usable() { [ -n "${'$'}1" ] && [ "${'$'}1" != null ] && [ "${'$'}1" != "${'$'}PKG" ] && pm path "${'$'}1" >/dev/null 2>&1; }
             |{
             |echo "${'$'}(date) giving the phone back"
+            |# First, this boot is marked given back: an app that starts again before the restart stays no host
+            |# (Retire.givenBack). After the restart a one-shot boot script drops the mark, then itself.
+            |settings put global ${Mark.KEY} "${'$'}(settings get global boot_count)"
+            |mkdir -p /data/adb/service.d && cat > ${Mark.CLEANER} <<'END'
+            |#!/system/bin/sh
+            |until [ "${'$'}(getprop sys.boot_completed)" = 1 ]; do sleep 2; done
+            |settings delete global ${Mark.KEY}
+            |rm -f "${'$'}0"
+            |END
+            |chmod 755 ${Mark.CLEANER}
             |# TosbiSim stops first, for good: the app restarted from the module's system copy in the last seconds (pm
             |# uninstall only removes its update) and silenced the phone again before the restart (20 Oct 2026). Without
             |# root and stopped it can't come back before the restart, which removes the module.
