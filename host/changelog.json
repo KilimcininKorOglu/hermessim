@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.25",
+    "code": 61,
+    "en": "A host whose TosbiSim data was cleared (in Android's app settings) no longer stops working until the next restart: it gets its Bluetooth permission back by itself and starts again. Problem reports leave out the phone's repetitive call-account messages, so they show more of what TosbiSim itself did.",
+    "tr": "TosbiSim verileri (Android'in uygulama ayarlarından) silinen bir ana cihaz artık bir sonraki yeniden başlatmaya kadar çalışmaz hale gelmiyor: Bluetooth iznini kendisi geri alıyor ve yeniden başlıyor. Sorun raporları telefonun tekrarlayan arama hesabı mesajlarını dışarıda bırakıyor; böylece TosbiSim'in kendi yaptıklarını daha uzun bir süre gösteriyor."
+  },
+  {
     "version": "0.12.24",
     "code": 60,
     "en": "TosbiSim now works on phones rooted with APatch: it gets root by itself, as with Magisk, and its screens name APatch's own menus. On APatch or KernelSU without a mount metamodule, the install now stops and says what is missing, instead of leaving no app. \"Stop using this phone as a host\" keeps TosbiSim out of the way until it is really gone, also if a restart left it installed, and keeps a note if the phone didn't restart.",
