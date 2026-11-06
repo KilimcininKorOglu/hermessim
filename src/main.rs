@@ -3,6 +3,8 @@
 #[cfg(target_os = "android")]
 #[macro_use]
 mod platform;
+#[cfg(target_os = "android")]
+mod alsa;
 
 fn main() {
     println!("hermessimd-rs scaffold");
