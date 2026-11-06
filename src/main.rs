@@ -5,6 +5,7 @@
 mod platform;
 #[cfg(target_os = "android")]
 mod alsa;
+mod protocol;
 
 fn main() {
     println!("hermessimd-rs scaffold");
