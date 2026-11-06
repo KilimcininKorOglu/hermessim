@@ -6,9 +6,7 @@ use std::os::unix::io::RawFd;
 
 use libc::{c_int, c_void, pid_t};
 
-use crate::protocol::{
-    c_atoi, charge_band, netblock_script, valid_pkg, valid_role, EscapeGesture,
-};
+use crate::protocol::{c_atoi, charge_band, netblock_script, valid_pkg, valid_role, EscapeGesture};
 
 pub const BOX_MAX_KEYDEVS: usize = 32;
 
@@ -19,7 +17,10 @@ const DAEMON_UP: &str = "com.keremgok.hermessim.host.DAEMON_UP";
 const CUT_NODES: [(&str, bool); 10] = [
     ("/sys/class/power_supply/battery/batt_slate_mode", true),
     ("/sys/class/power_supply/battery/charging_enabled", false),
-    ("/sys/class/power_supply/battery/battery_charging_enabled", false),
+    (
+        "/sys/class/power_supply/battery/battery_charging_enabled",
+        false,
+    ),
     ("/sys/class/power_supply/battery/charge_disable", true),
     ("/sys/class/power_supply/battery/input_suspend", true),
     ("/sys/class/qcom-battery/input_suspend", true),
@@ -75,7 +76,11 @@ pub fn screen(on: bool) -> i32 {
     let argv = [
         "/system/bin/input",
         "keyevent",
-        if on { "KEYCODE_WAKEUP" } else { "KEYCODE_SLEEP" },
+        if on {
+            "KEYCODE_WAKEUP"
+        } else {
+            "KEYCODE_SLEEP"
+        },
     ];
     if spawn(&argv) {
         0
@@ -88,14 +93,7 @@ pub fn role(role: &str, pkg: &str) -> i32 {
     if !valid_role(role) || !valid_pkg(pkg) {
         return -1;
     }
-    let argv = [
-        "/system/bin/cmd",
-        "role",
-        "add-role-holder",
-        role,
-        pkg,
-        "0",
-    ];
+    let argv = ["/system/bin/cmd", "role", "add-role-holder", role, pkg, "0"];
     crate::logi!("role {} -> {}", role, pkg);
     if spawn(&argv) {
         0
@@ -242,7 +240,9 @@ impl Charge {
             if !node_writable(&path) {
                 continue;
             }
-            let Some(value) = read_text(&path) else { continue };
+            let Some(value) = read_text(&path) else {
+                continue;
+            };
             if !value.contains("inhibit-charge") {
                 continue;
             }
@@ -379,7 +379,11 @@ impl Charge {
         if self.cutting != on {
             crate::logi!(
                 "battery care: {} ({})",
-                if on { "charging stopped" } else { "charging allowed" },
+                if on {
+                    "charging stopped"
+                } else {
+                    "charging allowed"
+                },
                 node
             );
         }
@@ -625,11 +629,7 @@ impl Charge {
         }
         mkdir_mode(LIMIT_DIR, 0o700);
         if write_file(LIMIT_FILE, &format!("{}\n", percent)) < 0 {
-            crate::logw!(
-                "save {}: {}",
-                LIMIT_FILE,
-                std::io::Error::last_os_error()
-            );
+            crate::logw!("save {}: {}", LIMIT_FILE, std::io::Error::last_os_error());
         }
         let node = self.node_name().unwrap_or("?");
         crate::logi!(
@@ -773,14 +773,7 @@ impl BoxState {
         let mut buf = [0u8; 4096];
         let mut power = false;
         loop {
-            let n = unsafe {
-                libc::recv(
-                    fd,
-                    buf.as_mut_ptr() as *mut c_void,
-                    buf.len() - 1,
-                    0,
-                )
-            };
+            let n = unsafe { libc::recv(fd, buf.as_mut_ptr() as *mut c_void, buf.len() - 1, 0) };
             if n <= 0 {
                 break;
             }
@@ -1069,13 +1062,7 @@ impl BoxState {
     pub fn key_event(&mut self, fd: RawFd) {
         let mut events = [0u8; std::mem::size_of::<InputEvent>() * 16];
         loop {
-            let n = unsafe {
-                libc::read(
-                    fd,
-                    events.as_mut_ptr() as *mut c_void,
-                    events.len(),
-                )
-            };
+            let n = unsafe { libc::read(fd, events.as_mut_ptr() as *mut c_void, events.len()) };
             if n <= 0 {
                 break;
             }
@@ -1168,7 +1155,11 @@ impl BoxState {
             LOG_FILE,
             pid,
             if since.is_some() { ", from " } else { "" },
-            if since.is_some() { since.unwrap_or("") } else { "" }
+            if since.is_some() {
+                since.unwrap_or("")
+            } else {
+                ""
+            }
         );
     }
 

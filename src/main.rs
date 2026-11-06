@@ -35,8 +35,8 @@ mod daemon {
     use libc::{c_int, c_void};
 
     use crate::boxmode::{self, BoxState, BOX_MAX_KEYDEVS};
-    use crate::protocol::{c_atoi, valid_iface, valid_uid};
     use crate::mixer::Mixer;
+    use crate::protocol::{c_atoi, valid_iface, valid_uid};
 
     const VERSION: &str = "0.1";
     const SOCK_NAME: &[u8] = b"hermessimd";
@@ -219,10 +219,7 @@ mod daemon {
         match cmd {
             "HELLO" => c.reply(format!(
                 "OK hermessimd {} card={} call={} session={}",
-                VERSION,
-                mixer.card,
-                mixer.call as i32,
-                mixer.session
+                VERSION, mixer.card, mixer.call as i32, mixer.session
             )),
             "STATUS" => {
                 let names = mixer.status_names();
@@ -364,9 +361,7 @@ mod daemon {
                 let uid = t.next();
                 let on = t.next();
                 let ok = match (uid, on) {
-                    (Some(uid), Some(on)) => {
-                        boxm.netblock(c_atoi(uid), c_atoi(on) != 0) == 0
-                    }
+                    (Some(uid), Some(on)) => boxm.netblock(c_atoi(uid), c_atoi(on) != 0) == 0,
                     _ => false,
                 };
                 if ok {
@@ -510,9 +505,7 @@ mod daemon {
                 break;
             }
             let mut buf = [0u8; 512];
-            let n = unsafe {
-                libc::read(fd, buf.as_mut_ptr() as *mut c_void, buf.len() - 1)
-            };
+            let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut c_void, buf.len() - 1) };
             if n <= 0 {
                 rc = 1;
                 break;
@@ -799,10 +792,7 @@ mod daemon {
                 if c.read(&mut mixer, &mut boxm) {
                     continue;
                 }
-                crate::logi!(
-                    "{} gone",
-                    if c.owner { "client" } else { "tool client" }
-                );
+                crate::logi!("{} gone", if c.owner { "client" } else { "tool client" });
                 if c.owner && mixer.call {
                     mixer.restore_all("client disconnected mid-call");
                 }

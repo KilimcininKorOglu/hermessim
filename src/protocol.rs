@@ -75,7 +75,9 @@ pub fn c_atoi(s: &str) -> i32 {
     let digits = i;
     let mut value: i128 = 0;
     while i < b.len() && b[i].is_ascii_digit() {
-        value = value.saturating_mul(10).saturating_add((b[i] - b'0') as i128);
+        value = value
+            .saturating_mul(10)
+            .saturating_add((b[i] - b'0') as i128);
         i += 1;
     }
     if i == digits {
@@ -157,9 +159,9 @@ pub fn valid_iface(iface: &str) -> bool {
 pub fn valid_pkg(pkg: &str) -> bool {
     !pkg.is_empty()
         && pkg.len() <= 100
-        && pkg.bytes().all(|c| {
-            c.is_ascii_alphanumeric() || c == b'.' || c == b'_'
-        })
+        && pkg
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'.' || c == b'_')
 }
 
 pub fn valid_role(role: &str) -> bool {
@@ -182,7 +184,7 @@ pub fn tune_values(prime: i32, keep: i32, period: i32) -> Option<(i32, i32, i32)
     ((1..=8).contains(&prime)
         && (0..=6).contains(&keep)
         && (period == 240 || period == 480 || period == 960))
-    .then_some((prime, keep, period))
+        .then_some((prime, keep, period))
 }
 
 /// The charge target band: 60 -> charge below 57, hold at 60, drain above 62.
@@ -227,8 +229,7 @@ impl EscapeGesture {
         self.at.copy_within(1.., 0);
         self.seq[5] = if up { 1 } else { -1 };
         self.at[5] = now_ns;
-        if self.seq == [1, 1, 1, -1, -1, -1] && self.at[5] - self.at[0] <= ESCAPE_WINDOW_NS
-        {
+        if self.seq == [1, 1, 1, -1, -1, -1] && self.at[5] - self.at[0] <= ESCAPE_WINDOW_NS {
             self.seq = [0; 6];
             return true;
         }
@@ -253,7 +254,10 @@ mod tests {
 
     #[test]
     fn parses_call_and_silence_specs() {
-        assert_eq!(parse_call_spec("Voice=1,0x2,-3"), Some(("Voice", vec![1, 2, -3])));
+        assert_eq!(
+            parse_call_spec("Voice=1,0x2,-3"),
+            Some(("Voice", vec![1, 2, -3]))
+        );
         assert_eq!(parse_call_spec("Voice="), Some(("Voice", vec![])));
         assert_eq!(parse_call_spec("=1"), None);
         assert_eq!(parse_call_spec("Voice=1,2,3,4,5"), None);
@@ -333,14 +337,20 @@ mod tests {
 
         let mut g = EscapeGesture::default();
         let mut fired = false;
-        for (i, up) in [true, true, false, true, false, false].into_iter().enumerate() {
+        for (i, up) in [true, true, false, true, false, false]
+            .into_iter()
+            .enumerate()
+        {
             fired |= g.push(up, i as i64 * 100);
         }
         assert!(!fired);
 
         let mut g = EscapeGesture::default();
         let mut fired = false;
-        for (i, up) in [true, true, true, false, false, false].into_iter().enumerate() {
+        for (i, up) in [true, true, true, false, false, false]
+            .into_iter()
+            .enumerate()
+        {
             fired |= g.push(up, i as i64 * 1_000_000_001);
         }
         assert!(!fired);

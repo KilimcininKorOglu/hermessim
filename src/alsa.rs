@@ -198,15 +198,42 @@ const IOC_WRITE: u32 = 1;
 const IOC_READ: u32 = 2;
 
 pub const fn ioc(dir: u32, ty: u32, nr: u32, size: usize) -> c_ulong {
-    ((dir << IOC_DIRSHIFT) | ((size as u32) << IOC_SIZESHIFT) | (ty << IOC_TYPESHIFT) | nr) as c_ulong
+    ((dir << IOC_DIRSHIFT) | ((size as u32) << IOC_SIZESHIFT) | (ty << IOC_TYPESHIFT) | nr)
+        as c_ulong
 }
 
-pub const CTL_ELEM_LIST: c_ulong = ioc(IOC_READ | IOC_WRITE, b'U' as u32, 0x10, size_of::<ElemList>());
-pub const CTL_ELEM_INFO: c_ulong = ioc(IOC_READ | IOC_WRITE, b'U' as u32, 0x11, size_of::<ElemInfo>());
-pub const CTL_ELEM_READ: c_ulong = ioc(IOC_READ | IOC_WRITE, b'U' as u32, 0x12, size_of::<ElemValue>());
-pub const CTL_ELEM_WRITE: c_ulong = ioc(IOC_READ | IOC_WRITE, b'U' as u32, 0x13, size_of::<ElemValue>());
-pub const CTL_SUBSCRIBE_EVENTS: c_ulong = ioc(IOC_READ | IOC_WRITE, b'U' as u32, 0x16, size_of::<i32>());
-pub const PCM_HW_REFINE: c_ulong = ioc(IOC_READ | IOC_WRITE, b'A' as u32, 0x10, size_of::<PcmHwParams>());
+pub const CTL_ELEM_LIST: c_ulong = ioc(
+    IOC_READ | IOC_WRITE,
+    b'U' as u32,
+    0x10,
+    size_of::<ElemList>(),
+);
+pub const CTL_ELEM_INFO: c_ulong = ioc(
+    IOC_READ | IOC_WRITE,
+    b'U' as u32,
+    0x11,
+    size_of::<ElemInfo>(),
+);
+pub const CTL_ELEM_READ: c_ulong = ioc(
+    IOC_READ | IOC_WRITE,
+    b'U' as u32,
+    0x12,
+    size_of::<ElemValue>(),
+);
+pub const CTL_ELEM_WRITE: c_ulong = ioc(
+    IOC_READ | IOC_WRITE,
+    b'U' as u32,
+    0x13,
+    size_of::<ElemValue>(),
+);
+pub const CTL_SUBSCRIBE_EVENTS: c_ulong =
+    ioc(IOC_READ | IOC_WRITE, b'U' as u32, 0x16, size_of::<i32>());
+pub const PCM_HW_REFINE: c_ulong = ioc(
+    IOC_READ | IOC_WRITE,
+    b'A' as u32,
+    0x10,
+    size_of::<PcmHwParams>(),
+);
 
 pub const fn eviocgname(len: usize) -> c_ulong {
     ioc(IOC_READ, b'E' as u32, 0x06, len)
@@ -287,7 +314,12 @@ pub fn info_enum_items(info: &ElemInfo) -> u32 {
 /// integers inside [min,max] unless max <= min; enum items < items.
 pub fn value_ok(name: &str, info: &ElemInfo, values: &[i64], n: usize) -> bool {
     if n < 1 || n as u32 > info.count {
-        crate::loge!("'{}': {} value(s) for a {}-value control: not written", name, n, info.count);
+        crate::loge!(
+            "'{}': {} value(s) for a {}-value control: not written",
+            name,
+            n,
+            info.count
+        );
         return false;
     }
     for &v in values.iter().take(n) {
@@ -304,7 +336,11 @@ pub fn value_ok(name: &str, info: &ElemInfo, values: &[i64], n: usize) -> bool {
             }
         };
         if !ok {
-            crate::loge!("'{}': value {} is outside the control's range: not written", name, v);
+            crate::loge!(
+                "'{}': value {} is outside the control's range: not written",
+                name,
+                v
+            );
             return false;
         }
     }
@@ -354,7 +390,12 @@ pub fn pcm_negotiate(
         if playback { 'p' } else { 'c' }
     );
     let c = std::ffi::CString::new(path).ok()?;
-    let fd = unsafe { libc::open(c.as_ptr(), libc::O_RDWR | libc::O_NONBLOCK | libc::O_CLOEXEC) };
+    let fd = unsafe {
+        libc::open(
+            c.as_ptr(),
+            libc::O_RDWR | libc::O_NONBLOCK | libc::O_CLOEXEC,
+        )
+    };
     if fd < 0 {
         return None;
     }

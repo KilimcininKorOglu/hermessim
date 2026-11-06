@@ -2,11 +2,11 @@
 // buffer and the audio client socket. GPL-3.0-or-later.
 #![cfg(target_os = "android")]
 
+use libc::{c_char, c_int, c_void};
 use std::ffi::{CStr, CString};
 use std::os::unix::io::RawFd;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Mutex;
-use libc::{c_char, c_int, c_void};
 
 use crate::alsa;
 use crate::opus;
@@ -297,13 +297,7 @@ fn open_pcm_n(
     Some(PcmPtr(pcm))
 }
 
-fn open_pcm(
-    device: i32,
-    playback: bool,
-    rate: i32,
-    channels: i32,
-    frame: i32,
-) -> Option<PcmPtr> {
+fn open_pcm(device: i32, playback: bool, rate: i32, channels: i32, frame: i32) -> Option<PcmPtr> {
     open_pcm_n(
         device,
         playback,
@@ -360,10 +354,7 @@ fn client_send(buf: &[u8]) {
         if n < 0 {
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
             if errno != libc::EAGAIN {
-                crate::logw!(
-                    "audio send: {}",
-                    std::io::Error::from_raw_os_error(errno)
-                );
+                crate::logw!("audio send: {}", std::io::Error::from_raw_os_error(errno));
             }
         }
     }
@@ -664,7 +655,14 @@ fn io_main() {
             break;
         }
         if pf[0].revents & libc::POLLIN != 0 {
-            let nfd = unsafe { libc::accept4(ls, std::ptr::null_mut(), std::ptr::null_mut(), libc::SOCK_CLOEXEC) };
+            let nfd = unsafe {
+                libc::accept4(
+                    ls,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    libc::SOCK_CLOEXEC,
+                )
+            };
             if nfd >= 0 {
                 let mut cr: libc::ucred = unsafe { std::mem::zeroed() };
                 let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
@@ -702,14 +700,7 @@ fn io_main() {
             }
         }
         if fd >= 0 && pf[1].revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) != 0 {
-            let got = unsafe {
-                libc::recv(
-                    fd,
-                    buf.as_mut_ptr() as *mut c_void,
-                    buf.len(),
-                    0,
-                )
-            };
+            let got = unsafe { libc::recv(fd, buf.as_mut_ptr() as *mut c_void, buf.len(), 0) };
             if got <= 0 {
                 crate::logi!("audio client gone");
                 let mine = {
@@ -761,13 +752,7 @@ fn capture_main() {
         CAP_RATE
     };
     let mut cch = if cfg.capture_channels == 2 { 2 } else { 1 };
-    if let Some((r, c)) = alsa::pcm_negotiate(
-        cfg.card,
-        cfg.capture_pcm,
-        false,
-        crate_,
-        cch,
-    ) {
+    if let Some((r, c)) = alsa::pcm_negotiate(cfg.card, cfg.capture_pcm, false, crate_, cch) {
         crate_ = r;
         cch = c;
     }
@@ -925,8 +910,19 @@ fn capture_main() {
             ) = {
                 let mut s = STATS.lock().unwrap();
                 let snap = (
-                    s.sent, s.recv, s.fec, s.plc, s.late, s.catchup, s.caperr, s.peak,
-                    s.played, s.depth_max, s.reopen, s.jb_n, s.jb_sum,
+                    s.sent,
+                    s.recv,
+                    s.fec,
+                    s.plc,
+                    s.late,
+                    s.catchup,
+                    s.caperr,
+                    s.peak,
+                    s.played,
+                    s.depth_max,
+                    s.reopen,
+                    s.jb_n,
+                    s.jb_sum,
                 );
                 s.jb_sum = 0.0;
                 s.jb_n = 0;
@@ -1212,7 +1208,12 @@ pub fn tune(prime: i32, keep: i32, period: i32) -> bool {
     JB_PRIME.store(prime, Ordering::Relaxed);
     JB_KEEP.store(keep, Ordering::Relaxed);
     PLAY_PERIOD.store(period, Ordering::Relaxed);
-    crate::logi!("audio tune: prime={} keep={} period={}", prime, keep, period);
+    crate::logi!(
+        "audio tune: prime={} keep={} period={}",
+        prime,
+        keep,
+        period
+    );
     true
 }
 

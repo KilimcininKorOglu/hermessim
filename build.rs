@@ -26,7 +26,9 @@ fn find_ndk() -> PathBuf {
             return p;
         }
     }
-    if let Some(p) = latest_dir(Path::new("/opt/homebrew/share/android-commandlinetools/ndk")) {
+    if let Some(p) = latest_dir(Path::new(
+        "/opt/homebrew/share/android-commandlinetools/ndk",
+    )) {
         return p;
     }
     panic!("Android NDK not found: set ANDROID_NDK_HOME (the Rust daemon builds libopus with it)");
@@ -50,7 +52,11 @@ fn main() {
 
     let ndk = find_ndk();
     let toolchain = ndk.join("build/cmake/android.toolchain.cmake");
-    assert!(toolchain.is_file(), "NDK toolchain missing: {}", toolchain.display());
+    assert!(
+        toolchain.is_file(),
+        "NDK toolchain missing: {}",
+        toolchain.display()
+    );
     let bin = latest_dir(&ndk.join("toolchains/llvm/prebuilt"))
         .expect("NDK clang toolchain missing")
         .join("bin");

@@ -10,7 +10,7 @@ use libc::{c_char, c_int, c_long};
 
 use crate::alsa::*;
 use crate::platform::{self, kernel_name};
-use crate::protocol::{c_atoi, c_strtoll, c_strtoll_prefix, NAME_LEN, MAX_VALUES};
+use crate::protocol::{c_atoi, c_strtoll, c_strtoll_prefix, MAX_VALUES, NAME_LEN};
 
 pub const MAX_MANAGED: usize = 64;
 pub const MAX_CALL_CONTROLS: usize = 64;
@@ -142,7 +142,11 @@ impl Crumb {
 
     fn boot_was_normal() -> (bool, String) {
         let raw = Self::boot_reason();
-        let why = if raw.is_empty() { "unknown".to_string() } else { raw.clone() };
+        let why = if raw.is_empty() {
+            "unknown".to_string()
+        } else {
+            raw.clone()
+        };
         if raw.is_empty() {
             return (false, why);
         }
@@ -162,7 +166,8 @@ impl Crumb {
     }
 
     pub fn start(&mut self) {
-        self.boot_id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap_or_default();
+        self.boot_id =
+            std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap_or_default();
         let prev = std::fs::read_to_string(CRUMB).unwrap_or_default();
         if !prev.is_empty() && prev != self.boot_id {
             let (normal, why) = Self::boot_was_normal();
@@ -305,14 +310,20 @@ impl Mixer {
         if name.is_empty() {
             return;
         }
-        let Some(info) = ctl_info(self.ctl, name) else { return };
+        let Some(info) = ctl_info(self.ctl, name) else {
+            return;
+        };
         let mut tmp = Managed::empty(name, info.id.numid, info);
         tmp.write_only = false;
         let ctl = self.ctl;
         let safe = self.safe;
         let crumb = &mut self.crumb;
         if ctl_write(ctl, safe, crumb, &mut tmp, values, n) {
-            crate::logi!("set '{}' ({} ...)", name, values.first().copied().unwrap_or(0));
+            crate::logi!(
+                "set '{}' ({} ...)",
+                name,
+                values.first().copied().unwrap_or(0)
+            );
         }
     }
 
@@ -431,11 +442,7 @@ impl Mixer {
         let mut rest = &spec[eq + 1..];
         while !rest.is_empty() {
             if values.len() == MAX_VALUES {
-                crate::loge!(
-                    "call control '{}': more than {} values",
-                    spec,
-                    MAX_VALUES
-                );
+                crate::loge!("call control '{}': more than {} values", spec, MAX_VALUES);
                 return false;
             }
             let comma = rest.find(',');
@@ -598,7 +605,9 @@ impl Mixer {
             if line.is_empty() {
                 continue;
             }
-            let Some(tab) = line.rfind('\t') else { continue };
+            let Some(tab) = line.rfind('\t') else {
+                continue;
+            };
             if tab == 0 {
                 continue;
             }
@@ -727,14 +736,12 @@ impl Mixer {
         const TYPES: [&str; 7] = ["none", "bool", "int", "enum", "bytes", "iec958", "int64"];
         let mut n = 0i32;
         for id in ids.iter().take(used as usize) {
-            let Some(info) = ctl_info_numid(self.ctl, id.numid) else { continue };
+            let Some(info) = ctl_info_numid(self.ctl, id.numid) else {
+                continue;
+            };
             let name = kernel_name(&info.id.name);
             let ty = TYPES.get(info.type_ as usize).copied().unwrap_or("?");
-            let _ = write!(
-                f,
-                "{}\t{}\t{}\t{}\t",
-                info.id.numid, name, ty, info.count
-            );
+            let _ = write!(f, "{}\t{}\t{}\t{}\t", info.id.numid, name, ty, info.count);
             match info.type_ {
                 ELEM_TYPE_INTEGER => {
                     let (min, max) = info_integer(&info);
@@ -791,7 +798,8 @@ fn create_0600(path: &str) -> std::io::Result<std::fs::File> {
         .open(path)
 }
 
-fn parse_dec_full(s: &str) -> Option<i64> {    let b = s.as_bytes();
+fn parse_dec_full(s: &str) -> Option<i64> {
+    let b = s.as_bytes();
     let mut i = 0;
     while i < b.len() && matches!(b[i], b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r') {
         i += 1;
@@ -856,7 +864,10 @@ fn manage_in(
         .iter()
         .any(|m| m.numid == info.id.numid && &m.want[..n] != &want[..n])
     {
-        crate::loge!("'{}' is already held at another value: not managed twice", name);
+        crate::loge!(
+            "'{}' is already held at another value: not managed twice",
+            name
+        );
         return false;
     }
     let mut m = Managed::empty(name, info.id.numid, info);
@@ -948,13 +959,7 @@ fn ctl_restore(ctl: RawFd, safe: bool, crumb: &mut Crumb, m: &mut Managed) -> bo
     ctl_write_value(ctl, safe, crumb, m, &mut v)
 }
 
-fn reapply_in(
-    ctl: RawFd,
-    safe: bool,
-    crumb: &mut Crumb,
-    list: &mut [Managed],
-    numid: u32,
-) {
+fn reapply_in(ctl: RawFd, safe: bool, crumb: &mut Crumb, list: &mut [Managed], numid: u32) {
     for m in list.iter_mut() {
         if m.numid != numid {
             continue;
