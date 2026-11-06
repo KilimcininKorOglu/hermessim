@@ -1,4 +1,5 @@
 /target
+/out
 *.o
 *.a
 *.so

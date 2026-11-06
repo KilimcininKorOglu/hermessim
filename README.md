@@ -42,6 +42,8 @@ cargo build --release --target armv7-linux-androideabi
 
 The binaries are `target/<target>/release/hermessimd`. The Cargo config links with the NDK
 `*-linux-android29-clang` driver and requests 16 KB segment alignment, matching the C module.
+`./build.sh` builds both ABIs and copies them to `out/arm64-v8a/hermessimd` and
+`out/armeabi-v7a/hermessimd`, verifying that every loadable segment is 16 KB-aligned.
 
 Host-only unit tests (`cargo test`) cover the protocol helpers, jitter buffer, charge band,
 netblock command builder and escape gesture; the Android-only modules are compiled by
