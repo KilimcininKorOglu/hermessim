@@ -20,7 +20,7 @@ The wire behaviour is intentionally identical to the C daemon in `host/daemon/`:
 | `src/alsa.rs` | kernel ALSA control/PCM ABI for aarch64 and armv7 |
 | `src/mixer.rs` | managed controls, call routing, safe mode, call originals, inventory |
 | `src/audio.rs` | Opus pump, jitter buffer, capture/playback, audio client socket |
-| `src/box.rs` | box mode, battery care, netblock, keys, uevent, log capture |
+| `src/boxmode.rs` | box mode, battery care, netblock, keys, uevent, log capture |
 | `src/protocol.rs` | line protocol, reply queue, command parsing |
 | `src/opus.rs` | libopus FFI |
 | `src/platform.rs` | Android logging and small libc helpers |
