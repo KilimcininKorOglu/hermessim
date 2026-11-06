@@ -51,8 +51,25 @@ fn main() {
     let ndk = find_ndk();
     let toolchain = ndk.join("build/cmake/android.toolchain.cmake");
     assert!(toolchain.is_file(), "NDK toolchain missing: {}", toolchain.display());
+    let bin = latest_dir(&ndk.join("toolchains/llvm/prebuilt"))
+        .expect("NDK clang toolchain missing")
+        .join("bin");
+    let clang_prefix = match arch.as_str() {
+        "aarch64" => "aarch64-linux-android29",
+        "arm" => "armv7a-linux-androideabi29",
+        other => panic!("unsupported Android architecture for opus: {other}"),
+    };
+    let clang = bin.join(format!("{clang_prefix}-clang"));
+    let clangxx = bin.join(format!("{clang_prefix}-clang++"));
+    assert!(clang.is_file(), "NDK clang missing: {}", clang.display());
+    let mut c_cfg = cc::Build::new();
+    c_cfg.compiler(&clang);
+    let mut cxx_cfg = cc::Build::new();
+    cxx_cfg.compiler(&clangxx);
 
     let dst = cmake::Config::new("vendor/opus")
+        .init_c_cfg(c_cfg)
+        .init_cxx_cfg(cxx_cfg)
         .define("OPUS_BUILD_PROGRAMS", "OFF")
         .define("OPUS_BUILD_TESTING", "OFF")
         .define("OPUS_BUILD_SHARED_LIBRARY", "OFF")
