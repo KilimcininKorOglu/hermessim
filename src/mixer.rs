@@ -1,0 +1,1006 @@
+// ALSA mixer ownership, call routing, safe mode and call originals. GPL-3.0-or-later.
+#![cfg(target_os = "android")]
+
+use std::ffi::{CStr, CString};
+use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::io::RawFd;
+
+use libc::{c_char, c_int, c_long};
+
+use crate::alsa::*;
+use crate::platform::{self, kernel_name};
+use crate::protocol::{c_atoi, c_strtoll, c_strtoll_prefix, NAME_LEN, MAX_VALUES};
+
+pub const MAX_MANAGED: usize = 64;
+pub const MAX_CALL_CONTROLS: usize = 64;
+const OWN_WRITE_GRACE_NS: i64 = 100_000_000;
+const CRUMB: &str = "/data/adb/hermessim/applying";
+const CRUMB_LINGER_NS: i64 = 5_000_000_000;
+const SAFE_FILE: &str = "/data/adb/hermessim/safe";
+const CALL_ORIG: &str = "/data/adb/hermessim/call-originals";
+
+#[derive(Clone)]
+pub struct Profile {
+    pub capture: String,
+    pub rec_config: String,
+    pub inject1: String,
+    pub inject2: String,
+    pub mute_tx: String,
+    pub mute_rx: String,
+    pub vsid: i64,
+    pub ramp: i64,
+    pub capture_pcm: i32,
+    pub capture_rate: i32,
+    pub capture_channels: i32,
+    pub inject_pcm: i32,
+    pub inject_rate: i32,
+    pub inject_channels: i32,
+    pub loopback: bool,
+}
+
+impl Default for Profile {
+    fn default() -> Self {
+        Self {
+            capture: String::new(),
+            rec_config: String::new(),
+            inject1: String::new(),
+            inject2: String::new(),
+            mute_tx: "Voice Tx Device Mute".into(),
+            mute_rx: "Voice Rx Device Mute".into(),
+            vsid: 4294967295,
+            ramp: 20,
+            capture_pcm: 0,
+            capture_rate: 16000,
+            capture_channels: 1,
+            inject_pcm: 0,
+            inject_rate: 48000,
+            inject_channels: 2,
+            loopback: false,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Managed {
+    pub name: String,
+    pub numid: u32,
+    pub count: u32,
+    pub want: [i64; MAX_VALUES],
+    pub nwant: usize,
+    pub orig: ElemValue,
+    pub have_orig: bool,
+    pub write_only: bool,
+    pub enumerated: bool,
+    pub last_write_ns: i64,
+    pub info: ElemInfo,
+    pub reapply_sec: i64,
+    pub reapplies: u32,
+    pub paused_until_sec: i64,
+}
+
+impl Managed {
+    fn empty(name: &str, numid: u32, info: ElemInfo) -> Self {
+        Self {
+            name: name.to_string(),
+            numid,
+            count: info.count,
+            want: [0; MAX_VALUES],
+            nwant: 0,
+            orig: unsafe { std::mem::zeroed() },
+            have_orig: false,
+            write_only: false,
+            enumerated: info.type_ == ELEM_TYPE_ENUMERATED,
+            last_write_ns: 0,
+            info,
+            reapply_sec: 0,
+            reapplies: 0,
+            paused_until_sec: 0,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct CallControl {
+    pub name: String,
+    pub values: Vec<i64>,
+}
+
+pub struct Crumb {
+    pub boot_id: String,
+    pub safe: bool,
+    until_ns: i64,
+}
+
+impl Crumb {
+    pub fn new() -> Self {
+        Self {
+            boot_id: String::new(),
+            safe: false,
+            until_ns: 0,
+        }
+    }
+
+    fn boot_reason() -> String {
+        unsafe {
+            let mut buf = [0u8; 96];
+            let key = CString::new("sys.boot.reason").unwrap();
+            let mut n = __system_property_get(key.as_ptr(), buf.as_mut_ptr() as *mut c_char);
+            if n <= 0 {
+                let key = CString::new("ro.boot.bootreason").unwrap();
+                n = __system_property_get(key.as_ptr(), buf.as_mut_ptr() as *mut c_char);
+            }
+            if n > 0 {
+                CStr::from_ptr(buf.as_ptr() as *const c_char)
+                    .to_string_lossy()
+                    .into_owned()
+            } else {
+                String::new()
+            }
+        }
+    }
+
+    fn boot_was_normal() -> (bool, String) {
+        let raw = Self::boot_reason();
+        let why = if raw.is_empty() { "unknown".to_string() } else { raw.clone() };
+        if raw.is_empty() {
+            return (false, why);
+        }
+        let low = raw.to_ascii_lowercase();
+        const CRASH: &[&str] = &[
+            "panic", "watchdog", "wdog", "wdt", "crash", "oops", "kernel", "hard", "hw_reset",
+            "abnormal", "fault", "bug", "sdi", "ramdump", "unknown", "warm", "reset",
+        ];
+        if CRASH.iter().any(|w| low.contains(w)) {
+            return (false, why);
+        }
+        let normal = low.starts_with("reboot")
+            || low.starts_with("shutdown")
+            || low.starts_with("cold")
+            || low.contains("userrequested");
+        (normal, why)
+    }
+
+    pub fn start(&mut self) {
+        self.boot_id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap_or_default();
+        let prev = std::fs::read_to_string(CRUMB).unwrap_or_default();
+        if !prev.is_empty() && prev != self.boot_id {
+            let (normal, why) = Self::boot_was_normal();
+            if normal {
+                crate::logw!(
+                    "the last boot ended while audio controls were being written, but by an ordinary '{}': not safe mode",
+                    why
+                );
+            } else {
+                self.safe = true;
+                crate::loge!(
+                    "SAFE MODE: the last boot ended ('{}') while audio controls were being written; none are written this boot",
+                    why
+                );
+                if let Ok(mut f) = create_0600(SAFE_FILE) {
+                    let _ = f.write_all(self.boot_id.as_bytes());
+                    let _ = f.sync_all();
+                }
+            }
+        }
+        let _ = std::fs::remove_file(CRUMB);
+        let safe = std::fs::read_to_string(SAFE_FILE).unwrap_or_default();
+        if !safe.is_empty() && safe == self.boot_id {
+            if !self.safe {
+                crate::loge!("SAFE MODE (this boot): no mixer writes");
+            }
+            self.safe = true;
+        } else if !safe.is_empty() {
+            let _ = std::fs::remove_file(SAFE_FILE);
+        }
+    }
+
+    pub fn boot_line(&self) -> String {
+        let id = self.boot_id.split('\n').next().unwrap_or("");
+        format!("boot {}", id)
+    }
+
+    pub fn arm(&mut self) {
+        if self.boot_id.is_empty() {
+            return;
+        }
+        let now = platform::now_ns(libc::CLOCK_MONOTONIC);
+        if self.until_ns == 0 {
+            if let Ok(mut f) = create_0600(CRUMB) {
+                let _ = f.write_all(self.boot_id.as_bytes());
+                let _ = f.sync_all();
+            }
+        }
+        self.until_ns = now + CRUMB_LINGER_NS;
+    }
+
+    pub fn clear(&mut self) {
+        if self.until_ns != 0 {
+            let _ = std::fs::remove_file(CRUMB);
+        }
+        self.until_ns = 0;
+    }
+
+    /// Milliseconds until the breadcrumb goes, or -1.
+    pub fn tick(&mut self) -> i64 {
+        if self.until_ns == 0 {
+            return -1;
+        }
+        let now = platform::now_ns(libc::CLOCK_MONOTONIC);
+        let ms = (self.until_ns - now) / 1_000_000;
+        if ms <= 0 {
+            self.clear();
+            -1
+        } else {
+            ms
+        }
+    }
+}
+
+extern "C" {
+    fn __system_property_get(name: *const c_char, value: *mut c_char) -> c_int;
+}
+
+pub struct Mixer {
+    pub card: i32,
+    pub ctl: RawFd,
+    pub profile: Profile,
+    pub managed: Vec<Managed>,
+    pub perm: Vec<Managed>,
+    pub call_controls: Vec<CallControl>,
+    pub call: bool,
+    pub session: i32,
+    pub remutes: u32,
+    pub safe: bool,
+    pub crumb: Crumb,
+}
+
+impl Mixer {
+    pub fn new(card: i32, ctl: RawFd) -> Self {
+        Self {
+            card,
+            ctl,
+            profile: Profile::default(),
+            managed: Vec::new(),
+            perm: Vec::new(),
+            call_controls: Vec::new(),
+            call: false,
+            session: 0,
+            remutes: 0,
+            safe: false,
+            crumb: Crumb::new(),
+        }
+    }
+
+    pub fn audio_cfg(&self) -> crate::audio::AudioCfg {
+        crate::audio::AudioCfg {
+            card: self.card,
+            capture_pcm: self.profile.capture_pcm,
+            capture_rate: self.profile.capture_rate,
+            capture_channels: self.profile.capture_channels,
+            inject_pcm: self.profile.inject_pcm,
+            inject_rate: self.profile.inject_rate,
+            inject_channels: self.profile.inject_channels,
+            loopback: self.profile.loopback,
+        }
+    }
+
+    pub fn manage_managed(&mut self, name: &str, want: &[i64], n: usize, write_only: bool) -> bool {
+        let ctl = self.ctl;
+        let safe = self.safe;
+        let crumb = &mut self.crumb;
+        let (list, other) = (&mut self.managed, &self.perm);
+        manage_in(ctl, safe, crumb, list, other, name, want, n, write_only)
+    }
+
+    pub fn manage_perm(&mut self, name: &str, want: &[i64], n: usize, write_only: bool) -> bool {
+        let ctl = self.ctl;
+        let safe = self.safe;
+        let crumb = &mut self.crumb;
+        let (list, other) = (&mut self.perm, &self.managed);
+        manage_in(ctl, safe, crumb, list, other, name, want, n, write_only)
+    }
+
+    pub fn set_by_name(&mut self, name: &str, values: &[i64], n: usize) {
+        if name.is_empty() {
+            return;
+        }
+        let Some(info) = ctl_info(self.ctl, name) else { return };
+        let mut tmp = Managed::empty(name, info.id.numid, info);
+        tmp.write_only = false;
+        let ctl = self.ctl;
+        let safe = self.safe;
+        let crumb = &mut self.crumb;
+        if ctl_write(ctl, safe, crumb, &mut tmp, values, n) {
+            crate::logi!("set '{}' ({} ...)", name, values.first().copied().unwrap_or(0));
+        }
+    }
+
+    pub fn clear_device_mutes(&mut self) {
+        let off = [0i64, self.profile.vsid, self.profile.ramp];
+        let tx = self.profile.mute_tx.clone();
+        let rx = self.profile.mute_rx.clone();
+        self.set_by_name(&tx, &off, 3);
+        self.set_by_name(&rx, &off, 3);
+    }
+
+    pub fn restore_all(&mut self, why: &str) {
+        crate::audio::call_end();
+        for i in (0..self.managed.len()).rev() {
+            let write_only = self.managed[i].write_only;
+            let name = self.managed[i].name.clone();
+            if write_only {
+                let off = [0i64, self.profile.vsid, self.profile.ramp];
+                let ctl = self.ctl;
+                let safe = self.safe;
+                let crumb = &mut self.crumb;
+                let m = &mut self.managed[i];
+                ctl_write(ctl, safe, crumb, m, &off, 3);
+            } else {
+                let ctl = self.ctl;
+                let safe = self.safe;
+                let crumb = &mut self.crumb;
+                let m = &mut self.managed[i];
+                ctl_restore(ctl, safe, crumb, m);
+            }
+            crate::logi!("restored '{}' ({})", name, why);
+        }
+        self.managed.clear();
+        self.call = false;
+        self.session = 0;
+        self.clear_device_mutes();
+        if self.ctl >= 0 && !self.safe {
+            let _ = std::fs::remove_file(CALL_ORIG);
+        }
+    }
+
+    pub fn restore_perm(&mut self) {
+        for i in 0..self.perm.len() {
+            let name = self.perm[i].name.clone();
+            let ctl = self.ctl;
+            let safe = self.safe;
+            let crumb = &mut self.crumb;
+            let m = &mut self.perm[i];
+            ctl_restore(ctl, safe, crumb, m);
+            crate::logi!("restored silence control '{}'", name);
+        }
+    }
+
+    pub fn call_start(&mut self, session: i32) -> i32 {
+        if self.call && session == self.session {
+            crate::logi!("CALL_START session={}: already active, ignored", session);
+            return self.managed.len() as i32;
+        }
+        if self.call {
+            self.restore_all("new CALL_START");
+        }
+        let inject = if session == 2 {
+            self.profile.inject2.clone()
+        } else {
+            self.profile.inject1.clone()
+        };
+        let mono = [1i64];
+        let on = [1i64];
+        let mute = [1i64, self.profile.vsid, self.profile.ramp];
+        let mut applied = 0i32;
+        let rec = self.profile.rec_config.clone();
+        let cap = self.profile.capture.clone();
+        applied += self.manage_managed(&rec, &mono, 1, false) as i32;
+        applied += self.manage_managed(&cap, &on, 1, false) as i32;
+        applied += self.manage_managed(&inject, &on, 1, false) as i32;
+        let tx = self.profile.mute_tx.clone();
+        let rx = self.profile.mute_rx.clone();
+        applied += self.manage_managed(&tx, &mute, 3, true) as i32;
+        applied += self.manage_managed(&rx, &mute, 3, true) as i32;
+        let controls: Vec<(String, Vec<i64>)> = self
+            .call_controls
+            .iter()
+            .map(|c| (c.name.clone(), c.values.clone()))
+            .collect();
+        for (name, values) in controls {
+            applied += self.manage_managed(&name, &values, values.len(), false) as i32;
+        }
+        self.call = true;
+        self.session = session;
+        self.remutes = 0;
+        crate::audio::call_begin(self.audio_cfg());
+        self.call_orig_save();
+        crate::logi!(
+            "CALL_START session={}: {} controls applied",
+            session,
+            applied
+        );
+        applied
+    }
+
+    pub fn call_control_add(&mut self, spec: &str) -> bool {
+        let Some(eq) = spec.rfind('=') else {
+            return false;
+        };
+        if eq == 0 {
+            return false;
+        }
+        if self.call_controls.len() >= MAX_CALL_CONTROLS {
+            crate::loge!("too many call controls: '{}' dropped", spec);
+            return false;
+        }
+        if eq >= NAME_LEN {
+            return false;
+        }
+        let mut values = Vec::new();
+        let mut rest = &spec[eq + 1..];
+        while !rest.is_empty() {
+            if values.len() == MAX_VALUES {
+                crate::loge!(
+                    "call control '{}': more than {} values",
+                    spec,
+                    MAX_VALUES
+                );
+                return false;
+            }
+            let comma = rest.find(',');
+            let (token, next) = match comma {
+                Some(c) => (&rest[..c], Some(&rest[c + 1..])),
+                None => (rest, None),
+            };
+            let (value, used) = c_strtoll(token);
+            if used == 0 || used != token.len() {
+                crate::loge!("call control '{}': not a number", spec);
+                return false;
+            }
+            values.push(value);
+            match next {
+                Some(n) => rest = n,
+                None => break,
+            }
+        }
+        self.call_controls.push(CallControl {
+            name: spec[..eq].to_string(),
+            values,
+        });
+        true
+    }
+
+    pub fn silence_add(&mut self, spec: &str) -> bool {
+        let Some(eq) = spec.rfind('=') else {
+            return false;
+        };
+        if eq == 0 || eq >= NAME_LEN {
+            return false;
+        }
+        let name = &spec[..eq];
+        let raw = &spec[eq + 1..];
+        let (value, used) = c_strtoll(raw);
+        if used == 0 || used != raw.len() {
+            crate::loge!("silence '{}': not a number", spec);
+            return false;
+        }
+        if let Some(i) = self.perm.iter().position(|m| m.name == name) {
+            let ctl = self.ctl;
+            let safe = self.safe;
+            let crumb = &mut self.crumb;
+            let m = &mut self.perm[i];
+            if ctl_write(ctl, safe, crumb, m, &[value], 1) {
+                m.want[0] = value;
+            }
+            return true;
+        }
+        self.manage_perm(name, &[value], 1, false)
+    }
+
+    pub fn set_key(&mut self, key: &str, val: &str) -> bool {
+        let mut dst: Option<&mut String> = None;
+        match key {
+            "capture" => dst = Some(&mut self.profile.capture),
+            "rec_config" => dst = Some(&mut self.profile.rec_config),
+            "inject.1" => dst = Some(&mut self.profile.inject1),
+            "inject.2" => dst = Some(&mut self.profile.inject2),
+            "mute.tx" => dst = Some(&mut self.profile.mute_tx),
+            "mute.rx" => dst = Some(&mut self.profile.mute_rx),
+            _ => {}
+        }
+        if let Some(dst) = dst {
+            if val == "-" {
+                dst.clear();
+            } else {
+                let mut n = (NAME_LEN - 1).min(val.len());
+                while !val.is_char_boundary(n) {
+                    n -= 1;
+                }
+                *dst = val[..n].to_string();
+            }
+            return true;
+        }
+        match key {
+            "mute.vsid" => self.profile.vsid = c_strtoll_prefix(val),
+            "mute.ramp" => self.profile.ramp = c_strtoll_prefix(val),
+            "capture.pcm" => self.profile.capture_pcm = c_atoi(val),
+            "inject.pcm" => self.profile.inject_pcm = c_atoi(val),
+            "capture.rate" => self.profile.capture_rate = c_atoi(val),
+            "capture.channels" => self.profile.capture_channels = c_atoi(val),
+            "call" => return self.call_control_add(val),
+            "call.clear" => self.call_controls.clear(),
+            "inject.rate" => self.profile.inject_rate = c_atoi(val),
+            "inject.channels" => self.profile.inject_channels = c_atoi(val),
+            "loopback" => self.profile.loopback = c_atoi(val) != 0,
+            "silence" => return self.silence_add(val),
+            _ => return false,
+        }
+        true
+    }
+
+    pub fn status_names(&self) -> String {
+        let mut out = String::new();
+        for m in &self.managed {
+            let piece = format!("{};", m.name);
+            if out.len() + piece.len() >= 1800 {
+                break;
+            }
+            out.push_str(&piece);
+        }
+        out
+    }
+
+    pub fn call_orig_save(&mut self) {
+        let tmp = format!("{}.tmp", CALL_ORIG);
+        let Ok(mut f) = std::fs::File::create(&tmp) else {
+            crate::logw!("save {}: {}", CALL_ORIG, platform::errstr());
+            return;
+        };
+        let _ = writeln!(f, "{}", self.crumb.boot_line());
+        let mut n = 0usize;
+        for m in &self.managed {
+            if m.write_only || !m.have_orig {
+                continue;
+            }
+            let _ = write!(f, "{}\t", m.name);
+            let count = (m.count as usize).min(MAX_VALUES);
+            for k in 0..count {
+                let v = if m.enumerated {
+                    elem_enum(&m.orig, k) as i64
+                } else {
+                    elem_integer(&m.orig, k) as i64
+                };
+                if k > 0 {
+                    let _ = write!(f, ",");
+                }
+                let _ = write!(f, "{}", v);
+            }
+            let _ = writeln!(f);
+            n += 1;
+        }
+        let ok = f.flush().is_ok() && f.sync_all().is_ok();
+        drop(f);
+        if !ok || n == 0 || std::fs::rename(&tmp, CALL_ORIG).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+    }
+
+    pub fn call_orig_restore(&mut self) {
+        let Ok(text) = std::fs::read_to_string(CALL_ORIG) else {
+            return;
+        };
+        let boot = format!("{}\n", self.crumb.boot_line());
+        let mut chunks = text.split_inclusive('\n');
+        if chunks.next() != Some(boot.as_str()) {
+            crate::logi!("call originals from another boot: dropped");
+            let _ = std::fs::remove_file(CALL_ORIG);
+            return;
+        }
+        let mut saved: Vec<(String, Vec<i64>)> = Vec::new();
+        for chunk in chunks {
+            if saved.len() >= MAX_MANAGED {
+                break;
+            }
+            let Some(line) = chunk.strip_suffix('\n') else {
+                break;
+            };
+            if line.is_empty() {
+                continue;
+            }
+            let Some(tab) = line.rfind('\t') else { continue };
+            if tab == 0 {
+                continue;
+            }
+            let name = &line[..tab];
+            if name.len() >= NAME_LEN {
+                continue;
+            }
+            let mut vals = Vec::new();
+            for part in line[tab + 1..].split(',') {
+                if vals.len() == MAX_VALUES {
+                    break;
+                }
+                let Some(v) = parse_dec_full(part) else {
+                    vals.clear();
+                    break;
+                };
+                vals.push(v);
+            }
+            if vals.is_empty() {
+                continue;
+            }
+            saved.push((name.to_string(), vals));
+        }
+        crate::logw!(
+            "a previous run died mid-call: restoring {} call control(s)",
+            saved.len()
+        );
+        for (name, vals) in saved.into_iter().rev() {
+            self.set_by_name(&name, &vals, vals.len());
+        }
+        let _ = std::fs::remove_file(CALL_ORIG);
+    }
+
+    pub fn on_ctl_event(&mut self, numid: u32) {
+        let ctl = self.ctl;
+        let safe = self.safe;
+        let crumb = &mut self.crumb;
+        reapply_in(ctl, safe, crumb, &mut self.managed, numid);
+        let ctl = self.ctl;
+        let safe = self.safe;
+        let crumb = &mut self.crumb;
+        reapply_in(ctl, safe, crumb, &mut self.perm, numid);
+    }
+
+    pub fn is_device_mute(&self, numid: u32) -> bool {
+        self.managed
+            .iter()
+            .any(|m| m.write_only && m.numid == numid)
+    }
+
+    pub fn reassert_device_mutes(&mut self) {
+        for i in 0..self.managed.len() {
+            if !self.managed[i].write_only {
+                continue;
+            }
+            let want = self.managed[i].want;
+            let n = self.managed[i].nwant;
+            let ctl = self.ctl;
+            let safe = self.safe;
+            let crumb = &mut self.crumb;
+            let m = &mut self.managed[i];
+            ctl_write(ctl, safe, crumb, m, &want, n);
+        }
+        self.remutes += 1;
+        if self.remutes <= 20 || self.remutes % 100 == 0 {
+            crate::logi!(
+                "device mutes re-asserted after a route change (#{})",
+                self.remutes
+            );
+        }
+    }
+
+    pub fn drain_ctl_events(&mut self) {
+        let mut route_changed = false;
+        for _ in 0..64 {
+            if self.ctl < 0 {
+                break;
+            }
+            let mut ev: ElemEvent = unsafe { std::mem::zeroed() };
+            let n = unsafe {
+                libc::read(
+                    self.ctl,
+                    &mut ev as *mut ElemEvent as *mut libc::c_void,
+                    std::mem::size_of::<ElemEvent>(),
+                )
+            };
+            if n != std::mem::size_of::<ElemEvent>() as isize {
+                break;
+            }
+            if ev.type_ == EVENT_ELEM {
+                let elem = unsafe { ev.data.elem };
+                if elem.mask & EVENT_MASK_VALUE != 0 && elem.mask != EVENT_MASK_REMOVE {
+                    self.on_ctl_event(elem.id.numid);
+                    if self.call && !self.is_device_mute(elem.id.numid) {
+                        route_changed = true;
+                    }
+                }
+            }
+        }
+        if route_changed {
+            self.reassert_device_mutes();
+        }
+    }
+
+    pub fn inventory(&self, path: &str) -> Result<i32, i32> {
+        if self.ctl < 0 {
+            return Err(-1);
+        }
+        let mut list: ElemList = unsafe { std::mem::zeroed() };
+        if ioctl_ptr(self.ctl, CTL_ELEM_LIST, &mut list) != 0 {
+            return Err(-1);
+        }
+        let total = list.count;
+        let mut ids = vec![ElemId::zeroed(); total.max(1) as usize];
+        list.space = total;
+        list.pids = ids.as_mut_ptr();
+        if ioctl_ptr(self.ctl, CTL_ELEM_LIST, &mut list) != 0 {
+            return Err(-1);
+        }
+        let used = list.used.min(total);
+        let tmp = format!("{}.tmp", path);
+        let mut f = match std::fs::File::create(&tmp) {
+            Ok(f) => f,
+            Err(_) => return Err(-2),
+        };
+        const TYPES: [&str; 7] = ["none", "bool", "int", "enum", "bytes", "iec958", "int64"];
+        let mut n = 0i32;
+        for id in ids.iter().take(used as usize) {
+            let Some(info) = ctl_info_numid(self.ctl, id.numid) else { continue };
+            let name = kernel_name(&info.id.name);
+            let ty = TYPES.get(info.type_ as usize).copied().unwrap_or("?");
+            let _ = write!(
+                f,
+                "{}\t{}\t{}\t{}\t",
+                info.id.numid, name, ty, info.count
+            );
+            match info.type_ {
+                ELEM_TYPE_INTEGER => {
+                    let (min, max) = info_integer(&info);
+                    let _ = write!(f, "{}..{}", min, max);
+                }
+                ELEM_TYPE_INTEGER64 => unsafe {
+                    let _ = write!(
+                        f,
+                        "{}..{}",
+                        info.value.integer64.min, info.value.integer64.max
+                    );
+                },
+                ELEM_TYPE_ENUMERATED => {
+                    let items = enum_items(self.ctl, &info, 64 * NAME_LEN);
+                    let _ = f.write_all(items.as_bytes());
+                    let count = info_enum_items(&info);
+                    if count > 64 {
+                        let _ = write!(f, "|...({})", count);
+                    }
+                }
+                _ => {}
+            }
+            let _ = writeln!(f);
+            n += 1;
+        }
+        let ok = f.flush().is_ok() && f.sync_all().is_ok();
+        drop(f);
+        if !ok || std::fs::rename(&tmp, path).is_err() {
+            crate::loge!("inventory: writing {} failed", tmp);
+            let _ = std::fs::remove_file(&tmp);
+            return Err(-2);
+        }
+        crate::logi!("inventory: {} controls -> {}", n, path);
+        Ok(n)
+    }
+
+    pub fn has(&self, name: &str) -> Option<(u32, String)> {
+        let info = ctl_info(self.ctl, name)?;
+        let items = if info.type_ == ELEM_TYPE_ENUMERATED {
+            enum_items(self.ctl, &info, 1500)
+        } else {
+            String::new()
+        };
+        Some((info.count, items))
+    }
+}
+
+fn create_0600(path: &str) -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+}
+
+fn parse_dec_full(s: &str) -> Option<i64> {    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() && matches!(b[i], b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r') {
+        i += 1;
+    }
+    let mut neg = false;
+    if i < b.len() && (b[i] == b'+' || b[i] == b'-') {
+        neg = b[i] == b'-';
+        i += 1;
+    }
+    let digits = i;
+    let mut value: i128 = 0;
+    while i < b.len() && b[i].is_ascii_digit() {
+        value = value
+            .saturating_mul(10)
+            .saturating_add((b[i] - b'0') as i128);
+        i += 1;
+    }
+    if i == digits || i != b.len() {
+        return None;
+    }
+    if neg {
+        value = -value;
+    }
+    Some(value.clamp(i64::MIN as i128, i64::MAX as i128) as i64)
+}
+
+fn manage_in(
+    ctl: RawFd,
+    safe: bool,
+    crumb: &mut Crumb,
+    list: &mut Vec<Managed>,
+    other: &[Managed],
+    name: &str,
+    want: &[i64],
+    n: usize,
+    write_only: bool,
+) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    if n < 1 || n > MAX_VALUES {
+        crate::loge!(
+            "'{}': {} value(s) (max {}): not managed",
+            name,
+            n,
+            MAX_VALUES
+        );
+        return false;
+    }
+    let Some(info) = ctl_info(ctl, name) else {
+        crate::logw!("no control '{}'", name);
+        return false;
+    };
+    if list.len() == MAX_MANAGED {
+        crate::loge!("too many managed controls");
+        return false;
+    }
+    if !value_ok(name, &info, want, n) {
+        return false;
+    }
+    if other
+        .iter()
+        .any(|m| m.numid == info.id.numid && &m.want[..n] != &want[..n])
+    {
+        crate::loge!("'{}' is already held at another value: not managed twice", name);
+        return false;
+    }
+    let mut m = Managed::empty(name, info.id.numid, info);
+    m.write_only = write_only;
+    m.nwant = n;
+    m.want[..n].copy_from_slice(&want[..n]);
+    if !write_only {
+        if let Some(orig) = ctl_read(ctl, m.numid) {
+            m.orig = orig;
+            m.have_orig = true;
+        }
+    }
+    ctl_write(ctl, safe, crumb, &mut m, want, n);
+    let orig_value = if !m.have_orig {
+        -1
+    } else if m.enumerated {
+        elem_enum(&m.orig, 0) as i64
+    } else {
+        elem_integer(&m.orig, 0) as i64
+    };
+    crate::logi!(
+        "managed '{}' numid={} -> {} (orig {})",
+        name,
+        m.numid,
+        want.first().copied().unwrap_or(0),
+        orig_value
+    );
+    list.push(m);
+    true
+}
+
+fn ctl_write_value(
+    ctl: RawFd,
+    safe: bool,
+    crumb: &mut Crumb,
+    m: &mut Managed,
+    v: &mut ElemValue,
+) -> bool {
+    if safe {
+        return false;
+    }
+    v.id.numid = m.numid;
+    m.last_write_ns = platform::now_ns(libc::CLOCK_MONOTONIC);
+    if ctl < 0 {
+        crate::loge!("write '{}': no mixer", m.name);
+        return false;
+    }
+    crumb.arm();
+    if !crate::alsa::ctl_write(ctl, v) {
+        crate::loge!("write '{}' failed: {}", m.name, platform::errstr());
+        return false;
+    }
+    true
+}
+
+fn ctl_write(
+    ctl: RawFd,
+    safe: bool,
+    crumb: &mut Crumb,
+    m: &mut Managed,
+    vals: &[i64],
+    n: usize,
+) -> bool {
+    if m.info.count != 0 && !value_ok(&m.name, &m.info, vals, n) {
+        return false;
+    }
+    let mut v: ElemValue = unsafe { std::mem::zeroed() };
+    v.id.numid = m.numid;
+    if !m.write_only && ctl >= 0 {
+        if let Some(read) = ctl_read(ctl, m.numid) {
+            v = read;
+        }
+    }
+    for i in 0..n.min(MAX_VALUES) {
+        if m.enumerated {
+            set_elem_enum(&mut v, i, vals[i] as u32);
+        } else {
+            set_elem_integer(&mut v, i, vals[i] as c_long);
+        }
+    }
+    ctl_write_value(ctl, safe, crumb, m, &mut v)
+}
+
+fn ctl_restore(ctl: RawFd, safe: bool, crumb: &mut Crumb, m: &mut Managed) -> bool {
+    if !m.have_orig {
+        return false;
+    }
+    let mut v = m.orig;
+    ctl_write_value(ctl, safe, crumb, m, &mut v)
+}
+
+fn reapply_in(
+    ctl: RawFd,
+    safe: bool,
+    crumb: &mut Crumb,
+    list: &mut [Managed],
+    numid: u32,
+) {
+    for m in list.iter_mut() {
+        if m.numid != numid {
+            continue;
+        }
+        if m.write_only {
+            if platform::now_ns(libc::CLOCK_MONOTONIC) - m.last_write_ns < OWN_WRITE_GRACE_NS {
+                continue;
+            }
+        } else {
+            let mut same = true;
+            if let Some(read) = ctl_read(ctl, numid) {
+                for i in 0..m.nwant {
+                    let cur = if m.enumerated {
+                        elem_enum(&read, i) as i64
+                    } else {
+                        elem_integer(&read, i) as i64
+                    };
+                    if cur != m.want[i] {
+                        same = false;
+                        break;
+                    }
+                }
+            } else {
+                same = false;
+            }
+            if same {
+                continue;
+            }
+        }
+        let now = platform::now_sec();
+        if now < m.paused_until_sec {
+            continue;
+        }
+        if now != m.reapply_sec {
+            m.reapply_sec = now;
+            m.reapplies = 0;
+        }
+        m.reapplies += 1;
+        if m.reapplies > 5 {
+            m.paused_until_sec = now + 10;
+            crate::loge!("'{}' won't keep our value: left alone for 10 s", m.name);
+            continue;
+        }
+        crate::logw!("'{}' rewritten by someone else, re-applying", m.name);
+        let want = m.want;
+        let n = m.nwant;
+        ctl_write(ctl, safe, crumb, m, &want, n);
+    }
+}

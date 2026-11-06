@@ -5,6 +5,12 @@
 mod platform;
 #[cfg(target_os = "android")]
 mod alsa;
+#[cfg(target_os = "android")]
+mod audio;
+#[cfg(target_os = "android")]
+mod mixer;
+#[cfg(target_os = "android")]
+mod opus;
 mod protocol;
 
 fn main() {
