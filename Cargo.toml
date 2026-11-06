@@ -1,0 +1,22 @@
+[package]
+name = "hermessimd-rs"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "HermesSIM host daemon — Rust reimplementation of the Android root daemon"
+build = "build.rs"
+
+[[bin]]
+name = "hermessimd"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+
+[build-dependencies]
+cmake = "0.1"
+
+[profile.release]
+panic = "abort"
+lto = "thin"
+codegen-units = 1
