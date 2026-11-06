@@ -221,23 +221,29 @@ object Updater {
             val fresh = File(app.cacheDir, "hermessimd")
             // The build customize.sh kept at install (bin/<abi>/hermessimd): a 32-bit phone must never get the 64-bit one
             ZipFile(zip).use { z -> z.getInputStream(z.getEntry("bin/$abi/hermessimd")).use { i -> fresh.outputStream().use { o -> i.copyTo(o) } } }
-            val installedSha = Root.sh("sha256sum /data/adb/modules/hermessim-host/hermessimd").out.substringBefore(' ')
+            // Only a real checksum: with root refused this was su's error text, so every app start "updated" a daemon it
+            // couldn't touch (APatch before its root switch, 4 Nov 2026)
+            val installedSha = Root.sh("sha256sum /data/adb/modules/hermessim-host/hermessimd").out.substringBefore(' ').trim()
+                .takeIf { it.matches(Regex("[0-9a-f]{64}")) }
             val freshSha = sha256(fresh)
             // service.sh went back to hermessimd.prev because this build kept failing to start, and wrote its sha256
             // here: installing it again would only repeat that, at every app start (audit, 20 Oct 2026)
             val rolledBack = Root.sh("cat /data/adb/hermessim/daemon-rolled-back 2>/dev/null").out
                 .trim().substringBefore(' ').substringBefore('\n').lowercase()
-            if (rolledBack == freshSha) {
+            if (installedSha == null) {
+                Log.w(TAG, "hermessimd: the installed build can't be read (no root?): left as it is")
+            } else if (rolledBack == freshSha) {
                 Log.w(TAG, "hermessimd: this app's build was rolled back by the module after failing; keeping the running one")
-            } else if (installedSha.isNotEmpty() && installedSha != freshSha) {
+            } else if (installedSha != freshSha) {
                 val m = "/data/adb/modules/hermessim-host"
                 // The running build is kept as hermessimd.prev: service.sh goes back to it if the new one won't start
-                Root.sh("cp $m/hermessimd $m/hermessimd.prev; cp ${Root.q(fresh.path)} $m/hermessimd.tmp && chmod 755 $m/hermessimd.tmp && " +
+                val r = Root.sh("cp $m/hermessimd $m/hermessimd.prev; cp ${Root.q(fresh.path)} $m/hermessimd.tmp && chmod 755 $m/hermessimd.tmp && " +
                     "mv -f $m/hermessimd.tmp $m/hermessimd && kill -USR1 \$(pidof hermessimd)")
                 // USR1: the old daemon leaves the host silenced; the new one announces itself (DAEMON_UP -> reconnect)
-                Log.i(TAG, "hermessimd updated from this app version (restarts in 2 s)")
+                if (r.ok) Log.i(TAG, "hermessimd updated from this app version (restarts in 2 s)")
+                else Log.w(TAG, "hermessimd update FAILED: ${r.out.takeLast(120).trim()}")
             }
-            refreshModuleFiles(zip)
+            if (installedSha != null) refreshModuleFiles(zip)               // root calls too: not without root
             fresh.delete(); zip.delete()
         }.onFailure { Log.w(TAG, "hermessimd update check: $it") }
     }
