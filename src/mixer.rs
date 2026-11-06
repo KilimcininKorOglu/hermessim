@@ -1,7 +1,7 @@
 // ALSA mixer ownership, call routing, safe mode and call originals. GPL-3.0-or-later.
 #![cfg(target_os = "android")]
 
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::RawFd;
@@ -131,9 +131,9 @@ impl Crumb {
                 n = __system_property_get(key.as_ptr(), buf.as_mut_ptr() as *mut c_char);
             }
             if n > 0 {
-                CStr::from_ptr(buf.as_ptr() as *const c_char)
-                    .to_string_lossy()
-                    .into_owned()
+                let n = (n as usize).min(buf.len());
+                let end = buf[..n].iter().position(|&b| b == 0).unwrap_or(n);
+                String::from_utf8_lossy(&buf[..end]).into_owned()
             } else {
                 String::new()
             }
