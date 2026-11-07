@@ -2,7 +2,6 @@
 # Generate the public support page (docs/index.html of the public repo) from profiles/support.json, so the page,
 # the host app and the iPhone app always show the same table. GPL-3.0-or-later.
 #   tools/gen-support-page.py [out.html]
-import html
 import json
 import os
 import sys
