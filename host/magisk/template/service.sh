@@ -163,7 +163,7 @@ until [ "$(getprop sys.boot_completed)" = 1 ]; do sleep 2; done
       if [ $n -lt 12 ]; then sleep 5; else sleep 60; fi
       n=$((n + 1))
       pidof $PKG >/dev/null && continue
-      am start-foreground-service -n $PKG/.HostService >/dev/null 2>&1
+      am start-foreground-service -n $PKG/com.keremgok.hermessim.host.HostService >/dev/null 2>&1
       [ $n -gt 12 ] && echo "$(date) host app was not running: started it"
     done ) &
   echo "$(date) service.sh done (app uid $APP_UID)"
