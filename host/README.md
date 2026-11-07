@@ -1,6 +1,6 @@
 # HermesSIM Host — developer notes (GPL-3.0-or-later)
 
-Runs on the rooted spare phone that holds the SIM (package `com.keremgok.hermessim.host`; "HermesSIM" is the code name).
+Runs on the rooted spare phone that holds the SIM (package `com.keremgok.hermessim.host`).
 Users install one APK (`host/release.sh` builds it): before root it is a compatibility check, after root it installs
 its own Magisk module. The steps below are the developer loop over adb.
 

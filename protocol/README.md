@@ -1,6 +1,6 @@
 # HermesSIM protocol v1 (MIT)
 
-Shared by the host (`sim-relay`, GPL-3.0) and the client (`sim-relay-client`, proprietary).
+Shared by the HermesSIM host (GPL-3.0) and the HermesSIM clients (proprietary).
 Schema: `hermessim.proto`. Lessons it encodes come from the M1 spike (`spikes/m1/RESULTS.md`).
 
 ## Transport
