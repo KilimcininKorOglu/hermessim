@@ -99,6 +99,7 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
             return
         }
         Log.i(TAG, "audio bridge up (L2CAP <-> hermessimd)")
+        CallAudioCheck.bridgeUp()
         val alive = AtomicBoolean(true)
         val backlog = Backlog()
         val down = Thread({ pumpDown(ds, backlog, alive) }, "audio-down").apply { isDaemon = true; start() }
@@ -186,9 +187,9 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
 
         /** Queue one frame; true if the oldest had to go. */
         fun add(frame: ByteArray): Boolean = lock.withLock {
-            q.addLast(frame); st[0]++
+            q.addLast(frame); st[0]++; CallAudioCheck.frameIn()
             var dropped = false
-            while (q.size > BACKLOG) { q.removeFirst(); st[3]++; dropped = true }
+            while (q.size > BACKLOG) { q.removeFirst(); st[3]++; dropped = true; CallAudioCheck.dropped() }
             ready.signal()
             dropped
         }
@@ -212,6 +213,7 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
          */
         fun wrote(frames: Int, ms: Int, now: Long): String? = lock.withLock {
             st[1] += frames; st[2]++; if (ms > st[4]) st[4] = ms
+            CallAudioCheck.wrote(frames, ms.toLong())
             if (now <= nextLog) return@withLock null
             nextLog = now + 5000
             val lagged = st[3] > 0 || st[2] < st[1] || st[4] >= 40
