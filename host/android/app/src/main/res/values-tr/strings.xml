@@ -151,6 +151,13 @@
     <string name="battery_care_band">%%%1$d altında şarj eder, hedefte tutar, %%%2$d üstünde deşarj eder</string>
     <string name="battery_care_off">Kapalı: normal şarj</string>
     <string name="box_off">Kapalı (kurulum bitince telefonunuzdaki HermesSIM\'den açın)</string>
+    <string name="bt_name_title">Bluetooth adı</string>
+    <string name="bt_name_note">Telefonlar bu ana cihazı eklerken bu adı görür. En çok %d byte.</string>
+    <string name="bt_name_btn">Adı değiştir</string>
+    <string name="btn_save">Kaydet</string>
+    <string name="bt_name_empty">Bir ad girin.</string>
+    <string name="bt_name_too_long">Ad çok uzun: en çok %d byte olabilir.</string>
+    <string name="bt_name_failed">Android adı kabul etmedi. Bluetooth\'un açık olduğunu kontrol edip yeniden deneyin.</string>
 
     <string name="error_title">Bu ekranda bir sorun oluştu</string>
     <string name="error_body">Ana cihaz çalışmaya devam ediyor. HermesSIM\'i kapatıp yeniden açın; sorun tekrar ederse düzeltebilmemiz için aşağıdan bir rapor gönderin.</string>

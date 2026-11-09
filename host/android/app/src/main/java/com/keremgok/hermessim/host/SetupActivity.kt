@@ -49,8 +49,9 @@ class SetupActivity : Activity() {
     private data class Card(val title: String, val body: String, val mark: Mark, val primary: Btn? = null, val secondary: Btn? = null,
                             val countdown: Boolean = false)
     // [report]: part of the model so its progress redraws the screen, also after a rotation
+    // [btName]: the host's Bluetooth name (null before root), so a rename redraws its card
     private data class Model(val subtitle: String, val step: Int, val steps: Int, val card: Card, val checks: List<Check>,
-                             val report: Diag.Report = Diag.report)
+                             val report: Diag.Report = Diag.report, val btName: String? = null)
 
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "setup-facts").apply { isDaemon = true } }
@@ -144,7 +145,7 @@ class SetupActivity : Activity() {
 
     private fun model(): Model {
         if (host && Retire.givenBack(this)) return givenBackModel()
-        val m = if (host) hostModel() else setupModel()
+        val m = if (host) hostModel().copy(btName = btName(getSystemService(BluetoothManager::class.java).adapter)) else setupModel()
         if (Retire.failed == 0) return m
         // The removal stopped (nothing changed, or rolled back to a working host): say why, offer it again
         val body = listOfNotNull(rs(Retire.failed), if (Retire.unpaired) getString(R.string.retire_unpaired) else null)
@@ -555,6 +556,7 @@ class SetupActivity : Activity() {
                 })
             }
             if (host && Box.chargeSupported) root.addView(batteryCareCard(), lp(top = 14))
+            m.btName?.let { root.addView(btNameCard(it), lp(top = 14)) }
             root.addView(diagnostics(), lp(top = 14))
             // Whenever root works, a broken host too (module turned off, service down): it must be removable. Not once
             // the removal ran: only its restart is left.
@@ -652,6 +654,46 @@ class SetupActivity : Activity() {
         when (r) { Diag.Report.QUEUED -> R.string.report_failed; Diag.Report.REFUSED -> R.string.report_refused; else -> null }?.let {
             addView(text(getString(it), 12.5f, c.secondary).apply { setPadding(0, dp(6), 0, 0); accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE })
         }
+    }
+
+    /** The name phones see when they add this host: Android's own Bluetooth name, changed here. */
+    private fun btNameCard(name: String) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        background = rounded(c.card, 16)
+        setPadding(dp(18), dp(14), dp(18), dp(14))
+        addView(text(getString(R.string.bt_name_title), 15f, c.text, bold = true))
+        addView(text(name, 15f, c.accent, bold = true).apply { setPadding(0, dp(4), 0, 0) })
+        addView(text(getString(R.string.bt_name_note, BtName.MAX_BYTES), 12.5f, c.secondary).apply { setPadding(0, dp(4), 0, 0) })
+        addView(button(Btn(getString(R.string.bt_name_btn), null), primary = false).apply {
+            setOnClickListener { unlocked { renameBluetooth() } }
+        }, lp(top = 10))
+    }
+
+    /** Asks for the new name; the dialog stays open until Android takes a valid one. */
+    private fun renameBluetooth() {
+        val bt = getSystemService(BluetoothManager::class.java).adapter ?: return
+        val field = android.widget.EditText(this).apply { setText(btName(bt)); setSingleLine(); selectAll() }
+        val frame = android.widget.FrameLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(field) }
+        val dialog = AlertDialog.Builder(this).setTitle(R.string.bt_name_title).setView(frame)
+            .setPositiveButton(R.string.btn_save, null).setNegativeButton(R.string.btn_cancel, null).show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val error = applyBtName(bt, BtName.check(field.text.toString()))
+            if (error == null) { dialog.dismiss(); shown = null; tick.run() } else field.error = error
+        }
+    }
+
+    /** Sets a valid name; returns why it was not set, or null once Android took it. */
+    private fun applyBtName(bt: android.bluetooth.BluetoothAdapter, check: BtName.Check): String? = when (check) {
+        BtName.Check.Empty -> getString(R.string.bt_name_empty)
+        BtName.Check.TooLong -> getString(R.string.bt_name_too_long, BtName.MAX_BYTES)
+        is BtName.Check.Ok -> if (setBtName(bt, check.name)) null else getString(R.string.bt_name_failed)
+    }
+
+    @Suppress("MissingPermission")
+    private fun setBtName(bt: android.bluetooth.BluetoothAdapter, name: String): Boolean {
+        val ok = runCatching { bt.setName(name) }.onFailure { Log.w("HermesSimHost", "Bluetooth name not set: $it") }.getOrDefault(false)
+        Log.i("HermesSimHost", "Bluetooth name set to ${name.toByteArray().size} bytes -> $ok")
+        return ok
     }
 
     /** "Stop using this phone as a host": the phone back as an ordinary phone, HermesSIM removed (Retire). */

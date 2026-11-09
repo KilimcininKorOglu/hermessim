@@ -157,6 +157,13 @@
     <string name="battery_care_band">Charges below %1$d%%, holds at the target, drains above %2$d%%</string>
     <string name="battery_care_off">Off: charges normally</string>
     <string name="box_off">Off (turn it on from HermesSIM on your phone when setup is done)</string>
+    <string name="bt_name_title">Bluetooth name</string>
+    <string name="bt_name_note">Phones see this name when they add this host. At most %d bytes.</string>
+    <string name="bt_name_btn">Change name</string>
+    <string name="btn_save">Save</string>
+    <string name="bt_name_empty">Enter a name.</string>
+    <string name="bt_name_too_long">The name is too long: at most %d bytes.</string>
+    <string name="bt_name_failed">Android didn\'t take the name. Check that Bluetooth is on and try again.</string>
 
     <string name="error_title">This screen hit a problem</string>
     <string name="error_body">The host keeps working. Close and reopen HermesSIM; if this comes back, send a report below so we can fix it.</string>

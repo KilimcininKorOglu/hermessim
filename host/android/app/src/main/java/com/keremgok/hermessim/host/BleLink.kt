@@ -126,6 +126,7 @@ class BleLink(
         if (!radioWatch) {
             radioWatch = true
             ctx.registerReceiver(radioReceiver, android.content.IntentFilter(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED))
+            ctx.registerReceiver(nameReceiver, android.content.IntentFilter(android.bluetooth.BluetoothAdapter.ACTION_LOCAL_NAME_CHANGED))
         }
         if (!allowed()) {
             if (!waitingPermission) { waitingPermission = true; Log.w(TAG, "no Bluetooth permission: GATT service waits for self-repair") }
@@ -174,6 +175,23 @@ class BleLink(
                     Log.i(TAG, "Bluetooth on again: rebuilding the GATT service and advertising")
                     start()
                 }
+            }
+        }
+    }
+
+    /**
+     * The phone's Bluetooth name changed (the host screen's Bluetooth name, or Android's settings): put the new name in
+     * the running set's scan response, so phones adding the host see it without a restart. A name that did not fit
+     * before may fit now, so it is tried again.
+     */
+    private val nameReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: android.content.Context, i: android.content.Intent) {
+            main.post {
+                withName = true
+                val set = advSet ?: return@post
+                runCatching { set.setScanResponseData(scanResponse()) }
+                    .onSuccess { Log.i(TAG, "advertising: Bluetooth name changed (${nameBytes()} bytes)") }
+                    .onFailure { Log.w(TAG, "advertising: new Bluetooth name not taken: $it") }
             }
         }
     }
