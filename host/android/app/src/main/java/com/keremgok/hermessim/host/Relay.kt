@@ -641,9 +641,13 @@ object Relay {
         }, 5000)
     }
 
-    /** The host's half of a problem report from the iPhone: scrubbed log + facts, in parts (frames are <= 4 KB). */
+    /**
+     * The host's half of a client's diagnostics request: scrubbed log + facts, in parts (frames are <= 4 KB). The client
+     * waits a limited time for it, so the log is read with the short root timeouts ([Diag.recentLog] fast).
+     */
     private fun sendDiagnostics(d: Peer, maxBytes: Int) = Thread {
-        val log = Diag.recentLog(if (maxBytes in 1..32_000) maxBytes else 16_000)
+        val t0 = SystemClock.elapsedRealtime()
+        val log = Diag.recentLog(if (maxBytes in 1..32_000) maxBytes else 16_000, fast = true)
         val facts = Diag.facts("event").apply {
             remove("install_id"); remove("kind")
             Compat.bleCaps(app)?.let { put("ble", it) }
@@ -654,7 +658,7 @@ object Relay {
             if (i == 0) m.setFactsJson(facts)
             main.post { send(d, Envelope.newBuilder().setDiagnostics(m)) }
         }
-        Log.i(TAG, "diagnostics sent to the client: ${log.length} chars in ${parts.size} parts")
+        Log.i(TAG, "diagnostics sent to the client: ${log.length} chars in ${parts.size} parts, ready after ${SystemClock.elapsedRealtime() - t0} ms")
     }.start()
 
     /**
