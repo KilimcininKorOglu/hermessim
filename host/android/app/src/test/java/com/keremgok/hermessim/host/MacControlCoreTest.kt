@@ -1,8 +1,11 @@
 package com.keremgok.hermessim.host
 
 import com.keremgok.hermessim.protocol.v1.HostAction
+import com.keremgok.hermessim.protocol.v1.Hotspot
 import com.keremgok.hermessim.protocol.v1.MacControl
+import com.keremgok.hermessim.protocol.v1.MacStatus
 import com.keremgok.hermessim.protocol.v1.SetHotspotBlock
+import com.keremgok.hermessim.protocol.v1.Sim
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -46,15 +49,29 @@ class MacControlCoreTest {
     }
 
     @Test
-    fun onlyAListedMacMayControlAndRemovingItForgetsThat() {
-        val core = MacCore { 0L }
-        val listed = "AA:BB:CC:DD:EE:01"
-        core.openWindow(); core.admit(MacCore.Mac(listed, "Mac"))
-        assertFalse(core.control(listed))                                    // off for a new Mac
-        assertFalse(core.setControl("AA:BB:CC:DD:EE:02", true))              // a stranger can't be allowed
-        assertTrue(core.setControl(listed, true))
-        assertTrue(core.control(listed))
-        core.remove(listed)
-        assertFalse(core.control(listed))
+    fun onlyAMacWithControlSeesTheLinesAndDevices() {
+        val device = Hotspot.Client.newBuilder().setMac("aa:bb:cc:dd:ee:0f").setIp("192.168.43.10").build()
+        val base = MacStatus.newBuilder().setDevices(1).addAllLines(MacControlCore.lines(listOf(
+            Sim.newBuilder().setSlot(1).setOperatorName("Turkcell").setEnabled(true).setDefaultData(true).build())))
+            .addClients(device).addBlocked(device).build()
+        with(MacControlCore.shown(base, texts = true, control = true)) {
+            assertTrue(control && texts)
+            assertEquals("Turkcell", linesList.single().name)
+            assertTrue(linesList.single().defaultData)
+            assertEquals(listOf(device), clientsList)
+            assertEquals(1, blockedCount)
+        }
+        with(MacControlCore.shown(base, texts = false, control = false)) {
+            assertFalse(control || texts)
+            assertEquals(0, linesCount + clientsCount + blockedCount)
+            assertEquals(1, devices)                                         // the count stays for every Mac
+        }
+    }
+
+    @Test
+    fun aStatusTooLongForTheLinkIsReadInstead() {
+        val status = ByteArray(200)
+        assertEquals(200, MacControlCore.notified(status, mtu = 203).size)
+        assertEquals(0, MacControlCore.notified(status, mtu = 202).size)
     }
 }

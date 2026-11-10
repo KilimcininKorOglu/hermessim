@@ -6,7 +6,10 @@ import android.os.Handler
 import android.util.Log
 import com.keremgok.hermessim.protocol.v1.HostActionResult
 import com.keremgok.hermessim.protocol.v1.MacControl
+import com.keremgok.hermessim.protocol.v1.MacLine
+import com.keremgok.hermessim.protocol.v1.MacStatus
 import com.keremgok.hermessim.protocol.v1.SetSim
+import com.keremgok.hermessim.protocol.v1.Sim
 
 /**
  * A Mac's control write (protocol/README.md "Mac", Control): the mobile data line, a host action or a hotspot device
@@ -31,6 +34,24 @@ object MacControlCore {
         MacControl.WhatCase.BLOCK -> if (HotspotGuardCore.validMac(control.block.mac.lowercase())) null else FAILED
         else -> FAILED
     }
+
+    /** The host's lines as a Mac with control chooses among them (MacStatus.lines). */
+    fun lines(sims: List<Sim>): List<MacLine> = sims.map { sim ->
+        MacLine.newBuilder().apply { slot = sim.slot; name = sim.operatorName; enabled = sim.enabled; defaultData = sim.defaultData }.build()
+    }
+
+    /** [base] as one Mac sees it: its own permissions, and the lines and devices only with [control]. */
+    fun shown(base: MacStatus, texts: Boolean, control: Boolean): MacStatus = base.toBuilder().also { b ->
+        b.texts = texts
+        b.control = control
+        if (!control) b.clearLines().clearClients().clearBlocked()
+    }.build()
+
+    /**
+     * A status notification's value: the status when it fits the link ([mtu] - 3 bytes), else nothing, and the Mac
+     * reads the status (a long read).
+     */
+    fun notified(status: ByteArray, mtu: Int): ByteArray = if (status.size <= mtu - 3) status else ByteArray(0)
 }
 
 /** Runs a Mac's control write on the main thread and gives the write's status. */

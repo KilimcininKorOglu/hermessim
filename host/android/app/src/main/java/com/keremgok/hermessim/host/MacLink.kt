@@ -60,13 +60,19 @@ class MacLink(
     private val core = MacCore(SystemClock::elapsedRealtime).apply {
         load(prefs.getStringSet("macs", emptySet()).orEmpty())
         loadTexts(prefs.getStringSet("texts", emptySet()).orEmpty())
+        loadControl(prefs.getStringSet("control", emptySet()).orEmpty())
     }
     private val shelf = MacTextShelf(System::currentTimeMillis)
     private val writes = PreparedWrites()
     private var gatt: BluetoothGattServer? = null
     private val connected = HashSet<String>()
-    // The texts notification carries no value: the Mac reads them, a long read past the link's MTU.
-    private val notifier = MacNotifier(bt) { address, uuid -> if (uuid == TEXTS) ByteArray(0) else statusFor(address).toByteArray() }
+    // The texts notification carries no value, nor a status too long for the link: the Mac reads them (a long read).
+    private val notifier = MacNotifier(bt) { address, uuid ->
+        if (uuid == TEXTS) ByteArray(0) else MacControlCore.notified(statusFor(address).toByteArray(), mtu(address))
+    }
+
+    /** The link's ATT MTU per Mac (BleLink knows it; 23 until the Mac asks for more). */
+    var mtu: (String) -> Int = { 23 }
     private val advertiser = MacAdvertiser(main, bt,
         wanted = { gatt != null && (core.macs.isNotEmpty() || core.windowOpen()) }, pairing = core::windowOpen, refused = { changed() })
 
@@ -78,9 +84,10 @@ class MacLink(
 
     /** For HostStatus.mac. */
     fun access(): MacAccess = MacAccess.newBuilder().setSupported(advertiser.supported()).setPairing(core.windowOpen()).setTexts(true)
+        .setControl(true)
         .addAllMacs(core.macs.map {
             PairedMac.newBuilder().setName(it.name).setAddress(it.address).setConnected(it.address in connected)
-                .setTexts(core.texts(it.address)).build()
+                .setTexts(core.texts(it.address)).setControl(core.control(it.address)).build()
         })
         .build()
 
@@ -102,8 +109,9 @@ class MacLink(
         }
     }
 
-    /** What [address] is shown: the host's state, plus whether this Mac may read the texts. */
-    private fun statusFor(address: String): MacStatus = with(status().toBuilder()) { texts = core.texts(address); build() }
+    /** What [address] is shown: the host's state with this Mac's permissions (the lines and devices only with control). */
+    private fun statusFor(address: String): MacStatus =
+        MacControlCore.shown(status(), core.texts(address), core.control(address))
 
     // ---------------------------------------------------------------- requests (binder threads: answered on main)
 
@@ -260,13 +268,21 @@ class MacLink(
     }
 
     /** SetMacTexts: the Mac learns it from its status; one no longer allowed stops hearing about texts. */
-    fun setTexts(address: String, on: Boolean) = main.post {
-        if (!core.setTexts(address, on)) return@post
-        save()
-        Log.i(TAG, "Mac $address: texts ${if (on) "on" else "off"}")
-        if (!on) notifier.subscribe(TEXTS, address, false)
-        changed()
-    }
+    fun setTexts(address: String, on: Boolean) =
+        permit(address, on, "texts", core::setTexts) { if (!on) notifier.subscribe(TEXTS, address, false) }
+
+    /** SetMacControl: the Mac learns it from its status, which then carries the lines and devices, or no longer. */
+    fun setControl(address: String, on: Boolean) = permit(address, on, "control", core::setControl) {}
+
+    /** One permission of one Mac changed: stored, [then] applied, and every Mac hears the new status. */
+    private fun permit(address: String, on: Boolean, what: String, set: (String, Boolean) -> Boolean, then: () -> Unit) =
+        main.post {
+            if (!set(address, on)) return@post
+            save()
+            Log.i(TAG, "Mac $address: $what ${if (on) "on" else "off"}")
+            then()
+            changed()
+        }
 
     fun remove(address: String) = main.post {
         if (!core.remove(address)) return@post
@@ -279,10 +295,11 @@ class MacLink(
         changed()
     }
 
-    /** The list and, apart from it, the Macs that may read the texts. */
+    /** The list and, apart from it, the Macs that may read the texts and those that may change host settings. */
     private fun save() = with(prefs.edit()) {
         putStringSet("macs", core.stored())
         putStringSet("texts", core.storedTexts())
+        putStringSet("control", core.storedControl())
         apply()
     }
 

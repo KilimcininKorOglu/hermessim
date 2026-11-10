@@ -86,13 +86,13 @@ class BleLink(
     }
 
     private val main = Handler(Looper.getMainLooper())
-    init { mac?.admitted = { restartAdvertising() } }
     private val bt = ctx.getSystemService(BluetoothManager::class.java)
     private val prefs = ctx.getSharedPreferences("ble", Context.MODE_PRIVATE)
     private var gatt: BluetoothGattServer? = null
     private lateinit var tx: BluetoothGattCharacteristic
     private val readers = ConcurrentHashMap<String, Framing.Reader>()
     private val mtu = ConcurrentHashMap<String, Int>()
+    init { mac?.apply { admitted = { restartAdvertising() }; mtu = { address -> this@BleLink.mtu[address] ?: 23 } } }
     private val queues = ConcurrentHashMap<String, ArrayDeque<ByteArray>>()
     private val inFlight = ConcurrentHashMap<String, Boolean>()
     private val notifyFails = ConcurrentHashMap<String, Int>()

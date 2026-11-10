@@ -405,6 +405,7 @@ object Relay {
             Envelope.BodyCase.SET_MAC_PAIRING -> macLink.setPairing(env.setMacPairing.on)
             Envelope.BodyCase.REMOVE_MAC -> macLink.remove(env.removeMac.address)
             Envelope.BodyCase.SET_MAC_TEXTS -> macLink.setTexts(env.setMacTexts.address, env.setMacTexts.on)
+            Envelope.BodyCase.SET_MAC_CONTROL -> macLink.setControl(env.setMacControl.address, env.setMacControl.on)
             Envelope.BodyCase.USSD_REQUEST -> Ussd.run(app, env.ussdRequest, main) { r ->
                 send(d, Envelope.newBuilder().setUssdResult(r), env.seq)
             }
@@ -784,7 +785,10 @@ object Relay {
         return b.build()
     }
 
-    /** What a Mac is shown (MacStatus): the hotspot as the client sees it, plus the host's battery and signal. */
+    /**
+     * What a Mac is shown (MacStatus): the hotspot as the client sees it, plus the host's battery and signal, and the
+     * lines and devices MacLink keeps for a Mac with control.
+     */
     @SuppressLint("MissingPermission")
     private fun macStatus(): MacStatus {
         val hs = Hotspot.info(app)
@@ -798,7 +802,8 @@ object Relay {
             .setHostName(name?.takeIf { it.isNotBlank() } ?: Build.MODEL)
             .setControllable(hs.supported && HostWifi.clientOverride == null)
             .setPausedForCall(hs.pausedForCall).setOffWhenUnused(true).setLimitReached(hs.limitReached)
-            .setDevices(hs.clientsCount)
+            .setDevices(hs.clientsCount).setHostActions(true)
+            .addAllLines(MacControlCore.lines(Sims.status(app))).addAllClients(hs.clientsList).addAllBlocked(hs.blockedList)
             .build()
     }
 
