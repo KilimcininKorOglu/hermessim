@@ -402,6 +402,9 @@ object Relay {
                 send(d, Envelope.newBuilder().setUssdResult(r), env.seq)
             }
             Envelope.BodyCase.SET_CALL_RULES -> { CallRuleStore.set(env.setCallRules.rules); main.post(pushStatus) }
+            Envelope.BodyCase.HOST_ACTION -> HostActions.run(app, env.hostAction.action, main) { r ->
+                send(d, Envelope.newBuilder().setHostActionResult(r), env.seq)
+            }
             Envelope.BodyCase.SET_HOST_WIFI -> HostWifi.setUseWhenAway(env.setHostWifi.useWhenAway, remote = d !is Peer.Ble)
             // Network names and passwords travel over Bluetooth only (18 Oct).
             Envelope.BodyCase.WIFI_SCAN, Envelope.BodyCase.WIFI_ADD, Envelope.BodyCase.WIFI_FORGET -> {
@@ -770,6 +773,7 @@ object Relay {
         if (::macLink.isInitialized) b.setMac(macLink.access())
         b.setUssd(true)
         b.setCallRules(CallRuleStore.rules)
+        b.setHostActions(true)
         return b.build()
     }
 
