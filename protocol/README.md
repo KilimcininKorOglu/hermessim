@@ -46,6 +46,19 @@ connection event can't take 100 single-packet writes a second. Receivers parse t
   switch and the busy reply. Blocked calls and texts never reach a client, a push or a Mac. A text the host sends by
   itself (the busy reply, a Mac's reply) reaches the clients served at that moment as `HostSmsSent` (never as a
   push, and not replayed), then its outcome as `SmsSendResult` with the same id.
+- Host actions (where `HostStatus.host_actions`): `HostAction{RECONNECT_NETWORK}` turns airplane mode on for 5 s, then
+  off, from a detached root script, so airplane mode goes off even if the host app dies meanwhile; a hotspot that was on
+  comes back on. `HostAction{REBOOT}` restarts the phone. The host answers `HostActionResult` with `reply_to` when it
+  starts (a restart follows a second later) and refuses both during a call (`IN_CALL`). Every link drops meanwhile and
+  comes back by itself.
+- Hotspot devices: `Hotspot.Client` carries the device's IPv4 address and, where `capabilities.client_usage`, the bytes
+  to and from it since the hotspot came on (counted per address in an iptables chain; a phone whose tethering runs in
+  hardware offload may count less). Where `capabilities.block_clients`, `SetHotspotBlock` cuts a device off the
+  internet by its MAC address: it stays connected, its forwarded traffic is dropped. The list (`Hotspot.blocked`, at
+  most 32) is kept on the host and applied whenever the hotspot comes on.
+- Charge limit: `SetBox.charge_limit` takes 50-100 (the clients offer steps of 5; 100 = off). `Box.charge_state` says
+  what the limit does now; `STUCK` means the phone kept undoing the cut and the host left it for the hour, and the
+  host then sends `HostNotice{CHARGE_CONTROL_STUCK}` once.
 
 ## Remote mode (internet)
 
@@ -101,7 +114,8 @@ Unpair forgets P.
 
 **Health notices.** The host sends each `HostNotice` once per event: battery at 15 % and at 5 % while not charging
 (armed again once it charges or passes 30 %), a SIM that newly asks for its PIN or PUK, the monthly hotspot limit
-at 80 % and 100 %, and a SIM that starts roaming (armed again once it stops; the host turns nothing off). That the host has been unreachable for a while the client works out itself (a host that is off
+at 80 % and 100 %, a SIM that starts roaming (armed again once it stops; the host turns nothing off), and a charge
+limit the phone keeps undoing (armed again once the limit holds). That the host has been unreachable for a while the client works out itself (a host that is off
 can't send anything).
 
 An Android app the user force-stopped gets no push until it is opened again (Android's rule); a swiped-away one does.
@@ -122,6 +136,7 @@ texts characteristic and its notifications answer only a Mac with `PairedMac.tex
 | `0e9c0015-0971-48af-ba0b-2c5c254faec0` | Mac pairing | advertised in place of the Mac service while the pairing window is open |
 | `0e9c0016-0971-48af-ba0b-2c5c254faec0` | texts: `MacTexts` | read, notify (no value: read again), encrypted, only with `PairedMac.texts` |
 | `0e9c0017-0971-48af-ba0b-2c5c254faec0` | reply: `MacReply` | write with response (prepared write allowed), encrypted, only with `PairedMac.texts` |
+| `0e9c0018-0971-48af-ba0b-2c5c254faec0` | control: `MacControl` | write with response, encrypted, only with `PairedMac.control` |
 
 Each value is one serialised message; a long read continues at its offset. **Pairing.** The client sends
 `SetMacPairing{on}`; for 120 s the host advertises the pairing UUID and confirms the one Bluetooth pairing request
@@ -133,6 +148,11 @@ that arrives, then puts that Mac on its list. The Mac starts the pairing by read
 text still in `MacTexts` (so a Mac can't text any number), on the line it came in on, and the clients see the reply as
 `HostSmsSent{origin MAC}`. A refused write gets `GATT_FAILURE`; a host without the characteristic has no replies. The
 write is acknowledged when the host starts sending: its outcome reaches the clients, not the Mac.
+**Control.** `SetMacControl{address, on}` lets one Mac change host settings (off for a new Mac); `MacStatus.control`
+tells the Mac, and only such a Mac gets the lines, the hotspot's devices and the blocked list in `MacStatus`. It
+writes `MacControl` to the control characteristic: the data line (`data_slot`), a host action, or a device block, as
+the client's own commands. A write without the permission gets `GATT_INSUFFICIENT_AUTHORIZATION`, a host action
+during a call the application error `0x80`, any other refusal `GATT_FAILURE`.
 
 ## Updates
 

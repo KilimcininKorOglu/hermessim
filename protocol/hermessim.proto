@@ -59,6 +59,10 @@ message Envelope {
     UssdResult ussd_result = 71;                 // host -> client (reply)
     SetCallRules set_call_rules = 72;            // client -> host: blocked numbers and the busy reply (where HostStatus.call_rules)
     HostSmsSent host_sms_sent = 73;              // host -> client: a text the host itself sent (busy reply, a Mac's reply)
+    HostAction host_action = 74;                 // client -> host: reconnect the network or restart (where HostStatus.host_actions)
+    HostActionResult host_action_result = 75;    // host -> client (reply)
+    SetHotspotBlock set_hotspot_block = 76;      // client -> host: cut a hotspot device off the internet, or let it back
+    SetMacControl set_mac_control = 77;          // client -> host: let a paired Mac change host settings (README "Mac")
   }
 }
 
@@ -122,6 +126,7 @@ message HostStatus {
   MacAccess mac = 17;            // Macs that may ask this host for its hotspot (README "Mac")
   bool ussd = 18;                // this host runs USSD codes (UssdRequest)
   CallRules call_rules = 19;     // blocked numbers and the busy reply; set = this host has them (SetCallRules)
+  bool host_actions = 20;        // this host reconnects its network and restarts on request (HostAction)
   enum VoiceTier { VOICE_TIER_UNSPECIFIED = 0; BASIC = 1; FULL_VOICE = 2; }
 }
 
@@ -168,10 +173,19 @@ message Box {
   bool on = 1;
   bool suspended = 2;            // escape gesture used: screen usable until suspended_until_ms, then back on
   int64 suspended_until_ms = 3;
-  int32 charge_limit = 4;        // target percent 50-90; 100 = off. Band derived: 60 -> 57..62
+  int32 charge_limit = 4;        // target percent 50-100 in steps of 5; 100 = off. Band derived: 60 -> 57..62
   bool charge_limit_supported = 5;
   bool call_screen_hidden = 6;   // host app holds the dialer role (no OEM in-call screen)
   int32 battery_health = 7;      // unused: kernels report design capacity as full capacity, so it was misleading
+  ChargeState charge_state = 8;  // what the charge limit does right now (status only)
+  enum ChargeState {
+    CHARGE_STATE_UNSPECIFIED = 0; // unknown, or an older host
+    NOT_LIMITING = 1;            // no limit, no control on this phone, or unplugged
+    CHARGING = 2;                // plugged in, below the limit: charging up to it
+    HELD = 3;                    // at the limit: charging stopped, the charger powers the phone
+    DRAINING = 4;                // above the limit: charging stopped until the battery comes down to it
+    STUCK = 5;                   // the phone keeps undoing the limit: the host left it alone for this hour
+  }
 }
 
 message SetBox {
@@ -213,10 +227,19 @@ message Hotspot {
   // again: it is not cut a second time that month. 0 = no limit.
   int64 monthly_limit_bytes = 20;
   bool limit_reached = 21;       // this month's usage is at or above the limit (status only)
+  // Devices cut off the internet (SetHotspotBlock; offered only where capabilities.block_clients), connected or not.
+  // A blocked device stays on the hotspot but its traffic is dropped. At most 32. Status only.
+  repeated Client blocked = 22;
 
   enum Band { BAND_UNSPECIFIED = 0; BAND_2GHZ = 1; BAND_5GHZ = 2; BAND_6GHZ = 3; BAND_AUTO = 4; BAND_DUAL_2_5 = 5; }
   enum Security { SECURITY_UNSPECIFIED = 0; OPEN = 1; WPA2 = 2; WPA3_TRANSITION = 3; WPA3 = 4; }
-  message Client { string name = 1; string mac = 2; }
+  message Client {
+    string name = 1;             // the device's own name where the host can read it, else empty
+    string mac = 2;
+    string ip = 3;               // its IPv4 address on the hotspot; empty in Hotspot.blocked
+    int64 down = 4;              // bytes to the device since the hotspot came on (capabilities.client_usage)
+    int64 up = 5;                // bytes from the device since the hotspot came on
+  }
   message Usage {
     int64 session_down = 1;      // bytes to connected devices since the hotspot last turned on
     int64 session_up = 2;        // bytes from connected devices
@@ -235,6 +258,8 @@ message Hotspot {
     bool call_pause = 7;
     bool apple_marker = 8;       // Hotspot.apple_marker can be set (Android 13 and later)
     bool monthly_limit = 9;      // Hotspot.monthly_limit_bytes can be set
+    bool client_usage = 10;      // Client.down / up are counted
+    bool block_clients = 11;     // SetHotspotBlock works
   }
 }
 
@@ -327,6 +352,7 @@ message MacAccess {
   bool pairing = 2;              // the pairing window is open now
   repeated PairedMac macs = 3;
   bool texts = 4;                // this host can show texts on a Mac (PairedMac.texts, SetMacTexts)
+  bool control = 5;              // this host lets a Mac change its settings (PairedMac.control, SetMacControl)
 }
 
 message PairedMac {
@@ -334,6 +360,7 @@ message PairedMac {
   string address = 2;
   bool connected = 3;
   bool texts = 4;                // this Mac may read the recent texts (off for a newly paired Mac)
+  bool control = 5;              // this Mac may change the data line, reconnect, restart and block devices (off for a new Mac)
 }
 
 // on: open the pairing window for 120 s (again from the start if open); off: close it.
@@ -343,6 +370,12 @@ message RemoveMac { string address = 1; }
 
 // PairedMac.texts for the Mac at `address`.
 message SetMacTexts {
+  string address = 1;
+  bool on = 2;
+}
+
+// PairedMac.control for the Mac at `address`.
+message SetMacControl {
   string address = 1;
   bool on = 2;
 }
@@ -362,7 +395,33 @@ message MacStatus {
   bool off_when_unused = 10;     // understands MacCommand.off_when_unused_s
   bool limit_reached = 11;       // the monthly data limit is used up (Hotspot.limit_reached): don't ask for the hotspot
   bool texts = 12;               // this Mac may read the texts characteristic (PairedMac.texts)
+  bool charging = 13;            // the host phone is charging
+  int32 devices = 14;            // devices on the hotspot now
+  bool control = 15;             // this Mac may write MacControl (PairedMac.control)
+  bool host_actions = 16;        // the host reconnects and restarts on request (HostStatus.host_actions)
+  // Filled only for a Mac with control:
+  repeated MacLine lines = 17;   // the host's SIMs, for the data line choice
+  repeated Hotspot.Client clients = 18;  // devices on the hotspot (as Hotspot.clients)
+  repeated Hotspot.Client blocked = 19;  // devices cut off the internet (as Hotspot.blocked)
   enum State { OFF = 0; STARTING = 1; ON = 2; FAILED = 3; }
+}
+
+message MacLine {
+  int32 slot = 1;
+  string name = 2;               // the operator's name
+  bool enabled = 3;
+  bool default_data = 4;         // carries mobile data and the hotspot
+}
+
+// Control (write with response, only with PairedMac.control): one change, as the client's own commands. A Mac without
+// control gets GATT_INSUFFICIENT_AUTHORIZATION; a restart or reconnect during a call gets the application error 0x80;
+// anything else the host refuses gets GATT_FAILURE.
+message MacControl {
+  oneof what {
+    int32 data_slot = 1;         // as SetSim{slot, make_default_data}
+    HostAction.Action host_action = 2;
+    SetHotspotBlock block = 3;
+  }
 }
 
 // Command (write): as SetHotspot.
@@ -523,6 +582,7 @@ message HostNotice {
     DATA_LIMIT_NEAR = 4;         // the hotspot used 80 % of its monthly limit
     DATA_LIMIT_REACHED = 5;      // the monthly limit is used up: the host turned the hotspot off
     ROAMING = 6;                 // a SIM started roaming; the host changes nothing (Sim.data_roaming says whether data runs)
+    CHARGE_CONTROL_STUCK = 7;    // the phone keeps undoing the charge limit (Box.charge_state STUCK)
   }
 }
 
@@ -569,6 +629,32 @@ message HostSmsSent {
   int64 at_ms = 5;
   Origin origin = 6;
   enum Origin { AUTO_REPLY = 0; MAC = 1; }
+}
+
+// Reconnect the host's network (airplane mode on for 5 s, then off: the host's links drop and come back by themselves;
+// a hotspot that was on comes back on) or restart the host phone. Refused during a call.
+message HostAction {
+  Action action = 1;
+  enum Action { ACTION_UNSPECIFIED = 0; RECONNECT_NETWORK = 1; REBOOT = 2; }
+}
+
+// Sent when the host starts the action (a restart follows a second later), or refuses it.
+message HostActionResult {
+  bool ok = 1;
+  Failure failure = 2;
+  enum Failure {
+    NONE = 0;
+    IN_CALL = 1;                 // a call is up: try again after it
+    FAILED = 2;                  // the host couldn't start it
+  }
+}
+
+// Cut a device off the hotspot's internet (it stays connected) or let it back. Matched on the MAC address; at most 32
+// blocked devices. `name` is kept for the list (the device may not be connected later).
+message SetHotspotBlock {
+  string mac = 1;
+  bool blocked = 2;
+  string name = 3;
 }
 
 // Problem reports (anonymous): the host's recent log, scrubbed on the host before it leaves (no phone numbers,
