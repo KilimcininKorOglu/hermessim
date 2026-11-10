@@ -54,6 +54,7 @@ message Envelope {
     SetMacPairing set_mac_pairing = 66;          // client -> host: open or close the window in which a Mac may pair
     RemoveMac remove_mac = 67;                   // client -> host: forget a paired Mac
     HostNotice host_notice = 68;                 // host -> client: something the user should hear about (README "Push")
+    SetMacTexts set_mac_texts = 69;              // client -> host: let a paired Mac read the recent texts (README "Mac")
   }
 }
 
@@ -312,24 +313,33 @@ message SetHotspot { bool on = 1; int32 off_when_unused_s = 2; }
 // Hotspot.call_pause on or off. Applies at once (a running hotspot isn't restarted, as SetHotspotConfig would).
 message SetHotspotCallPause { bool on = 1; }
 
-// Macs (README "Mac"). A Mac reaches the host on a GATT service of its own, apart from the client's, and may only ask
-// for the hotspot. It pairs while the client holds the window open; the host accepts no other pairing request.
+// Macs (README "Mac"). A Mac reaches the host on a GATT service of its own, apart from the client's, and may ask for
+// the hotspot; it reads the recent texts only where the client allowed it (PairedMac.texts). It pairs while the client
+// holds the window open; the host accepts no other pairing request.
 message MacAccess {
   bool supported = 1;            // this host can serve Macs (its Bluetooth runs a second advertisement)
   bool pairing = 2;              // the pairing window is open now
   repeated PairedMac macs = 3;
+  bool texts = 4;                // this host can show texts on a Mac (PairedMac.texts, SetMacTexts)
 }
 
 message PairedMac {
   string name = 1;
   string address = 2;
   bool connected = 3;
+  bool texts = 4;                // this Mac may read the recent texts (off for a newly paired Mac)
 }
 
 // on: open the pairing window for 120 s (again from the start if open); off: close it.
 message SetMacPairing { bool on = 1; }
 
 message RemoveMac { string address = 1; }
+
+// PairedMac.texts for the Mac at `address`.
+message SetMacTexts {
+  string address = 1;
+  bool on = 2;
+}
 
 // The Mac service's characteristics carry these, each value one serialised message.
 // Status (read, notify): what the Mac shows and decides on.
@@ -345,6 +355,7 @@ message MacStatus {
   bool paused_for_call = 9;
   bool off_when_unused = 10;     // understands MacCommand.off_when_unused_s
   bool limit_reached = 11;       // the monthly data limit is used up (Hotspot.limit_reached): don't ask for the hotspot
+  bool texts = 12;               // this Mac may read the texts characteristic (PairedMac.texts)
   enum State { OFF = 0; STARTING = 1; ON = 2; FAILED = 3; }
 }
 
@@ -356,6 +367,17 @@ message MacCommand {
 
 // Secret (read): the hotspot's passphrase, kept out of the status notifications.
 message MacSecret { string passphrase = 1; }
+
+// Texts (read, notify): the texts of the last 10 minutes, newest first, at most 5, the value at most 512 bytes (the
+// oldest drop first; a lone text too long is cut at its end). A notification carries no value: the Mac reads.
+message MacTexts { repeated MacText texts = 1; }
+
+message MacText {
+  string id = 1;                 // SmsReceived.id
+  string sender = 2;             // SmsReceived.from_e164, else from_raw
+  string body = 3;
+  int64 at_ms = 4;               // SmsReceived.received_ms
+}
 
 // Per-SIM settings from the client. Only the fields that are present are changed.
 message SetSim {

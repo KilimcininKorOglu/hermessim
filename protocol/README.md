@@ -101,9 +101,10 @@ An Android app the user force-stopped gets no push until it is opened again (And
 
 ## Mac
 
-A Mac asks the host for its hotspot, nothing else, on a GATT service of its own. Its connections never count as the
-client's link. Every characteristic needs an encrypted link, and the host answers only Macs on its list
-(`HostStatus.mac.macs`); any other central gets `GATT_INSUFFICIENT_AUTHORIZATION`.
+A Mac asks the host for its hotspot on a GATT service of its own, and reads the recent texts where the client allowed
+it. Its connections never count as the client's link. Every characteristic needs an encrypted link, and the host
+answers only Macs on its list (`HostStatus.mac.macs`); any other central gets `GATT_INSUFFICIENT_AUTHORIZATION`. The
+texts characteristic and its notifications answer only a Mac with `PairedMac.texts`; another gets the same error.
 
 | UUID | Role | Properties / security |
 | --- | --- | --- |
@@ -112,12 +113,14 @@ client's link. Every characteristic needs an encrypted link, and the host answer
 | `0e9c0013-0971-48af-ba0b-2c5c254faec0` | command: `MacCommand` | write with response, encrypted |
 | `0e9c0014-0971-48af-ba0b-2c5c254faec0` | secret: `MacSecret` | read, encrypted |
 | `0e9c0015-0971-48af-ba0b-2c5c254faec0` | Mac pairing | advertised in place of the Mac service while the pairing window is open |
+| `0e9c0016-0971-48af-ba0b-2c5c254faec0` | texts: `MacTexts` | read, notify (no value: read again), encrypted, only with `PairedMac.texts` |
 
 Each value is one serialised message; a long read continues at its offset. **Pairing.** The client sends
 `SetMacPairing{on}`; for 120 s the host advertises the pairing UUID and confirms the one Bluetooth pairing request
 that arrives, then puts that Mac on its list. The Mac starts the pairing by reading an encrypted characteristic.
 `RemoveMac` takes a Mac off the list and drops its bond. A host whose Bluetooth can't run two advertising sets reports
-`supported = false`.
+`supported = false`. **Texts.** `SetMacTexts{address, on}` lets one Mac read the texts (off for a new Mac);
+`MacStatus.texts` tells the Mac. On each new text the host notifies the subscribed Macs, and each reads `MacTexts`.
 
 ## Updates
 
