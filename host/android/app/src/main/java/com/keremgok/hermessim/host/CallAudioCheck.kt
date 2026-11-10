@@ -8,7 +8,11 @@ import java.util.concurrent.atomic.AtomicLong
  * End-of-call audio check: a relayed call that lost part of its audio either way says so in the host log
  * ("call audio poor"), with the numbers that tell where the audio went: the daemon's txdrop, the bridge's backlog drops
  * and slow writes. The daemon counts its side (AUDIO?), the bridge its own here; [judge] decides. Nothing is sent to a
- * server: the line stays in the log.
+ * server by itself: the line stays in the log.
+ *
+ * Every relayed call leaves its numbers in the log and in [last], judged poor or not: a diagnostics request from the
+ * client carries them (Relay.sendDiagnostics), so the host's side of "the call was choppy" no longer depends on which
+ * lines the log excerpt happened to hold (a Galaxy A13's excerpt was the call's last half second, 10 Nov 2026).
  */
 object CallAudioCheck {
     /** One call's bridge numbers (AudioBridge, any thread). */
@@ -20,6 +24,17 @@ object CallAudioCheck {
     @Volatile private var internet = false
     @Volatile private var held = false
     @Volatile private var hotspotAtStart = "off"
+
+    /** The last relayed call's numbers ("what": "ok" or [judge]'s verdict) and when it ended (elapsedRealtime). */
+    @Volatile var last: JSONObject? = null; private set
+    @Volatile private var lastAt = 0L
+
+    /** What the radios were doing, for a stall's log line and a call's numbers (Daemon.start sets it; any thread). */
+    @Volatile var radio: () -> String = { "" }
+
+    /** [last] for a diagnostics report, with how long ago the call ended; null before the first call. */
+    fun lastForReport(): JSONObject? =
+        last?.let { JSONObject(it.toString()).put("ended_s_ago", (android.os.SystemClock.elapsedRealtime() - lastAt) / 1000) }
 
     /** A write at least this slow is a stall: the link stopped taking audio. */
     const val STALL_MS = 1000L
@@ -81,21 +96,35 @@ object CallAudioCheck {
     fun totals(reply: String): Map<String, Long> =
         Regex("""\b(\w+)=(-?\d+)""").findAll(reply).associate { it.groupValues[1] to (it.groupValues[2].toLongOrNull() ?: 0) }
 
-    /** The log line's details for a poor call: [what] went wrong, from [d] (AUDIO?) and the bridge's [b]. */
+    /** A call's numbers: [what] went wrong ("ok": nothing), from [d] (AUDIO?) and the bridge's [b]. */
     fun detail(what: String, seconds: Long, d: Map<String, Long>, b: Bridge, reply: String): JSONObject {
         val toClient = ((d["sent"] ?: 0) - (d["noclient"] ?: 0)).coerceAtLeast(1)
         val live = (d["live"] ?: 0).coerceAtLeast(1)
+        val capMs = d["capms"] ?: 0
         return JSONObject().put("what", what).put("seconds", seconds)
             .put("via", via(b.sessions > 0, internet))
             .put("to_phone_lost_pct", ((d["txdrop"] ?: 0) + b.dropped) * 100 / toClient)
             .put("from_phone_missing_pct", if (held) -1 else ((d["plc"] ?: 0) + (d["starved"] ?: 0)) * 100 / live)
+            // The caller's audio the voice path handed over, against the time it took (100 = real time; -1: an older daemon)
+            .put("capture_pct", if (capMs >= 1000) (d["cap"] ?: 0) * 1000 / capMs else -1).put("capture_errors", d["caperr"] ?: -1)
             .put("slowest_write_ms", b.slowestMs).put("stalls", b.stalls)
             .put("frames_per_write", if (b.writes > 0) "%.2f".format(java.util.Locale.ROOT, b.framesOut.toDouble() / b.writes) else "-")
             .put("bridges", b.sessions).put("held", held)
             .put("ble_interval_ms", BleLink.lastIntervalMs)
-            .put("hotspot", hotspotAtStart)
-            .put("daemon", reply.removePrefix("OK ").take(300))
+            .put("hotspot", hotspotAtStart).put("radio", runCatching { radio() }.getOrDefault(""))
+            .put("daemon", reply.removePrefix("OK ").take(340))
             .put("bridge", "in=${b.framesIn} out=${b.framesOut} writes=${b.writes} dropped=${b.dropped}")
+    }
+
+    /**
+     * [detail] as words, not JSON: the report's scrubber blanks quoted strings, and a JSON line then read
+     * {"<…>":"<…>", …}. The daemon's totals are the line before it ("daemon <- AUDIO? -> OK …"). Pure (CallAudioCheckTest).
+     */
+    fun line(detail: JSONObject): String {
+        val what = detail.optString("what")
+        return "call audio ${if (what == "ok") "ok" else "poor ($what)"}: " + detail.keys().asSequence()
+            .filter { it != "what" && it != "daemon" }
+            .joinToString(" ") { k -> detail.opt(k).toString().let { v -> if (' ' in v) "$k=[$v]" else "$k=$v" } }
     }
 
     private fun via(bluetooth: Boolean, internet: Boolean): String = when {
@@ -111,7 +140,9 @@ object CallAudioCheck {
         val d = totals(reply)
         if (d["live"] == null) return                                      // a daemon from before these totals
         val b = bridge()
-        val what = judge(seconds, d, b, held) ?: return
-        android.util.Log.w("HermesSimHost", "call audio poor ($what): ${detail(what, seconds, d, b, reply)}")
+        val what = judge(seconds, d, b, held)
+        val detail = detail(what ?: "ok", seconds, d, b, reply)
+        last = detail; lastAt = android.os.SystemClock.elapsedRealtime()
+        if (what == null) android.util.Log.i("HermesSimHost", line(detail)) else android.util.Log.w("HermesSimHost", line(detail))
     }
 }

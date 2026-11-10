@@ -45,6 +45,17 @@ class CallAudioCheckTest {
         assertNull(CallAudioCheck.judge(30, d(sent = 2550), b(), held = false))                                // an older daemon
     }
 
+    @Test fun aCallsNumbersReadAsWordsSoTheReportScrubberLeavesThem() {
+        val detail = org.json.JSONObject().put("what", "stall").put("seconds", 30).put("radio", "wifi=off voice=lte")
+            .put("daemon", "call=1 sent=3000").put("held", false)
+        // The test classpath's org.json keeps no key order (Android's does), so the words are compared as a set
+        val line = CallAudioCheck.line(detail)
+        assertEquals("call audio poor (stall): ", line.substringBefore("seconds").substringBefore("held").substringBefore("radio"))
+        assertEquals(setOf("seconds=30", "radio=[wifi=off voice=lte]", "held=false"),
+            Regex("""\w+=(\[[^]]*]|\S+)""").findAll(line.substringAfter(": ")).map { it.value }.toSet())
+        assertEquals("call audio ok: seconds=30", CallAudioCheck.line(org.json.JSONObject().put("what", "ok").put("seconds", 30)))
+    }
+
     @Test fun aStallAloneIsReported() =
         assertEquals("stall", CallAudioCheck.judge(30, d(), b(stalls = 1), held = false))
 

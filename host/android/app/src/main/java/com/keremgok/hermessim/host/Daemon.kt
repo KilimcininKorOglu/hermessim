@@ -43,7 +43,30 @@ object Daemon {
         profile = p
         started = true
         Log.i(TAG, "profile: ${p?.id ?: "NONE for this device — Basic mode only"}")
+        CallAudioCheck.radio = { radios(appCtx) }
         exec.execute { connect() }
+    }
+
+    /** What the phone's radios are doing, in a few words: Bluetooth shares its antenna and its chip with them. */
+    private fun radios(c: Context): String {
+        val wifi = runCatching { c.getSystemService(android.net.wifi.WifiManager::class.java).isWifiEnabled }.getOrNull()
+        val net = runCatching { c.getSystemService(android.telephony.TelephonyManager::class.java).voiceNetworkType }.getOrNull()
+        return "wifi=${wifi?.let { if (it) "on" else "off" } ?: "?"} hotspot=${if (Hotspot.isOn(c)) "on" else "off"} " +
+            "voice=${voiceGeneration(net)} ble=${BleLink.lastIntervalMs}ms"
+    }
+
+    /** A TelephonyManager network type as a short word ("?": unreadable). */
+    private fun voiceGeneration(net: Int?): String = when (net) {
+        null -> "?"
+        android.telephony.TelephonyManager.NETWORK_TYPE_GSM, android.telephony.TelephonyManager.NETWORK_TYPE_GPRS,
+        android.telephony.TelephonyManager.NETWORK_TYPE_EDGE -> "2g"
+        android.telephony.TelephonyManager.NETWORK_TYPE_UMTS, android.telephony.TelephonyManager.NETWORK_TYPE_HSDPA,
+        android.telephony.TelephonyManager.NETWORK_TYPE_HSUPA, android.telephony.TelephonyManager.NETWORK_TYPE_HSPA,
+        android.telephony.TelephonyManager.NETWORK_TYPE_HSPAP -> "3g"
+        android.telephony.TelephonyManager.NETWORK_TYPE_LTE -> "lte"
+        android.telephony.TelephonyManager.NETWORK_TYPE_NR -> "nr"
+        android.telephony.TelephonyManager.NETWORK_TYPE_IWLAN -> "wifi-calling"
+        else -> "type$net"
     }
 
     /** A call is ACTIVE (or still DIALING: [connected] false) on this voice session (1 or 2). Idempotent. */
