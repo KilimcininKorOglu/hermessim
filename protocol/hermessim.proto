@@ -201,6 +201,11 @@ message Hotspot {
   // A phone whose Wi-Fi driver interface predates Android 13's may drop the element without telling the host.
   bool apple_marker = 18;
   int32 frequency_mhz = 19;      // the running hotspot's channel frequency (status only); 0 = off or unknown
+  // Monthly data limit (offered only where capabilities.monthly_limit), counted as Usage.month: at 80 % the host sends
+  // DATA_LIMIT_NEAR; at 100 % it turns a running hotspot off once and sends DATA_LIMIT_REACHED. The user may turn it on
+  // again: it is not cut a second time that month. 0 = no limit.
+  int64 monthly_limit_bytes = 20;
+  bool limit_reached = 21;       // this month's usage is at or above the limit (status only)
 
   enum Band { BAND_UNSPECIFIED = 0; BAND_2GHZ = 1; BAND_5GHZ = 2; BAND_6GHZ = 3; BAND_AUTO = 4; BAND_DUAL_2_5 = 5; }
   enum Security { SECURITY_UNSPECIFIED = 0; OPEN = 1; WPA2 = 2; WPA3_TRANSITION = 3; WPA3 = 4; }
@@ -222,11 +227,13 @@ message Hotspot {
     // Bluetooth's own band, so the two share one radio. A hotspot that can use 5 GHz keeps out of Bluetooth's way.
     bool call_pause = 7;
     bool apple_marker = 8;       // Hotspot.apple_marker can be set (Android 13 and later)
+    bool monthly_limit = 9;      // Hotspot.monthly_limit_bytes can be set
   }
 }
 
 // Fields of Hotspot that the client may change: ssid, passphrase, band, hidden, security, max_clients,
-// auto_off, auto_off_minutes, apple_marker. The host applies them and restarts the hotspot if it was on.
+// auto_off, auto_off_minutes, apple_marker, monthly_limit_bytes. The host applies them and restarts the hotspot if it
+// was on (a new monthly limit alone applies without a restart).
 message SetHotspotConfig { Hotspot config = 1; }
 
 message KeepAlive { uint32 n = 1; }
@@ -337,6 +344,7 @@ message MacStatus {
   bool controllable = 8;         // the host can switch its hotspot now
   bool paused_for_call = 9;
   bool off_when_unused = 10;     // understands MacCommand.off_when_unused_s
+  bool limit_reached = 11;       // the monthly data limit is used up (Hotspot.limit_reached): don't ask for the hotspot
   enum State { OFF = 0; STARTING = 1; ON = 2; FAILED = 3; }
 }
 
