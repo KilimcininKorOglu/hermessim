@@ -42,6 +42,7 @@ object Hotspot {
             if (cfg != null) syncVendorTimeout(ctx, cfg.autoOff, (cfg.timeoutMs / 60_000L).toInt())
         }
         dropWpa3(ctx)
+        SoftApWatch.start(ctx, exec, ::changed)
         runCatching {
             val tm = ctx.getSystemService("tethering") ?: return
             val cbClass = Class.forName("android.net.TetheringManager\$TetheringEventCallback")
@@ -208,7 +209,8 @@ object Hotspot {
 
     /** The soft AP settings we show and change. */
     private data class ApCfg(val ssid: String, val passphrase: String, val security: Int, val band: Int, val bands: IntArray?,
-                             val hidden: Boolean, val maxClients: Int, val autoOff: Boolean, val timeoutMs: Long) {
+                             val hidden: Boolean, val maxClients: Int, val autoOff: Boolean, val timeoutMs: Long,
+                             val appleMarker: Boolean = false) {
         fun same(o: ApCfg) = copy(bands = null) == o.copy(bands = null) && bands.contentEquals(o.bands)
     }
 
@@ -257,7 +259,8 @@ object Hotspot {
             fun <T> get(name: String): T? = runCatching { @Suppress("UNCHECKED_CAST") (cfg.javaClass.getMethod(name).invoke(cfg) as T) }.getOrNull()
             return ApCfg(get<String>("getSsid").orEmpty(), get<String>("getPassphrase").orEmpty(), get<Int>("getSecurityType") ?: SEC_WPA2,
                 get<Int>("getBand") ?: BAND_2GHZ, get<IntArray>("getBands"), get<Boolean>("isHiddenSsid") ?: false,
-                get<Int>("getMaxNumberOfClients") ?: 0, get<Boolean>("isAutoShutdownEnabled") ?: false, timeout(get<Long>("getShutdownTimeoutMillis")))
+                get<Int>("getMaxNumberOfClients") ?: 0, get<Boolean>("isAutoShutdownEnabled") ?: false, timeout(get<Long>("getShutdownTimeoutMillis")),
+                AppleMarker.present(SoftApWatch.elements(cfg)))
         }
         if (cause(direct.exceptionOrNull() ?: return null) !is SecurityException) return null
         val cached = rootCfg
@@ -306,6 +309,7 @@ object Hotspot {
             .setCapabilities(runCatching { capabilities(ctx, wm) }.getOrDefault(HotspotMsg.Capabilities.getDefaultInstance()))
             .setCallPause(HotspotPause.setting && callPauseOffered(ctx)).setPausedForCall(HotspotPause.paused && !on)
             .setUsage(DataUsage.usage())
+            .setAppleMarker(cfg.appleMarker).setFrequencyMhz(if (on) SoftApWatch.frequencyMhz else 0)
             .build()
     }.getOrElse { Log.w(TAG, "hotspot info unavailable: ${cause(it)}"); HotspotMsg.newBuilder().setSupported(false).build() }
 
@@ -321,7 +325,7 @@ object Hotspot {
      */
     private fun capabilities(ctx: Context, wm: WifiManager): HotspotMsg.Capabilities {
         val b = HotspotMsg.Capabilities.newBuilder().setHiddenSsid(true).setMaxClients(false).setAutoOff(true).setOffWhenUnused(true)
-            .setCallPause(callPauseOffered(ctx))
+            .setCallPause(callPauseOffered(ctx)).setAppleMarker(android.os.Build.VERSION.SDK_INT >= 33)
         b.addBands(HotspotMsg.Band.BAND_2GHZ)
         if (wm.is5GHzBandSupported) b.addBands(HotspotMsg.Band.BAND_5GHZ).addBands(HotspotMsg.Band.BAND_AUTO)
         if (wm.is5GHzBandSupported && android.os.Build.VERSION.SDK_INT >= 31 && wm.isBridgedApConcurrencySupported) b.addBands(HotspotMsg.Band.BAND_DUAL_2_5)
@@ -391,10 +395,12 @@ object Hotspot {
             call("setAutoShutdownEnabled", arrayOf(Boolean::class.javaPrimitiveType!!), c.autoOff)
             if (c.autoOff && c.autoOffMinutes > 0)
                 call("setShutdownTimeoutMillis", arrayOf(Long::class.javaPrimitiveType!!), c.autoOffMinutes * 60_000L)
+            if (android.os.Build.VERSION.SDK_INT >= 33)
+                call("setVendorElements", arrayOf(List::class.java), SoftApWatch.marked(current, c.appleMarker))
             val cfg = bClass.getMethod("build").invoke(b)
             val ok = WifiManager::class.java.getMethod("setSoftApConfiguration", cfgClass).invoke(wm, cfg) as Boolean
             Log.i(TAG, "hotspot config saved=$ok band=${c.band} sec=${c.security} hidden=${c.hidden} " +
-                    "max=${c.maxClients} autoOff=${c.autoOff}/${c.autoOffMinutes}min (was on: $wasOn)")
+                    "max=${c.maxClients} autoOff=${c.autoOff}/${c.autoOffMinutes}min appleMarker=${c.appleMarker} (was on: $wasOn)")
             if (!ok) error("the phone rejected these settings")
             syncVendorTimeout(ctx, c.autoOff, c.autoOffMinutes)
             if (wasOn) restart(ctx, reply) else done(true, "saved")
