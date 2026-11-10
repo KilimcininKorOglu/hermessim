@@ -51,6 +51,8 @@ message Envelope {
     Unpair unpair = 63;                          // client -> host: "forget this host" on the phone (host -> client: its answer, or unasked: the host was removed)
     PushSetup push_setup = 64;                   // client -> host, over Bluetooth only: the push wake-up key
     SetHotspotCallPause set_hotspot_call_pause = 65; // client -> host: Hotspot.call_pause (only where capabilities.call_pause)
+    SetMacPairing set_mac_pairing = 66;          // client -> host: open or close the window in which a Mac may pair
+    RemoveMac remove_mac = 67;                   // client -> host: forget a paired Mac
   }
 }
 
@@ -111,6 +113,7 @@ message HostStatus {
   HostWifi host_wifi = 14;       // the host's own Wi-Fi connection (not the hotspot)
   Uplink uplink = 15;            // what the host's own internet runs on right now
   bytes push_key_id = 16;        // first 8 bytes of sha256(PushSetup.key) the host holds; empty = none (README "Push")
+  MacAccess mac = 17;            // Macs that may ask this host for its hotspot (README "Mac")
   enum VoiceTier { VOICE_TIER_UNSPECIFIED = 0; BASIC = 1; FULL_VOICE = 2; }
 }
 
@@ -192,6 +195,11 @@ message Hotspot {
   bool call_pause = 16;
   bool paused_for_call = 17;     // off right now for a call, back on when it ends (status only). The user turning the
                                  // hotspot on during the call wins: it stays on for the rest of that call.
+  // The hotspot's beacon carries Apple's Personal Hotspot element (offered only where capabilities.apple_marker), so a
+  // Mac treats it as a phone's hotspot: link icon, metered, left for a regular network. Takes effect at the next start.
+  // A phone whose Wi-Fi driver interface predates Android 13's may drop the element without telling the host.
+  bool apple_marker = 18;
+  int32 frequency_mhz = 19;      // the running hotspot's channel frequency (status only); 0 = off or unknown
 
   enum Band { BAND_UNSPECIFIED = 0; BAND_2GHZ = 1; BAND_5GHZ = 2; BAND_6GHZ = 3; BAND_AUTO = 4; BAND_DUAL_2_5 = 5; }
   enum Security { SECURITY_UNSPECIFIED = 0; OPEN = 1; WPA2 = 2; WPA3_TRANSITION = 3; WPA3 = 4; }
@@ -212,11 +220,12 @@ message Hotspot {
     // Pause during calls is offered: this host relays call audio over Bluetooth and its hotspot can only use 2.4 GHz,
     // Bluetooth's own band, so the two share one radio. A hotspot that can use 5 GHz keeps out of Bluetooth's way.
     bool call_pause = 7;
+    bool apple_marker = 8;       // Hotspot.apple_marker can be set (Android 13 and later)
   }
 }
 
 // Fields of Hotspot that the client may change: ssid, passphrase, band, hidden, security, max_clients,
-// auto_off, auto_off_minutes. The host applies them and restarts the hotspot if it was on.
+// auto_off, auto_off_minutes, apple_marker. The host applies them and restarts the hotspot if it was on.
 message SetHotspotConfig { Hotspot config = 1; }
 
 message KeepAlive { uint32 n = 1; }
@@ -294,6 +303,50 @@ message SetHotspot { bool on = 1; int32 off_when_unused_s = 2; }
 
 // Hotspot.call_pause on or off. Applies at once (a running hotspot isn't restarted, as SetHotspotConfig would).
 message SetHotspotCallPause { bool on = 1; }
+
+// Macs (README "Mac"). A Mac reaches the host on a GATT service of its own, apart from the client's, and may only ask
+// for the hotspot. It pairs while the client holds the window open; the host accepts no other pairing request.
+message MacAccess {
+  bool supported = 1;            // this host can serve Macs (its Bluetooth runs a second advertisement)
+  bool pairing = 2;              // the pairing window is open now
+  repeated PairedMac macs = 3;
+}
+
+message PairedMac {
+  string name = 1;
+  string address = 2;
+  bool connected = 3;
+}
+
+// on: open the pairing window for 120 s (again from the start if open); off: close it.
+message SetMacPairing { bool on = 1; }
+
+message RemoveMac { string address = 1; }
+
+// The Mac service's characteristics carry these, each value one serialised message.
+// Status (read, notify): what the Mac shows and decides on.
+message MacStatus {
+  State state = 1;
+  string ssid = 2;
+  int32 frequency_mhz = 3;       // 0 = unknown
+  string gateway = 4;            // the hotspot's own IPv4 address while on
+  int32 battery_percent = 5;
+  int32 signal_level = 6;        // 0..4, the host's mobile signal
+  string host_name = 7;
+  bool controllable = 8;         // the host can switch its hotspot now
+  bool paused_for_call = 9;
+  bool off_when_unused = 10;     // understands MacCommand.off_when_unused_s
+  enum State { OFF = 0; STARTING = 1; ON = 2; FAILED = 3; }
+}
+
+// Command (write): as SetHotspot.
+message MacCommand {
+  bool on = 1;
+  int32 off_when_unused_s = 2;
+}
+
+// Secret (read): the hotspot's passphrase, kept out of the status notifications.
+message MacSecret { string passphrase = 1; }
 
 // Per-SIM settings from the client. Only the fields that are present are changed.
 message SetSim {

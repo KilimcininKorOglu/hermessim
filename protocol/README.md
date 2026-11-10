@@ -93,6 +93,26 @@ Unpair forgets P.
 
 An Android app the user force-stopped gets no push until it is opened again (Android's rule); a swiped-away one does.
 
+## Mac
+
+A Mac asks the host for its hotspot, nothing else, on a GATT service of its own. Its connections never count as the
+client's link. Every characteristic needs an encrypted link, and the host answers only Macs on its list
+(`HostStatus.mac.macs`); any other central gets `GATT_INSUFFICIENT_AUTHORIZATION`.
+
+| UUID | Role | Properties / security |
+| --- | --- | --- |
+| `0e9c0011-0971-48af-ba0b-2c5c254faec0` | Mac service | advertised in a second advertising set, apart from the client's |
+| `0e9c0012-0971-48af-ba0b-2c5c254faec0` | status: `MacStatus` | read, notify, encrypted |
+| `0e9c0013-0971-48af-ba0b-2c5c254faec0` | command: `MacCommand` | write with response, encrypted |
+| `0e9c0014-0971-48af-ba0b-2c5c254faec0` | secret: `MacSecret` | read, encrypted |
+| `0e9c0015-0971-48af-ba0b-2c5c254faec0` | Mac pairing | advertised in place of the Mac service while the pairing window is open |
+
+Each value is one serialised message; a long read continues at its offset. **Pairing.** The client sends
+`SetMacPairing{on}`; for 120 s the host advertises the pairing UUID and confirms the one Bluetooth pairing request
+that arrives, then puts that Mac on its list. The Mac starts the pairing by reading an encrypted characteristic.
+`RemoveMac` takes a Mac off the list and drops its bond. A host whose Bluetooth can't run two advertising sets reports
+`supported = false`.
+
 ## Updates
 
 `GET /api/v1/releases/host?since=<versionCode>` lists the host releases newer than `since` (newest first: version,
