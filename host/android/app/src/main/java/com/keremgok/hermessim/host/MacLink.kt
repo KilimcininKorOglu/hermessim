@@ -57,6 +57,7 @@ class MacLink(
         loadTexts(prefs.getStringSet("texts", emptySet()).orEmpty())
     }
     private val shelf = MacTextShelf(System::currentTimeMillis)
+    private val writes = PreparedWrites()
     private var gatt: BluetoothGattServer? = null
     private val connected = HashSet<String>()
     // The texts notification carries no value: the Mac reads them, a long read past the link's MTU.
@@ -109,6 +110,28 @@ class MacLink(
     }
 
     fun onWrite(device: BluetoothDevice, requestId: Int, uuid: UUID, responseNeeded: Boolean, value: ByteArray) = main.post {
+        written(device, requestId, uuid, responseNeeded, value)
+    }
+
+    /** One part of a long write: kept until the execute; the answer echoes the part, as ATT asks. */
+    fun onPreparedWrite(device: BluetoothDevice, requestId: Int, uuid: UUID, offset: Int, responseNeeded: Boolean, value: ByteArray) =
+        main.post {
+            val code = when {
+                !allowed(device, uuid) -> INSUFFICIENT_AUTHORIZATION
+                !writes.add(device.address, uuid, offset, value) -> INVALID_OFFSET
+                else -> BluetoothGatt.GATT_SUCCESS
+            }
+            if (responseNeeded) respond(device, requestId, code, value, offset)
+        }
+
+    /** The end of a long write: the collected value is handled as one write; a cancelled one is only answered. */
+    fun onExecuteWrite(device: BluetoothDevice, requestId: Int, execute: Boolean) = main.post {
+        val (uuid, value) = writes.execute(device.address, execute)
+            ?: return@post respond(device, requestId, BluetoothGatt.GATT_SUCCESS, null)
+        written(device, requestId, uuid, true, value)
+    }
+
+    private fun written(device: BluetoothDevice, requestId: Int, uuid: UUID, responseNeeded: Boolean, value: ByteArray) {
         val ok = allowed(device, uuid)
         val cmd = if (ok && uuid == COMMAND) runCatching { MacCommand.parseFrom(value) }.getOrNull() else null
         val code = when { !ok -> INSUFFICIENT_AUTHORIZATION; cmd == null -> BluetoothGatt.GATT_FAILURE; else -> BluetoothGatt.GATT_SUCCESS }
@@ -160,7 +183,7 @@ class MacLink(
 
     fun connectionChanged(device: BluetoothDevice, up: Boolean) = main.post {
         if (up) { if (core.isMac(device.address)) connected.add(device.address) }
-        else { connected.remove(device.address); notifier.drop(device.address) }
+        else { connected.remove(device.address); notifier.drop(device.address); writes.drop(device.address) }
         if (core.isMac(device.address)) changed()
         advertiser.kick()
     }

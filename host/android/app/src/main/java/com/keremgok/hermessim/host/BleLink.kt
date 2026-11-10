@@ -411,12 +411,22 @@ class BleLink(
 
         override fun onCharacteristicWriteRequest(device: BluetoothDevice, requestId: Int, c: BluetoothGattCharacteristic,
                                                   prepared: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray) {
-            if (forMac(c)) { mac?.onWrite(device, requestId, c.uuid, responseNeeded, value); return }
+            if (forMac(c)) {
+                if (prepared) mac?.onPreparedWrite(device, requestId, c.uuid, offset, responseNeeded, value)
+                else mac?.onWrite(device, requestId, c.uuid, responseNeeded, value)
+                return
+            }
             if (responseNeeded) gatt?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
             if (c.uuid != CTRL_RX) return
             val frames = readers.getOrPut(device.address) { Framing.Reader() }.feed(value)
             if (frames == null) { Log.w(TAG, "corrupt stream from ${device.address}, resetting"); readers.remove(device.address); return }
             frames.forEach { onFrame(device, it) }
+        }
+
+        /** The end of a long (prepared) write: only the Mac service takes them. */
+        override fun onExecuteWrite(device: BluetoothDevice, requestId: Int, execute: Boolean) {
+            if (mac?.isMac(device.address) == true) { mac.onExecuteWrite(device, requestId, execute); return }
+            gatt?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
         }
 
         override fun onNotificationSent(device: BluetoothDevice, status: Int) {
