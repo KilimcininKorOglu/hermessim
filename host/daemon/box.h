@@ -12,7 +12,7 @@ int box_charge(int percent);                    // target 50-100; 100 = off. Ban
 void box_charge_init(void);                     // release the input cut, re-apply the saved limit
 void box_charge_check(void);                    // hold the limit (on battery events and periodically)
 void box_charge_shutdown(void);                 // release every charge control
-void box_charge_status(char *out, size_t size); // target/resume/drain state for CHARGE?
+void box_charge_status(char *out, size_t size); // target/resume/drain/cutting/held/stuck state for CHARGE?
 int box_uevent_open(void);                      // netlink socket for power_supply events
 void box_uevent(int fd);
 int box_netblock(int uid, int on);

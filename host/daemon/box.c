@@ -384,8 +384,14 @@ const char *box_charge_node(void) {
     return cap && cut ? "cap+cut" : cap ? "cap" : cut ? "cut" : NULL;
 }
 
+// held: charging is stopped by us right now (the input cut, or charge_behaviour off "auto"); stuck: the kernel kept
+// undoing the cut and the limit is left alone until the hour is over.
 void box_charge_status(char *out, size_t size) {
-    snprintf(out, size, "target=%d resume=%d drain=%d cutting=%d", g_limit, g_resume, g_drain, g_cutting);
+    find_behaviour();
+    int held = g_cutting || (g_behaviour_path[0] && (behaviour_active("inhibit-charge") || behaviour_active("force-discharge")));
+    int stuck = g_recut_paused_until != 0 && boot_s() < g_recut_paused_until;
+    snprintf(out, size, "target=%d resume=%d drain=%d cutting=%d held=%d stuck=%d", g_limit, g_resume, g_drain, g_cutting,
+             held, stuck);
 }
 
 void box_charge_check(void) {
