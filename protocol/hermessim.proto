@@ -498,7 +498,7 @@ message Uplink {
 message HostNotice {
   Kind kind = 1;
   int32 value = 2;               // BATTERY_*: the battery percent; DATA_LIMIT_*: the percent of the monthly limit used
-  int32 slot = 3;                // SIM_LOCKED: the SIM slot; else 0
+  int32 slot = 3;                // SIM_LOCKED, ROAMING: the SIM slot; else 0
   int64 at_ms = 4;               // when it happened (unix ms)
   enum Kind {
     KIND_UNSPECIFIED = 0;
@@ -507,6 +507,7 @@ message HostNotice {
     SIM_LOCKED = 3;              // a SIM now asks for its PIN or PUK
     DATA_LIMIT_NEAR = 4;         // the hotspot used 80 % of its monthly limit
     DATA_LIMIT_REACHED = 5;      // the monthly limit is used up: the host turned the hotspot off
+    ROAMING = 6;                 // a SIM started roaming; the host changes nothing (Sim.data_roaming says whether data runs)
   }
 }
 

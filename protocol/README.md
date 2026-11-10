@@ -93,8 +93,8 @@ Unpair forgets P.
 | `notice` | a `HostNotice`, no client on Bluetooth | as `sms`, collapse id `notice-<kind>-<slot>` | as `sms` | the notice as a notification |
 
 **Health notices.** The host sends each `HostNotice` once per event: battery at 15 % and at 5 % while not charging
-(armed again once it charges or passes 30 %), a SIM that newly asks for its PIN or PUK, and the monthly hotspot limit
-at 80 % and 100 %. That the host has been unreachable for a while the client works out itself (a host that is off
+(armed again once it charges or passes 30 %), a SIM that newly asks for its PIN or PUK, the monthly hotspot limit
+at 80 % and 100 %, and a SIM that starts roaming (armed again once it stops; the host turns nothing off). That the host has been unreachable for a while the client works out itself (a host that is off
 can't send anything).
 
 An Android app the user force-stopped gets no push until it is opened again (Android's rule); a swiped-away one does.
