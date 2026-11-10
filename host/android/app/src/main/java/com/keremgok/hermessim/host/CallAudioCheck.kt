@@ -52,7 +52,7 @@ object CallAudioCheck {
         if (seconds < 10) return null
         val toClient = (d["sent"] ?: 0) - (d["noclient"] ?: 0)
         val lostDown = (d["txdrop"] ?: 0) + b.dropped
-        val down = toClient >= 500 && lostDown * 100 >= toClient * 3
+        val down = (toClient >= 500 && lostDown * 100 >= toClient * 3) || shortCapture(d, held)
         val live = d["live"] ?: 0
         val up = !held && live >= 500 && ((d["plc"] ?: 0) + (d["starved"] ?: 0)) * 100 >= live * 5
         return when {
@@ -62,6 +62,19 @@ object CallAudioCheck {
             b.stalls > 0 -> "stall"
             else -> null
         }
+    }
+
+    /**
+     * The capture handed over less than real time: under 97% of the time its reads took, or read errors for 3% of the
+     * frames. That caller audio is gone before the daemon or the bridge could drop it (a Galaxy A13 host's phone got 85
+     * of 100 frames a second, 10 Nov 2026). Not judged with a hold in the call (the voice path stops then), nor with
+     * under 5 s of capture or a daemon from before these totals.
+     */
+    private fun shortCapture(d: Map<String, Long>, held: Boolean): Boolean {
+        val cap = d["cap"] ?: 0
+        val capMs = d["capms"] ?: 0
+        if (held || capMs < 5000) return false
+        return cap * 1000 <= capMs * 97 || (d["caperr"] ?: 0) * 100 >= cap * 3
     }
 
     /** The daemon's AUDIO? reply as numbers ("OK call=1 session=1 ... live=2420"). */

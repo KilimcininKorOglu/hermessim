@@ -208,6 +208,11 @@ static unsigned g_tot_cap, g_tot_voiced, g_tot_sent, g_tot_played;
 // captured with no client connected; client audio received, concealed (PLC), and pulls that found nothing to
 // play, counted only while a client is connected (a hang-up's tail isn't a loss).
 static unsigned g_tot_txdrop, g_tot_noclient, g_tot_recv, g_tot_plc, g_tot_starved, g_tot_live;
+// The capture against the clock: the time its reads took while the stream worked (ms, read to read with no error
+// between) and its read errors. A voice path that hands over less than real time loses caller audio before anything
+// here can drop it, so no other total shows it (a Galaxy A13's phone got 85 of 100 frames a second and the end-of-call
+// check saw nothing wrong, 10 Nov 2026).
+static unsigned g_tot_capms, g_tot_caperr;
 static volatile int g_client_up;
 static int g_tot_peak;
 #define VOICED_PEAK 1000          // |sample| above this in a read = someone is talking (silence/comfort noise stays far below)
@@ -487,6 +492,29 @@ static void pcm_wake_all(void) {
     pthread_mutex_unlock(&g_live_lock);
 }
 
+// The capture's own clock for g_tot_capms: the time between good reads that follow each other.
+typedef struct {
+    struct timespec prev;          // the last good read, {0} after an error
+    unsigned long long ns;
+} cap_clock_t;
+
+static void cap_clock_read(cap_clock_t *c) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    if (c->prev.tv_sec || c->prev.tv_nsec) {
+        c->ns += (unsigned long long)(now.tv_sec - c->prev.tv_sec) * 1000000000ull
+               + (unsigned long long)now.tv_nsec - (unsigned long long)c->prev.tv_nsec;
+        st_umax(&g_tot_capms, (unsigned)(c->ns / 1000000ull));
+    }
+    c->prev = now;
+}
+
+// A failed read: counted, and the stream isn't running, so the gap up to the next good read isn't a slow capture.
+static void cap_clock_error(cap_clock_t *c) {
+    st_inc(&g_tot_caperr);
+    c->prev.tv_sec = 0; c->prev.tv_nsec = 0;
+}
+
 static void *capture_main(void *arg) {
     (void)arg;
     set_realtime("capture");
@@ -516,6 +544,7 @@ static void *capture_main(void *arg) {
     unsigned frames = 0;
 
     struct timespec err_log = { 0 };
+    cap_clock_t cap_clk = { 0 };
     struct timespec backoff = { .tv_nsec = 10 * 1000 * 1000 };    // 10 ms: don't spin when the backend isn't streaming
     // One 10 ms period per read, paced by the DSP. Errors are rare with the system tinyalsa; the cap below
     // still stops a failing stream from storming the audio DSP (a storm rebooted the phone once).
@@ -538,6 +567,7 @@ static void *capture_main(void *arg) {
                 break;
             }
             st_inc(&g_st_caperr);
+            cap_clock_error(&cap_clk);
             if (consecutive_err >= CAP_SLOW_AFTER) {     // e.g. outgoing call still dialing: voice path not up yet
                 struct timespec slow = { .tv_nsec = 100 * 1000 * 1000 };
                 nanosleep(&slow, NULL);
@@ -552,6 +582,7 @@ static void *capture_main(void *arg) {
             continue;                                   // NULL pcm is retried at the top of the loop
         }
         consecutive_err = 0;
+        cap_clock_read(&cap_clk);
         if (cch == 2) for (int i = 0; i < cframe; i++) pcmbuf[i] = (int16_t)(((int)pcmbuf[2 * i] + pcmbuf[2 * i + 1]) / 2);
         int rpeak = 0;
         for (int i = 0; i < cframe; i++) { int a = pcmbuf[i] < 0 ? -pcmbuf[i] : pcmbuf[i]; if (a > rpeak) rpeak = a; }
@@ -745,11 +776,12 @@ void audio_totals(char *buf, size_t n) {
     pthread_mutex_lock(&g_stats_lock);
     unsigned cap = g_tot_cap, voiced = g_tot_voiced, sent = g_tot_sent, played = g_tot_played;
     unsigned txdrop = g_tot_txdrop, noclient = g_tot_noclient, recv = g_tot_recv, plc = g_tot_plc;
-    unsigned starved = g_tot_starved, live = g_tot_live;
+    unsigned starved = g_tot_starved, live = g_tot_live, capms = g_tot_capms, caperr = g_tot_caperr;
     int peak = g_tot_peak;
     pthread_mutex_unlock(&g_stats_lock);
-    snprintf(buf, n, "cap=%u voiced=%u sent=%u played=%u peak=%d txdrop=%u noclient=%u recv=%u plc=%u starved=%u live=%u",
-             cap, voiced, sent, played, peak, txdrop, noclient, recv, plc, starved, live);
+    snprintf(buf, n, "cap=%u voiced=%u sent=%u played=%u peak=%d txdrop=%u noclient=%u recv=%u plc=%u starved=%u live=%u"
+             " capms=%u caperr=%u",
+             cap, voiced, sent, played, peak, txdrop, noclient, recv, plc, starved, live, capms, caperr);
 }
 
 void audio_call_begin(const audio_cfg_t *cfg) {
@@ -757,6 +789,7 @@ void audio_call_begin(const audio_cfg_t *cfg) {
     pthread_mutex_lock(&g_stats_lock);
     g_tot_cap = g_tot_voiced = g_tot_sent = g_tot_played = 0;
     g_tot_txdrop = g_tot_noclient = g_tot_recv = g_tot_plc = g_tot_starved = g_tot_live = 0;
+    g_tot_capms = g_tot_caperr = 0;
     g_tot_peak = 0;
     pthread_mutex_unlock(&g_stats_lock);
     g_cfg = *cfg;

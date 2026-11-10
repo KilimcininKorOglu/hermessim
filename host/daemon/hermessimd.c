@@ -23,7 +23,7 @@
 //   HAS <control>  -> OK count=n [items=a|b|c] | ERR   (auto profiles: a control on this card, an enum's options)
 //   TUNE [p k per] -> OK prime= keep= period=   (jitter-buffer frames, inject PCM period; live)
 //   AUDIO?         -> OK call= session= silence= cap= voiced= sent= played= peak= txdrop= noclient= recv= plc=
-//                     starved= live=   (this call's totals: the call test, the app's end-of-call check)
+//                     starved= live= capms= caperr=   (this call's totals: the call test, the app's end-of-call check)
 //   Box mode (box.c): SCREEN_OFF | WAKE | POWERKEY 1|0 | ROLE <role> <pkg> | CHARGE <target> |
 //                     CHARGE? -> OK <node> target= resume= drain= cutting= held=0|1 stuck=0|1 | ERR
 //                     NETBLOCK <uid> <0|1> (iptables chain hermessim_block)
