@@ -381,7 +381,8 @@ message SetMacControl {
 }
 
 // The Mac service's characteristics carry these, each value one serialised message.
-// Status (read, notify): what the Mac shows and decides on.
+// Status (read, notify): what the Mac shows and decides on. A notification too long for the link carries no value: the
+// Mac reads the status.
 message MacStatus {
   State state = 1;
   string ssid = 2;

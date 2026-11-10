@@ -130,7 +130,7 @@ texts characteristic and its notifications answer only a Mac with `PairedMac.tex
 | UUID | Role | Properties / security |
 | --- | --- | --- |
 | `0e9c0011-0971-48af-ba0b-2c5c254faec0` | Mac service | advertised in a second advertising set, apart from the client's |
-| `0e9c0012-0971-48af-ba0b-2c5c254faec0` | status: `MacStatus` | read, notify, encrypted |
+| `0e9c0012-0971-48af-ba0b-2c5c254faec0` | status: `MacStatus` | read, notify (no value when too long for the link: read again), encrypted |
 | `0e9c0013-0971-48af-ba0b-2c5c254faec0` | command: `MacCommand` | write with response, encrypted |
 | `0e9c0014-0971-48af-ba0b-2c5c254faec0` | secret: `MacSecret` | read, encrypted |
 | `0e9c0015-0971-48af-ba0b-2c5c254faec0` | Mac pairing | advertised in place of the Mac service while the pairing window is open |
