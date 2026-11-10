@@ -299,6 +299,7 @@ object Hotspot {
             else -> HotspotMsg.Security.WPA2
         }
         val starting = !on && startingSince > 0 && android.os.SystemClock.elapsedRealtime() - startingSince < 15_000
+        val usage = DataUsage.usage()
         HotspotMsg.newBuilder()
             .setSupported(true).setOn(on).setStarting(starting).setGateway(if (on) gateway() else "")
             .setSsid(cfg.ssid).setPassphrase(cfg.passphrase)
@@ -308,7 +309,7 @@ object Hotspot {
             .addAllClients(if (on) clients else emptyList())
             .setCapabilities(runCatching { capabilities(ctx, wm) }.getOrDefault(HotspotMsg.Capabilities.getDefaultInstance()))
             .setCallPause(HotspotPause.setting && callPauseOffered(ctx)).setPausedForCall(HotspotPause.paused && !on)
-            .setUsage(DataUsage.usage())
+            .setUsage(usage).setMonthlyLimitBytes(DataLimit.limitBytes).setLimitReached(DataLimit.reached(usage.month))
             .setAppleMarker(cfg.appleMarker).setFrequencyMhz(if (on) SoftApWatch.frequencyMhz else 0)
             .build()
     }.getOrElse { Log.w(TAG, "hotspot info unavailable: ${cause(it)}"); HotspotMsg.newBuilder().setSupported(false).build() }
@@ -325,7 +326,7 @@ object Hotspot {
      */
     private fun capabilities(ctx: Context, wm: WifiManager): HotspotMsg.Capabilities {
         val b = HotspotMsg.Capabilities.newBuilder().setHiddenSsid(true).setMaxClients(false).setAutoOff(true).setOffWhenUnused(true)
-            .setCallPause(callPauseOffered(ctx)).setAppleMarker(android.os.Build.VERSION.SDK_INT >= 33)
+            .setCallPause(callPauseOffered(ctx)).setAppleMarker(android.os.Build.VERSION.SDK_INT >= 33).setMonthlyLimit(true)
         b.addBands(HotspotMsg.Band.BAND_2GHZ)
         if (wm.is5GHzBandSupported) b.addBands(HotspotMsg.Band.BAND_5GHZ).addBands(HotspotMsg.Band.BAND_AUTO)
         if (wm.is5GHzBandSupported && android.os.Build.VERSION.SDK_INT >= 31 && wm.isBridgedApConcurrencySupported) b.addBands(HotspotMsg.Band.BAND_DUAL_2_5)

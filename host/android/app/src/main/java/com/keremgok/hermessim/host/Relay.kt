@@ -96,6 +96,7 @@ object Relay {
         audio = AudioBridge(adapter, ble).also { it.start() }
         Push.start(app)
         Health.init(app)
+        DataLimit.init(app)
         RemoteLink.start(app, { bytes -> main.post { runCatching { onPeerFrame(Peer.Internet, bytes) }.onFailure { Log.e(TAG, "remote frame failed: $it") } } }) { present, wasThere ->
             main.post {
                 // A room blip mid-call doesn't touch the call's audio (TURN carries it); it ends with the call.
@@ -233,6 +234,30 @@ object Relay {
 
     fun smsSendResult(r: SmsSendResult) = broadcast(Envelope.newBuilder().setSmsSendResult(r))
 
+    /** SetHotspotConfig: a change of the monthly limit alone applies without restarting a running hotspot. */
+    private fun hotspotConfig(d: Peer, seq: Int, c: com.keremgok.hermessim.protocol.v1.Hotspot) {
+        val limitChanged = DataLimit.set(c.monthlyLimitBytes)
+        if (limitChanged && DataLimitCore.onlyLimit(c, Hotspot.info(app))) {
+            Log.i(TAG, "hotspot monthly limit ${c.monthlyLimitBytes / 1_000_000} MB")
+            main.post(pushStatus)
+            return
+        }
+        Hotspot.configure(app, c) { ok, detail ->
+            if (!ok) error(d, seq, Error.Code.BAD_REQUEST, "hotspot: $detail")
+            main.postDelayed({ broadcast(Envelope.newBuilder().setHostStatus(status())) }, 1500)
+        }
+    }
+
+    /** This month's hotspot usage against its limit (DataLimit): a notice, and at the limit the hotspot off once. */
+    private fun dataLimit(h: com.keremgok.hermessim.protocol.v1.Hotspot) {
+        val out = DataLimit.check(h)
+        val kind = out.notice ?: return
+        hostNotice(HostNotice.newBuilder().setKind(kind).setValue(out.percent).setAtMs(System.currentTimeMillis()).build())
+        if (!out.cutOff) return
+        Log.i(TAG, "monthly data limit used up: hotspot off")
+        switchHotspot(false, 0) { _, detail -> Log.w(TAG, "data limit: hotspot not turned off: $detail") }
+    }
+
     /** A health notice (Health): to the clients served now and, with none on Bluetooth, as a push too. */
     private fun hostNotice(n: HostNotice) {
         Log.i(TAG, "notice ${n.kind} value=${n.value} slot=${n.slot}")
@@ -332,10 +357,7 @@ object Relay {
                 else CallRegistry.dial(env.dial)?.let { error(d, env.seq, Error.Code.BAD_REQUEST, it) }
             Envelope.BodyCase.SMS_ACK -> { SmsStore.ack(app, env.smsAck.id); Log.i(TAG, "SMS ${env.smsAck.id.take(8)} acked") }
             Envelope.BodyCase.SMS_SEND -> SmsSender.send(app, env.smsSend)
-            Envelope.BodyCase.SET_HOTSPOT_CONFIG -> Hotspot.configure(app, env.setHotspotConfig.config) { ok, detail ->
-                if (!ok) error(d, env.seq, Error.Code.BAD_REQUEST, "hotspot: $detail")
-                main.postDelayed({ broadcast(Envelope.newBuilder().setHostStatus(status())) }, 1500)
-            }
+            Envelope.BodyCase.SET_HOTSPOT_CONFIG -> hotspotConfig(d, env.seq, env.setHotspotConfig.config)
             Envelope.BodyCase.SET_SIM -> {
                 Sims.apply(app, env.setSim)?.let { error(d, env.seq, Error.Code.BAD_REQUEST, "SIM: $it") }
                 // Switching a SIM on/off or moving data takes a few seconds to settle.
@@ -613,6 +635,7 @@ object Relay {
             val s = status()
             broadcast(Envelope.newBuilder().setHostStatus(s))
             Health.notices(s).forEach(::hostNotice)
+            dataLimit(s.hotspot)
         }
         if (::macLink.isInitialized) macLink.statusChanged()            // the Macs hear the same changes
     }
@@ -750,7 +773,7 @@ object Relay {
             .setSignalLevel(app.getSystemService(TelephonyManager::class.java).signalStrength?.level ?: 0)
             .setHostName(name?.takeIf { it.isNotBlank() } ?: Build.MODEL)
             .setControllable(hs.supported && HostWifi.clientOverride == null)
-            .setPausedForCall(hs.pausedForCall).setOffWhenUnused(true)
+            .setPausedForCall(hs.pausedForCall).setOffWhenUnused(true).setLimitReached(hs.limitReached)
             .build()
     }
 
