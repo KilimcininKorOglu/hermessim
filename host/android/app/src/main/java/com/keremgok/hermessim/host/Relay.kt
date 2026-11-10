@@ -20,6 +20,8 @@ import com.keremgok.hermessim.protocol.v1.HostStatus
 import com.keremgok.hermessim.protocol.v1.Sim
 import com.keremgok.hermessim.protocol.v1.Uplink
 import com.keremgok.hermessim.protocol.v1.KeepAlive
+import com.keremgok.hermessim.protocol.v1.MacCommand
+import com.keremgok.hermessim.protocol.v1.MacStatus
 import com.keremgok.hermessim.protocol.v1.Remote
 import com.keremgok.hermessim.protocol.v1.SmsReceived
 import com.keremgok.hermessim.protocol.v1.SmsSendResult
@@ -56,6 +58,9 @@ object Relay {
 
     private lateinit var app: Context
     private lateinit var ble: BleLink
+    private lateinit var macLink: MacLink
+    /** The last start failed and nothing has switched the hotspot since: a Mac sees FAILED, not OFF. */
+    @Volatile private var hotspotFailed = false
     private var audio: AudioBridge? = null
     private val main = Handler(Looper.getMainLooper())
     private val seq = AtomicInteger()
@@ -80,7 +85,10 @@ object Relay {
         VoiceGate.init(app)
         Api.refreshSupportTable(app)          // newest phone tiers from hermessim.keremgok.tr (bundled copy as fallback)
         if (pinned() == null) openPairing(FIRST_PAIRING_WINDOW_MS)
-        ble = BleLink(app, ::onFrame, ::onLink, ::pairable)
+        macLink = MacLink(app, ::macStatus, { Hotspot.info(app).passphrase }, ::macCommand,
+            changed = { main.removeCallbacks(pushStatus); main.postDelayed(pushStatus, 250) },
+            unbond = { address -> pairExec.execute { RootBt.unbond(app, address) } })
+        ble = BleLink(app, ::onFrame, ::onLink, ::pairable, macLink)
         ble.onServiceReady = { askForHello() }
         ble.start()
         val adapter = (app.getSystemService(android.content.Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager).adapter
@@ -128,12 +136,7 @@ object Relay {
         // served; other requests outside the window are left to Android.
         app.registerReceiver(object : android.content.BroadcastReceiver() {
             override fun onReceive(c: Context, i: android.content.Intent) {
-                val dev = i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
-                val mac = dev.address
-                val known = pinned() != null && mac == app.getSharedPreferences("relay", Context.MODE_PRIVATE).getString("client_mac", null)
-                if (!pairable() && !known) return
-                if (known && !pairable()) Log.i(TAG, "pairing request from the paired phone (its keys were reset): accepting")
-                pairExec.execute { RootBt.confirm(app, mac) }
+                i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)?.let(::pairingRequest)
             }
         }, android.content.IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST).apply { priority = 1000 })
         Sims.protectNewSims(app)
@@ -152,6 +155,17 @@ object Relay {
             SmsStore.pending(app).filter { it.receivedMs > recent }.forEach(Push::sms)
         }
         Log.i(TAG, "relay up; pinned client=${pinned() ?: "none"}")
+    }
+
+    /** A Bluetooth pairing request (the receiver in [start]): confirmed as root when it is one of ours. */
+    private fun pairingRequest(dev: BluetoothDevice) {
+        val address = dev.address
+        val known = pinned() != null && address == app.getSharedPreferences("relay", Context.MODE_PRIVATE).getString("client_mac", null)
+        val forMac = macLink.windowOpen()       // a Mac pairs while the client holds its window open
+        if (!pairable() && !known && !forMac) return
+        if (known && !pairable()) Log.i(TAG, "pairing request from the paired phone (its keys were reset): accepting")
+        if (forMac) Log.i(TAG, "pairing request inside the Mac window: accepting")
+        pairExec.execute { RootBt.confirm(app, address) }
     }
 
     /** For the setup screen: paired client model (null = not paired), connected now, pairing window open. */
@@ -173,7 +187,7 @@ object Relay {
      *  [start] there is no one to tell: the Hello's status carries it. */
     fun voiceChanged() { if (started()) main.post(pushStatus) }
     fun pairingOpen(): Boolean = SystemClock.elapsedRealtime() < pairingUntil
-    fun pairingSecondsLeft(): Int = ((pairingUntil - SystemClock.elapsedRealtime()) / 1000).coerceAtLeast(0).toInt()
+    fun pairingSecondsLeft(): Int = secondsLeft(pairingUntil, SystemClock.elapsedRealtime())
 
     /**
      * An iPhone may pair now: the window is open, or no iPhone is paired (a new host, or one its iPhone forgot: no
@@ -340,26 +354,12 @@ object Relay {
             }
             Envelope.BodyCase.DIAGNOSTICS_REQUEST -> sendDiagnostics(d, env.diagnosticsRequest.maxBytes)
             Envelope.BodyCase.UNPAIR -> unpair(d, env.seq)
-            Envelope.BodyCase.SET_HOTSPOT -> {
-                if (!env.setHotspot.on && env.setHotspot.offWhenUnusedS > 0) {     // the host keeps the timer
-                    Hotspot.offWhenUnused(app, env.setHotspot.offWhenUnusedS); return
-                }
-                Hotspot.cancelOffWhenUnused()
-                // Starting the hotspot can take the host off Wi-Fi, which may carry this internet call (18 Oct).
-                if (env.setHotspot.on && !bleNear() && CallRegistry.snapshot().any { it.state != CallEvent.State.ENDED })
-                    return error(d, env.seq, Error.Code.BAD_REQUEST, "hotspot: after the call")
-                HotspotPause.userSwitched(env.setHotspot.on)        // the user's switch wins over a call pause
-                Hotspot.set(app, env.setHotspot.on) { ok, detail ->
-                    if (!ok) error(d, env.seq, Error.Code.INTERNAL, "hotspot: $detail")
-                    // The AP state change itself pushes status (Hotspot.watch); this catches a settle without one.
-                    main.postDelayed(pushStatus, 1500)
-                }
-                main.post(pushStatus)                   // "Starting…" / off right away, not after the AP settles
-                // A start Android accepted can still die before the AP is up (no state change then): end "Starting…"
-                // as soon as its 15 s window closes.
-                if (env.setHotspot.on) main.postDelayed(pushStatus, 15_500)
+            Envelope.BodyCase.SET_HOTSPOT -> switchHotspot(env.setHotspot.on, env.setHotspot.offWhenUnusedS) { code, detail ->
+                error(d, env.seq, code, detail)
             }
             Envelope.BodyCase.SET_HOTSPOT_CALL_PAUSE -> setCallPause(d, env.seq, env.setHotspotCallPause.on)
+            Envelope.BodyCase.SET_MAC_PAIRING -> macLink.setPairing(env.setMacPairing.on)
+            Envelope.BodyCase.REMOVE_MAC -> macLink.remove(env.removeMac.address)
             Envelope.BodyCase.SET_HOST_WIFI -> HostWifi.setUseWhenAway(env.setHostWifi.useWhenAway, remote = d !is Peer.Ble)
             // Network names and passwords travel over Bluetooth only (18 Oct).
             Envelope.BodyCase.WIFI_SCAN, Envelope.BodyCase.WIFI_ADD, Envelope.BodyCase.WIFI_FORGET -> {
@@ -599,7 +599,10 @@ object Relay {
     }
 
     // Runs on the main thread after every change: a failure here must cost one status, not the process.
-    private val pushStatus = Runnable { Bg.guard("status") { broadcast(Envelope.newBuilder().setHostStatus(status())) } }
+    private val pushStatus = Runnable {
+        Bg.guard("status") { broadcast(Envelope.newBuilder().setHostStatus(status())) }
+        if (::macLink.isInitialized) macLink.statusChanged()            // the Macs hear the same changes
+    }
 
     /**
      * This process may be new while a client's link stayed up (app update or crash): the client doesn't know
@@ -717,7 +720,54 @@ object Relay {
         b.setUplink(uplink(b.simsList))
         Push.keyId()?.let { b.setPushKeyId(com.google.protobuf.ByteString.copyFrom(it)) }
         b.setUpdate(Updater.status())
+        if (::macLink.isInitialized) b.setMac(macLink.access())
         return b.build()
+    }
+
+    /** What a Mac is shown (MacStatus): the hotspot as the client sees it, plus the host's battery and signal. */
+    @SuppressLint("MissingPermission")
+    private fun macStatus(): MacStatus {
+        val hs = Hotspot.info(app)
+        val bm = app.getSystemService(BatteryManager::class.java)
+        val name = runCatching { (app.getSystemService(Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager).adapter?.name }.getOrNull()
+        return MacStatus.newBuilder()
+            .setState(MacCore.state(hs.on, hs.starting, hotspotFailed))
+            .setSsid(hs.ssid).setFrequencyMhz(hs.frequencyMhz).setGateway(hs.gateway)
+            .setBatteryPercent(bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY))
+            .setSignalLevel(app.getSystemService(TelephonyManager::class.java).signalStrength?.level ?: 0)
+            .setHostName(name?.takeIf { it.isNotBlank() } ?: Build.MODEL)
+            .setControllable(hs.supported && HostWifi.clientOverride == null)
+            .setPausedForCall(hs.pausedForCall).setOffWhenUnused(true)
+            .build()
+    }
+
+    /** A Mac's command (MacLink, main thread): the same switch as the client's SetHotspot. */
+    private fun macCommand(cmd: MacCommand) {
+        if (HostWifi.clientOverride != null) { Log.i(TAG, "rig running: the Mac's hotspot switch ignored"); return }
+        switchHotspot(cmd.on, cmd.offWhenUnusedS) { _, detail -> Log.w(TAG, "Mac hotspot switch: $detail") }
+    }
+
+    /**
+     * SetHotspot from the client or a Mac. on = false with [offWhenUnusedS] > 0: the host keeps the "off once unused"
+     * timer. [refused] hears why it didn't happen (code, detail).
+     */
+    private fun switchHotspot(on: Boolean, offWhenUnusedS: Int, refused: (Error.Code, String) -> Unit) {
+        if (!on && offWhenUnusedS > 0) { Hotspot.offWhenUnused(app, offWhenUnusedS); return }
+        Hotspot.cancelOffWhenUnused()
+        // Starting the hotspot can take the host off Wi-Fi, which may carry this internet call (18 Oct).
+        if (on && !bleNear() && CallRegistry.snapshot().any { it.state != CallEvent.State.ENDED })
+            return refused(Error.Code.BAD_REQUEST, "hotspot: after the call")
+        HotspotPause.userSwitched(on)        // the user's switch wins over a call pause
+        hotspotFailed = false
+        Hotspot.set(app, on) { ok, detail ->
+            if (!ok) { if (on) hotspotFailed = true; refused(Error.Code.INTERNAL, "hotspot: $detail") }
+            // The AP state change itself pushes status (Hotspot.watch); this catches a settle without one.
+            main.postDelayed(pushStatus, 1500)
+        }
+        main.post(pushStatus)                   // "Starting…" / off right away, not after the AP settles
+        // A start Android accepted can still die before the AP is up (no state change then): end "Starting…"
+        // as soon as its 15 s window closes.
+        if (on) main.postDelayed(pushStatus, 15_500)
     }
 }
 

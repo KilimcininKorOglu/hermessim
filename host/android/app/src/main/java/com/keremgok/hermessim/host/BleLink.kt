@@ -65,6 +65,7 @@ class BleLink(
     private val onFrame: (BluetoothDevice, ByteArray) -> Unit,
     private val onLink: (BluetoothDevice, Boolean) -> Unit,
     private val pairable: () -> Boolean = { false },
+    private val mac: MacLink? = null,
 ) {
     companion object {
         /** The link's connection interval as last reported to our client role (ms; 0 = not yet): call audio check. */
@@ -79,9 +80,13 @@ class BleLink(
         val CTRL_RX: UUID = UUID.fromString("0e9c0003-0971-48af-ba0b-2c5c254faec0")
         val AUDIO_PSM: UUID = UUID.fromString("0e9c0004-0971-48af-ba0b-2c5c254faec0")
         val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+
+        /** Advertising data naming one service: the client's set and the Mac's carry nothing else. */
+        fun advertised(uuid: UUID): AdvertiseData = AdvertiseData.Builder().addServiceUuid(ParcelUuid(uuid)).build()
     }
 
     private val main = Handler(Looper.getMainLooper())
+    init { mac?.admitted = { restartAdvertising() } }
     private val bt = ctx.getSystemService(BluetoothManager::class.java)
     private val prefs = ctx.getSharedPreferences("ble", Context.MODE_PRIVATE)
     private var gatt: BluetoothGattServer? = null
@@ -167,6 +172,7 @@ class BleLink(
                     runCatching { gatt?.close() }; gatt = null
                     advSet = null; registered = false; starting = false; replacing = false; enableTries = 0; failures = 0; advDisabled = false   // the radio drops it
                     advStatus = null
+                    mac?.radioOff()
                     readers.clear(); queues.clear(); inFlight.clear(); mtu.clear(); notifyFails.clear()
                 }
                 android.bluetooth.BluetoothAdapter.STATE_OFF -> radioBack()
@@ -199,6 +205,7 @@ class BleLink(
     fun stop() {
         runCatching { bt.adapter.bluetoothLeAdvertiser.stopAdvertisingSet(advCallback) }
         advSet = null; registered = false; starting = false; replacing = false
+        mac?.stop()
         gatt?.close()
         gatt = null
     }
@@ -332,19 +339,30 @@ class BleLink(
     /** Our GATT service is registered: notifications can reach clients from now on. */
     var onServiceReady: (() -> Unit)? = null
 
+    /** The request is for the Mac service: MacLink answers it (true), BleLink stays out of it. */
+    private fun forMac(c: BluetoothGattCharacteristic?): Boolean = mac != null && c?.service?.uuid == MacLink.SERVICE
+
     private val callback = object : BluetoothGattServerCallback() {
         override fun onServiceAdded(status: Int, service: BluetoothGattService) {
-            Log.i(TAG, "GATT service added status=$status")
-            if (status == BluetoothGatt.GATT_SUCCESS) main.post { onServiceReady?.invoke() }
+            Log.i(TAG, "GATT service ${service.uuid} added status=$status")
+            if (status != BluetoothGatt.GATT_SUCCESS) return
+            if (service.uuid == MacLink.SERVICE) { mac?.kick(); return }
+            main.post { onServiceReady?.invoke() }
+            // Android adds one service at a time: the Mac's goes in once the client's is in.
+            val server = gatt ?: return
+            mac?.let { m -> runCatching { server.addService(m.service(server)) }.onFailure { Log.w(TAG, "Mac service not added: $it") } }
         }
 
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
+            mac?.connectionChanged(device, newState == BluetoothProfile.STATE_CONNECTED)
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 Log.i(TAG, "BLE connected ${device.address} bond=${device.bondState}")
                 ignoredDown.remove(device.address)
                 resetStream(device.address)
                 gatt?.setPreferredPhy(device, BluetoothDevice.PHY_LE_2M_MASK, BluetoothDevice.PHY_LE_2M_MASK,
                     BluetoothDevice.PHY_OPTION_NO_PREFERRED)
+                // A Mac that came in through the client's set switched it off: the iPhone must still find the host.
+                if (mac?.isMac(device.address) == true) restartAdvertising()
                 return
             }
             // A false DISCONNECTED comes from a short duplicate connection while the real link stays up (M1 spike)
@@ -352,6 +370,8 @@ class BleLink(
             Log.i(TAG, "BLE disconnected ${device.address} status=$status (stack says ${if (stillUp) "STILL UP, ignored" else "down"})")
             if (stillUp) { ignoredDown.add(device.address); return }
             ignoredDown.remove(device.address)
+            // A Mac is never the client's link: its going changes nothing the client relies on.
+            if (mac?.isMac(device.address) == true) { resetStream(device.address); restartAdvertising(); return }
             linkDown(device)
         }
 
@@ -368,6 +388,7 @@ class BleLink(
 
         override fun onDescriptorWriteRequest(device: BluetoothDevice, requestId: Int, d: BluetoothGattDescriptor,
                                               prepared: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray) {
+            if (forMac(d.characteristic)) { mac?.onCccd(device, requestId, responseNeeded, value); return }
             if (d.uuid == CCCD) {
                 val on = value.isNotEmpty() && value[0].toInt() and 1 == 1
                 setSubscribed(device.address, on)
@@ -383,12 +404,14 @@ class BleLink(
 
         override fun onCharacteristicReadRequest(device: BluetoothDevice, requestId: Int, offset: Int,
                                                  c: BluetoothGattCharacteristic) {
+            if (forMac(c)) { mac?.onRead(device, requestId, offset, c.uuid); return }
             val v = if (c.uuid == AUDIO_PSM) byteArrayOf((audioPsm and 0xff).toByte(), (audioPsm shr 8).toByte()) else ByteArray(0)
             gatt?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, v)
         }
 
         override fun onCharacteristicWriteRequest(device: BluetoothDevice, requestId: Int, c: BluetoothGattCharacteristic,
                                                   prepared: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray) {
+            if (forMac(c)) { mac?.onWrite(device, requestId, c.uuid, responseNeeded, value); return }
             if (responseNeeded) gatt?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
             if (c.uuid != CTRL_RX) return
             val frames = readers.getOrPut(device.address) { Framing.Reader() }.feed(value)
@@ -398,6 +421,7 @@ class BleLink(
 
         override fun onNotificationSent(device: BluetoothDevice, status: Int) {
             if (status != BluetoothGatt.GATT_SUCCESS) Log.w(TAG, "notification to ${device.address} status=$status")
+            if (mac?.isMac(device.address) == true) { mac.notificationSent(device); return }
             inFlight[device.address] = false
             pump(device)
         }
@@ -473,8 +497,7 @@ class BleLink(
 
     /** [PAIR_SERVICE] while [pairable] (the Add host sheet lists only those), else [SERVICE] (the paired iPhone's
      *  search). The GATT service is [SERVICE] either way. */
-    private fun adData(): AdvertiseData =
-        AdvertiseData.Builder().addServiceUuid(ParcelUuid(if (pairable()) PAIR_SERVICE else SERVICE)).build()
+    private fun adData(): AdvertiseData = advertised(if (pairable()) PAIR_SERVICE else SERVICE)
 
     /** The phone's name in the scan response when it fits (31 bytes - 2; Android 11/12 count the whole name, and
      *  refuse the set otherwise): nameless, the host still works, the iPhone's sheet shows HermesSIM Host. */
