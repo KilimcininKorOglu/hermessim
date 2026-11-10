@@ -44,8 +44,8 @@ connection event can't take 100 single-packet writes a second. Receivers parse t
   menu's text, but the menu cannot be answered: Android's API sends a single request.
 - Call rules (where `HostStatus.call_rules` is set): `SetCallRules` replaces the blocked numbers, the hidden-number
   switch and the busy reply. Blocked calls and texts never reach a client, a push or a Mac. A text the host sends by
-  itself (the busy reply, a Mac's reply) reaches the clients as `HostSmsSent`, then its outcome as `SmsSendResult`
-  with the same id.
+  itself (the busy reply, a Mac's reply) reaches the clients served at that moment as `HostSmsSent` (never as a
+  push, and not replayed), then its outcome as `SmsSendResult` with the same id.
 
 ## Remote mode (internet)
 

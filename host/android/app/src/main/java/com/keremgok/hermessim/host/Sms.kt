@@ -15,6 +15,7 @@ import android.provider.Telephony
 import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
 import android.util.Log
+import com.keremgok.hermessim.protocol.v1.HostSmsSent
 import com.keremgok.hermessim.protocol.v1.SmsReceived
 import com.keremgok.hermessim.protocol.v1.SmsSend
 import com.keremgok.hermessim.protocol.v1.SmsSendResult
@@ -74,6 +75,10 @@ class SmsDeliverReceiver : BroadcastReceiver() {
         SmsStore.add(ctx, msg)
         Log.i(TAG, "SMS received on slot $slot (${body.length} chars), queued ${msg.id}")
         Relay.smsReceived(msg)
+        if (CallRuleStore.autoReply(from)) {
+            Log.i(TAG, "busy: replying to ${msg.id} on slot $slot")
+            SmsSender.sendFromHost(ctx, from, CallRuleStore.rules.busyText, slot, HostSmsSent.Origin.AUTO_REPLY)
+        }
     }
 }
 
@@ -100,6 +105,14 @@ object SmsSender {
     private val delivered = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
     /** When each message went out (elapsedRealtime), to tell a timeout from a real refusal. */
     private val sentAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** A text the host sends by itself (the busy reply, a Mac's reply): the clients get it as HostSmsSent, then its SmsSendResult. */
+    fun sendFromHost(ctx: Context, to: String, body: String, slot: Int, origin: HostSmsSent.Origin) {
+        val id = "host-${UUID.randomUUID()}"
+        Relay.hostSmsSent(HostSmsSent.newBuilder().setId(id).setTo(to).setBody(body).setSlot(slot)
+            .setAtMs(System.currentTimeMillis()).setOrigin(origin).build())
+        send(ctx, SmsSend.newBuilder().setClientMsgId(id).setTo(to).setBody(body).setSlot(slot).build())
+    }
 
     fun send(ctx: Context, s: SmsSend) {
         if (s.to.isBlank() || s.body.isEmpty()) {

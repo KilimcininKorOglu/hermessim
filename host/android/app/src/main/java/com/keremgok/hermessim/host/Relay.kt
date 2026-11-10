@@ -17,6 +17,7 @@ import com.keremgok.hermessim.protocol.v1.Error
 import com.keremgok.hermessim.protocol.v1.Hello
 import com.keremgok.hermessim.protocol.v1.Unpair
 import com.keremgok.hermessim.protocol.v1.HostNotice
+import com.keremgok.hermessim.protocol.v1.HostSmsSent
 import com.keremgok.hermessim.protocol.v1.HostStatus
 import com.keremgok.hermessim.protocol.v1.Sim
 import com.keremgok.hermessim.protocol.v1.Uplink
@@ -234,6 +235,9 @@ object Relay {
     }
 
     fun smsSendResult(r: SmsSendResult) = broadcast(Envelope.newBuilder().setSmsSendResult(r))
+
+    /** A text the host sent by itself: to the clients served now, never as a push. */
+    fun hostSmsSent(m: HostSmsSent) = broadcast(Envelope.newBuilder().setHostSmsSent(m))
 
     /** SetHotspotConfig: a change of the monthly limit alone applies without restarting a running hotspot. */
     private fun hotspotConfig(d: Peer, seq: Int, c: com.keremgok.hermessim.protocol.v1.Hotspot) {
