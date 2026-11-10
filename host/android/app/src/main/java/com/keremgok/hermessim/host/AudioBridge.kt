@@ -27,6 +27,85 @@ internal fun LocalSocket.closeNow() {
 }
 
 /**
+ * How many of the daemon's 10 ms frames share one Bluetooth packet from a call's start (1: each goes alone).
+ *
+ * A MediaTek host starts with two. A Galaxy A13 (MT6769) took every single-frame write at once (slowest write 1 ms,
+ * nothing dropped, its capture at 100%), yet its Bluetooth passed 91 to 98 packets a second of the 100 and paused for
+ * up to 190 ms: the phone got the caller late and in clumps, 14% of its playback had nothing to play, and the host
+ * saw none of it, because what the link can't carry waits inside Android's Bluetooth, below this socket (10 Nov
+ * 2026). Fifty packets a second is half that link's rate, so a pause is caught up instead of piling on. The cost is
+ * 10 ms on the first frame of each pair, which is why hosts whose link carries 100 a second keep one.
+ */
+object AudioPack {
+    const val MAX = 4
+    private val MTK = Regex("""\bmt\d{4}""", RegexOption.IGNORE_CASE)
+
+    /** adb debug (AUDIO_PACK): frames per packet on any host until the app restarts; 0 = by the chip. */
+    @Volatile var forced = 0
+
+    /** [names]: what the phone calls its chip (Build.SOC_*, ro.board.platform, Build.HARDWARE). Pure (AudioPackTest). */
+    fun frames(names: List<String>, forced: Int = 0): Int = when {
+        forced in 1..MAX -> forced
+        names.any { it.contains("mediatek", ignoreCase = true) || MTK.containsMatchIn(it) } -> 2
+        else -> 1
+    }
+
+    private val byChip by lazy { frames(listOf(Compat.soc(), Compat.prop("ro.board.platform"), android.os.Build.HARDWARE)) }
+
+    /** For the call that starts now. The first use asks the system for the chip's name (AudioBridge does, before any call). */
+    fun now(): Int = if (forced in 1..MAX) forced else byChip
+}
+
+/**
+ * The caller's frames waiting for the Bluetooth link, oldest first: at most [backlog], then the oldest goes.
+ * [take] hands over every frame waiting, as one write; with a pack over 1 it first waits for that many (a frame
+ * comes every 10 ms), but never long: a daemon that stops sending (a hold) must not keep a frame back.
+ */
+internal class SendQueue(private val backlog: Int) {
+    class Taken(val bytes: Int, val frames: Int)
+
+    private val q = ArrayDeque<ByteArray>()
+    private val lock = ReentrantLock()
+    private val ready = lock.newCondition()
+    private var closed = false
+
+    /** Adds [frame]; how many of the oldest fell out for it. */
+    fun offer(frame: ByteArray): Int = lock.withLock {
+        q.addLast(frame)
+        var dropped = 0
+        while (q.size > backlog) { q.removeFirst(); dropped++ }
+        ready.signalAll()
+        dropped
+    }
+
+    /** Blocks for the next write's frames, copied into [buf] back to back (as many as fit [maxTx]); null once closed. */
+    fun take(buf: ByteArray, maxTx: Int, pack: Int): Taken? = lock.withLock {
+        while (q.isEmpty()) { if (closed) return@withLock null; ready.await(200, TimeUnit.MILLISECONDS) }
+        if (pack > 1) awaitPack(pack)
+        var n = 0; var frames = 0
+        while (q.isNotEmpty() && (n == 0 || n + q.first().size <= maxTx)) {
+            val f = q.removeFirst(); System.arraycopy(f, 0, buf, n, f.size); n += f.size; frames++
+        }
+        Taken(n, frames)
+    }
+
+    /** Waits (lock held) until [pack] frames are in, the queue closes, or the pack's time is up. */
+    private fun awaitPack(pack: Int) {
+        var left = TimeUnit.MILLISECONDS.toNanos((pack - 1) * FRAME_MS + SLACK_MS)
+        while (q.size < pack && !closed && left > 0) left = ready.awaitNanos(left)
+    }
+
+    /** Ends the waiting: [take] hands over what is left without the pack's wait, then null. */
+    fun close() = lock.withLock { closed = true; ready.signalAll() }
+
+    companion object {
+        const val FRAME_MS = 10L
+        /** Past the pair's own 10 ms: the daemon's frames come off the sound card's clock, a few ms either way. */
+        const val SLACK_MS = 5L
+    }
+}
+
+/**
  * Bridges the audio daemon (hermessimd, unix SEQPACKET "@hermessimd-audio") and the iPhone (BLE L2CAP CoC).
  * The daemon owns the call-audio codec and PCM I/O; this just forwards Opus packets both ways.
  *
@@ -56,6 +135,7 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
 
     private fun acceptLoop() {
         var fails = 0
+        AudioPack.now().let { if (it > 1) Log.i(TAG, "audio to the phone: this host packs $it frames a Bluetooth packet") }
         while (acceptThread != null) {
             if (!adapter.isEnabled) { Thread.sleep(2000); continue }   // radio off: wait quietly (BleLink rebuilds on STATE_ON)
             if (!ble.allowed()) { Thread.sleep(2000); continue }       // no Bluetooth permission yet: self-repair grants it
@@ -101,7 +181,8 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
         Log.i(TAG, "audio bridge up (L2CAP <-> hermessimd)")
         CallAudioCheck.bridgeUp()
         val alive = AtomicBoolean(true)
-        val backlog = Backlog()
+        // Not every Bluetooth blocks the write, so some hosts pair their frames from the start (AudioPack).
+        val backlog = Backlog(AudioPack.now())
         val down = Thread({ pumpDown(ds, backlog, alive) }, "audio-down").apply { isDaemon = true; start() }
         val send = Thread({ pumpSend(l2cap, backlog, alive) }, "audio-send").apply { isDaemon = true; start() }
         try {
@@ -109,7 +190,7 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
         } catch (_: Exception) {
         } finally {
             alive.set(false)
-            backlog.wake()
+            backlog.close()
             runCatching { l2cap.close() }
             ds.closeNow()
             down.join(500); send.join(500)
@@ -146,22 +227,23 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
                     Log.w(TAG, "audio to the phone: Bluetooth isn't taking it, dropping the oldest (${runCatching { CallAudioCheck.radio() }.getOrDefault("")})")
                 }
             }
-        } catch (_: Exception) {} finally { alive.set(false); backlog.wake() }
+        } catch (_: Exception) {} finally { alive.set(false); backlog.close() }
     }
 
-    /** backlog -> L2CAP: every frame waiting, up to the link's largest packet, in one write. */
+    /** backlog -> L2CAP: every frame waiting (at least the host's pack), up to the link's largest packet, in one write. */
     private fun pumpSend(l2cap: BluetoothSocket, backlog: Backlog, alive: AtomicBoolean) {
         val out = l2cap.outputStream
         val maxTx = runCatching { l2cap.maxTransmitPacketSize }.getOrDefault(0).let { if (it in 64..4096) it else MAX + 2 }
         val buf = ByteArray(maxOf(maxTx, MAX + 2))
+        if (backlog.pack > 1) Log.i(TAG, "audio to the phone: ${backlog.pack} frames a packet on this host")
         try {
             while (alive.get()) {
-                val (n, frames) = backlog.take(buf, maxTx, alive)
-                if (n == 0) continue
+                val t = backlog.take(buf, maxTx) ?: break
+                if (t.bytes == 0) continue
                 val t0 = SystemClock.elapsedRealtime()
-                out.write(buf, 0, n)
-                backlog.wrote(frames, (SystemClock.elapsedRealtime() - t0).toInt(), t0)
-                    ?.let { Log.i(TAG, "audio to the phone 5s: $it (max $maxTx B)") }
+                out.write(buf, 0, t.bytes)
+                backlog.wrote(t.frames, (SystemClock.elapsedRealtime() - t0).toInt(), t0)
+                    ?.let { Log.i(TAG, "audio to the phone 5s: $it (max $maxTx B, ${backlog.pack} a packet)") }
             }
         } catch (_: Exception) {} finally { alive.set(false) }
     }
@@ -181,46 +263,42 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
         }
     }
 
-    /** Caller audio waiting for the Bluetooth link: [pumpDown] adds frames, [pumpSend] takes them in batches. */
-    private class Backlog {
-        private val q = ArrayDeque<ByteArray>()
+    /**
+     * Caller audio waiting for the Bluetooth link ([SendQueue]) and its 5 s numbers: [pumpDown] adds frames, [pumpSend]
+     * takes them in writes of at least [pack] frames.
+     */
+    private class Backlog(val pack: Int) {
+        private val queue = SendQueue(BACKLOG)
         private val lock = ReentrantLock()
-        private val ready = lock.newCondition()
         private val st = IntArray(5)                 // frames in, frames out, writes, dropped, slowest write (ms)
         private var nextLog = SystemClock.elapsedRealtime() + 5000
 
         /** Queue one frame; true if the oldest had to go. */
-        fun add(frame: ByteArray): Boolean = lock.withLock {
-            q.addLast(frame); st[0]++; CallAudioCheck.frameIn()
-            var dropped = false
-            while (q.size > BACKLOG) { q.removeFirst(); st[3]++; dropped = true; CallAudioCheck.dropped() }
-            ready.signal()
-            dropped
+        fun add(frame: ByteArray): Boolean {
+            val dropped = queue.offer(frame)
+            CallAudioCheck.frameIn()
+            repeat(dropped) { CallAudioCheck.dropped() }
+            lock.withLock { st[0]++; st[3] += dropped }
+            return dropped > 0
         }
 
-        /** Wait for frames, then copy as many as fit in [max] bytes (at least one) into [buf]: (bytes, frames). */
-        fun take(buf: ByteArray, max: Int, alive: AtomicBoolean): Pair<Int, Int> = lock.withLock {
-            while (q.isEmpty() && alive.get()) ready.await(200, TimeUnit.MILLISECONDS)
-            var n = 0; var frames = 0
-            while (q.isNotEmpty() && (n == 0 || n + q.first().size <= max)) {
-                val f = q.removeFirst(); System.arraycopy(f, 0, buf, n, f.size); n += f.size; frames++
-            }
-            n to frames
-        }
+        /** The next write's frames in [buf], as many as fit [max] bytes (at least one); null once closed and empty. */
+        fun take(buf: ByteArray, max: Int): SendQueue.Taken? = queue.take(buf, max, pack)
 
-        /** Wake a sender waiting in [take] (the bridge is closing). */
-        fun wake() = lock.withLock { ready.signalAll() }
+        /** The bridge is closing: wake a sender waiting in [take]. */
+        fun close() = queue.close()
 
         /**
-         * Count one write that took [ms]. Every 5 s, the window's numbers if the link lagged (frames shared a write, a
-         * drop, a slow write), else null: healthy calls already log every 5 s in the daemon's line.
+         * Count one write that took [ms]. Every 5 s, the window's numbers if the link lagged (more frames shared a
+         * write than this host packs, a drop, a slow write), else null: healthy calls already log every 5 s in the
+         * daemon's line.
          */
         fun wrote(frames: Int, ms: Int, now: Long): String? = lock.withLock {
             st[1] += frames; st[2]++; if (ms > st[4]) st[4] = ms
             CallAudioCheck.wrote(frames, ms.toLong())
             if (now <= nextLog) return@withLock null
             nextLog = now + 5000
-            val lagged = st[3] > 0 || st[2] < st[1] || st[4] >= 40
+            val lagged = st[3] > 0 || st[1] > st[2] * pack || st[4] >= 40
             val line = if (lagged) "frames=${st[1]}/${st[0]} writes=${st[2]} dropped=${st[3]} slowest write=${st[4]} ms" else null
             st.fill(0)
             line
