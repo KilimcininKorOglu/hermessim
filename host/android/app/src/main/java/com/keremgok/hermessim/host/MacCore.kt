@@ -2,6 +2,8 @@
 package com.keremgok.hermessim.host
 
 import com.keremgok.hermessim.protocol.v1.MacStatus
+import com.keremgok.hermessim.protocol.v1.MacText
+import com.keremgok.hermessim.protocol.v1.MacTexts
 
 /** Whole seconds from [now] until [until] (elapsed-realtime ms), never negative: a pairing window's countdown. */
 fun secondsLeft(until: Long, now: Long): Int = ((until - now) / 1000).coerceAtLeast(0).toInt()
@@ -35,9 +37,23 @@ class MacCore(private val now: () -> Long) {
     var macs: List<Mac> = emptyList()
         private set
     private var windowUntil = 0L
+    private var readers: Set<String> = emptySet()
 
     fun load(stored: Collection<String>) { macs = stored.mapNotNull(::decode).distinctBy { it.address }.take(MAX_MACS) }
     fun stored(): Set<String> = macs.map(::encode).toSet()
+
+    /** The Macs that may read the texts (PairedMac.texts), stored apart from the list: older lists stay readable. */
+    fun loadTexts(stored: Collection<String>) { readers = stored.filter(::isMac).toSet() }
+    fun storedTexts(): Set<String> = readers
+    fun texts(address: String): Boolean = address in readers
+
+    /** True if the setting changed; only a listed Mac can be allowed. */
+    fun setTexts(address: String, on: Boolean): Boolean {
+        val next = if (on && isMac(address)) readers + address else readers - address
+        if (next == readers) return false
+        readers = next
+        return true
+    }
 
     fun windowOpen(): Boolean = now() < windowUntil
     fun secondsLeft(): Int = secondsLeft(windowUntil, now())
@@ -66,6 +82,46 @@ class MacCore(private val now: () -> Long) {
     fun remove(address: String): Boolean {
         val before = macs.size
         macs = macs.filterNot { it.address == address }
+        readers = readers - address
         return macs.size != before
+    }
+}
+
+/**
+ * The texts a Mac may read (protocol/README.md "Mac", MacTexts): those of the last 10 minutes, newest first, at most
+ * 5, and the serialised value at most 512 bytes (a GATT attribute's limit). The oldest drop first; a lone text too long
+ * keeps the start of its body.
+ */
+class MacTextShelf(private val now: () -> Long) {
+    companion object {
+        const val WINDOW_MS = 10 * 60_000L
+        const val MAX_TEXTS = 5
+        const val MAX_BYTES = 512
+    }
+
+    private var texts: List<MacText> = emptyList()
+
+    fun add(text: MacText) {
+        texts = (listOf(text) + texts.filterNot { it.id == text.id }).sortedByDescending { it.atMs }.take(MAX_TEXTS)
+    }
+
+    fun value(): MacTexts {
+        val recent = texts.filter { now() - it.atMs < WINDOW_MS }
+        for (n in recent.size downTo 1) {
+            val value = MacTexts.newBuilder().addAllTexts(recent.take(n)).build()
+            if (value.serializedSize <= MAX_BYTES) return value
+        }
+        return recent.firstOrNull()?.let { MacTexts.newBuilder().addTexts(cut(it)).build() } ?: MacTexts.getDefaultInstance()
+    }
+
+    /** [text] with its body shortened until it fits alone. */
+    private fun cut(text: MacText): MacText {
+        var body = text.body
+        while (body.isNotEmpty()) {
+            body = body.dropLast(maxOf(1, (body.length / 8)))
+            val fitted = text.toBuilder().setBody(body).build()
+            if (MacTexts.newBuilder().addTexts(fitted).build().serializedSize <= MAX_BYTES) return fitted
+        }
+        return text.toBuilder().setBody("").build()
     }
 }

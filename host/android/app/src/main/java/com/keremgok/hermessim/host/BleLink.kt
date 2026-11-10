@@ -388,7 +388,7 @@ class BleLink(
 
         override fun onDescriptorWriteRequest(device: BluetoothDevice, requestId: Int, d: BluetoothGattDescriptor,
                                               prepared: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray) {
-            if (forMac(d.characteristic)) { mac?.onCccd(device, requestId, responseNeeded, value); return }
+            if (forMac(d.characteristic)) { mac?.onCccd(device, requestId, d.characteristic.uuid, responseNeeded, value); return }
             if (d.uuid == CCCD) {
                 val on = value.isNotEmpty() && value[0].toInt() and 1 == 1
                 setSubscribed(device.address, on)

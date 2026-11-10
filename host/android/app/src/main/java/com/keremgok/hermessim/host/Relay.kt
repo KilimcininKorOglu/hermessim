@@ -230,6 +230,7 @@ object Relay {
     fun smsReceived(m: SmsReceived) {
         broadcast(Envelope.newBuilder().setSmsReceived(m))
         Push.sms(m)
+        if (::macLink.isInitialized) macLink.textArrived(m)
     }
 
     fun smsSendResult(r: SmsSendResult) = broadcast(Envelope.newBuilder().setSmsSendResult(r))
@@ -391,6 +392,7 @@ object Relay {
             Envelope.BodyCase.SET_HOTSPOT_CALL_PAUSE -> setCallPause(d, env.seq, env.setHotspotCallPause.on)
             Envelope.BodyCase.SET_MAC_PAIRING -> macLink.setPairing(env.setMacPairing.on)
             Envelope.BodyCase.REMOVE_MAC -> macLink.remove(env.removeMac.address)
+            Envelope.BodyCase.SET_MAC_TEXTS -> macLink.setTexts(env.setMacTexts.address, env.setMacTexts.on)
             Envelope.BodyCase.SET_HOST_WIFI -> HostWifi.setUseWhenAway(env.setHostWifi.useWhenAway, remote = d !is Peer.Ble)
             // Network names and passwords travel over Bluetooth only (18 Oct).
             Envelope.BodyCase.WIFI_SCAN, Envelope.BodyCase.WIFI_ADD, Envelope.BodyCase.WIFI_FORGET -> {
