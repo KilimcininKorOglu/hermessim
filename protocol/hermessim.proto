@@ -57,6 +57,8 @@ message Envelope {
     SetMacTexts set_mac_texts = 69;              // client -> host: let a paired Mac read the recent texts (README "Mac")
     UssdRequest ussd_request = 70;               // client -> host: run a USSD code on a line (where HostStatus.ussd)
     UssdResult ussd_result = 71;                 // host -> client (reply)
+    SetCallRules set_call_rules = 72;            // client -> host: blocked numbers and the busy reply (where HostStatus.call_rules)
+    HostSmsSent host_sms_sent = 73;              // host -> client: a text the host itself sent (busy reply, a Mac's reply)
   }
 }
 
@@ -119,6 +121,7 @@ message HostStatus {
   bytes push_key_id = 16;        // first 8 bytes of sha256(PushSetup.key) the host holds; empty = none (README "Push")
   MacAccess mac = 17;            // Macs that may ask this host for its hotspot (README "Mac")
   bool ussd = 18;                // this host runs USSD codes (UssdRequest)
+  CallRules call_rules = 19;     // blocked numbers and the busy reply; set = this host has them (SetCallRules)
   enum VoiceTier { VOICE_TIER_UNSPECIFIED = 0; BASIC = 1; FULL_VOICE = 2; }
 }
 
@@ -533,6 +536,31 @@ message UssdResult {
     NETWORK = 3;                 // the network refused it, or another code is still running
     TIMEOUT = 4;                 // no answer within 30 s
   }
+}
+
+// Calls and texts the host keeps away from the user, and its busy reply. A blocked call is rejected (the caller hears
+// busy) and reaches no client; a blocked text stays in the host's own inbox and reaches no client, push or Mac. Numbers
+// match on their last 10 digits. While busy, a text gets busy_text back on the line it came in on, once an hour per
+// number at most; short codes (6 digits or fewer), senders with letters, hidden and blocked numbers never get one.
+message CallRules {
+  repeated string blocked = 1;   // at most 50 numbers
+  bool block_hidden = 2;         // reject calls without caller ID
+  bool busy = 3;
+  string busy_text = 4;          // at most 300 bytes; empty = no reply
+}
+
+message SetCallRules { CallRules rules = 1; }
+
+// A text the host sent by itself. The send's outcome follows as SmsSendResult with client_msg_id = id. Sent to the
+// clients on the link (or the internet room) only, never as a push.
+message HostSmsSent {
+  string id = 1;
+  string to = 2;
+  string body = 3;
+  int32 slot = 4;
+  int64 at_ms = 5;
+  Origin origin = 6;
+  enum Origin { AUTO_REPLY = 0; MAC = 1; }
 }
 
 // Problem reports (anonymous): the host's recent log, scrubbed on the host before it leaves (no phone numbers,

@@ -42,6 +42,10 @@ connection event can't take 100 single-packet writes a second. Receivers parse t
 - USSD (where `HostStatus.ussd`): `UssdRequest` runs one code on a line and the host answers `UssdResult` with
   `reply_to`. One code runs at a time; a second one meanwhile gets `NETWORK`. A code that opens a menu returns the
   menu's text, but the menu cannot be answered: Android's API sends a single request.
+- Call rules (where `HostStatus.call_rules` is set): `SetCallRules` replaces the blocked numbers, the hidden-number
+  switch and the busy reply. Blocked calls and texts never reach a client, a push or a Mac. A text the host sends by
+  itself (the busy reply, a Mac's reply) reaches the clients as `HostSmsSent`, then its outcome as `SmsSendResult`
+  with the same id.
 
 ## Remote mode (internet)
 
