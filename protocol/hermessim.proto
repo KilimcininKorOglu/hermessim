@@ -53,6 +53,7 @@ message Envelope {
     SetHotspotCallPause set_hotspot_call_pause = 65; // client -> host: Hotspot.call_pause (only where capabilities.call_pause)
     SetMacPairing set_mac_pairing = 66;          // client -> host: open or close the window in which a Mac may pair
     RemoveMac remove_mac = 67;                   // client -> host: forget a paired Mac
+    HostNotice host_notice = 68;                 // host -> client: something the user should hear about (README "Push")
   }
 }
 
@@ -460,6 +461,23 @@ message Uplink {
   Kind kind = 1;
   string name = 2;               // Wi-Fi: network name; mobile: the data line's operator
   enum Kind { NONE = 0; WIFI = 1; MOBILE = 2; OTHER = 3; }
+}
+
+// A health notice the host sends once per event: to the clients it serves and, with no client on Bluetooth, as a
+// `notice` push. The client shows it as a notification.
+message HostNotice {
+  Kind kind = 1;
+  int32 value = 2;               // BATTERY_*: the battery percent; DATA_LIMIT_*: the percent of the monthly limit used
+  int32 slot = 3;                // SIM_LOCKED: the SIM slot; else 0
+  int64 at_ms = 4;               // when it happened (unix ms)
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    BATTERY_LOW = 1;             // 15 % or less, not charging
+    BATTERY_CRITICAL = 2;        // 5 % or less, not charging
+    SIM_LOCKED = 3;              // a SIM now asks for its PIN or PUK
+    DATA_LIMIT_NEAR = 4;         // the hotspot used 80 % of its monthly limit
+    DATA_LIMIT_REACHED = 5;      // the monthly limit is used up: the host turned the hotspot off
+  }
 }
 
 // Problem reports (anonymous): the host's recent log, scrubbed on the host before it leaves (no phone numbers,

@@ -80,7 +80,7 @@ key K instead, and so does the client with it. Below, `room_token` and the push 
 as remote mode derives them from K. The client registers `POST /api/v1/push/register {room_token,
 voip_token, alert_token | fcm_token, environment: sandbox|production, app_version}` (stored under `room_id`; one phone
 per room, registering replaces it; no tokens = forget)
-and the host sends `POST /api/v1/push/send {room_token, kind: call|sms|note, sealed: base64, collapse_id?}`.
+and the host sends `POST /api/v1/push/send {room_token, kind: call|sms|note|notice, sealed: base64, collapse_id?}`.
 `sealed` = `nonce12 || ChaCha20-Poly1305(push key, nonce, [u64 BE unix ms][Envelope])`, AAD `"h2c"`, push key = HKDF
 info `push` (the client keeps only this key where its notification extension can read it). `PushSetup{}` (empty) or
 Unpair forgets P.
@@ -90,6 +90,12 @@ Unpair forgets P.
 | `call` | `CallEvent` RINGING, incoming, no client on Bluetooth, full voice | VoIP, expiration 0 | data `{k, s}`, high priority, TTL 60 s | iPhone: rings it in CallKit at once (every VoIP push must report a call); Android: rings it through Telecom; then reaches the host as usual |
 | `sms` | `SmsReceived` not acked within 4 s | alert, mutable, collapse id = SMS id, 1 day | data `{k, s}`, high priority, TTL 1 day | iPhone: the notification extension writes the text's notification and the app stays quiet when the text arrives; Android: stored and shown as if the link brought it (deduplicated by id) |
 | `note` | a ringing call in Basic mode | as `sms`, collapse id `basic-<call_id>` | as `sms` | "Missed call" note |
+| `notice` | a `HostNotice`, no client on Bluetooth | as `sms`, collapse id `notice-<kind>-<slot>` | as `sms` | the notice as a notification |
+
+**Health notices.** The host sends each `HostNotice` once per event: battery at 15 % and at 5 % while not charging
+(armed again once it charges or passes 30 %), a SIM that newly asks for its PIN or PUK, and the monthly hotspot limit
+at 80 % and 100 %. That the host has been unreachable for a while the client works out itself (a host that is off
+can't send anything).
 
 An Android app the user force-stopped gets no push until it is opened again (Android's rule); a swiped-away one does.
 
