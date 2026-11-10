@@ -498,6 +498,8 @@ class SetupActivity : Activity() {
 
     // ------------------------------------------------------------------ views
 
+    private companion object { const val CHARGE_STEP = 5 }   // the charge limit moves in steps of 5 (as in the clients)
+
     /** Battery-care control on the host itself; the client app has the same target slider. */
     private fun batteryCareCard(): View {
         val card = batteryCare ?: LinearLayout(this).apply {
@@ -508,14 +510,14 @@ class SetupActivity : Activity() {
             batteryTarget = text("", 15f, c.accent, bold = true).apply { setPadding(0, dp(4), 0, 0) }
             addView(batteryTarget)
             batterySeek = SeekBar(this@SetupActivity).apply {
-                max = 50                                       // 50..100: 100 turns the limit off
+                max = (100 - 50) / CHARGE_STEP                 // 50..100 in steps of 5: 100 turns the limit off
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(seek: SeekBar, progress: Int, fromUser: Boolean) {
                         if (fromUser) updateBatteryLabels()
                     }
                     override fun onStartTrackingTouch(seek: SeekBar) = Unit
                     override fun onStopTrackingTouch(seek: SeekBar) {
-                        Box.setChargeLimit(seek.progress + 50)
+                        Box.setChargeLimit(seek.progress * CHARGE_STEP + 50)
                     }
                 })
             }
@@ -523,14 +525,15 @@ class SetupActivity : Activity() {
             batteryBand = text("", 12f, c.secondary).apply { setPadding(0, 0, 0, dp(4)) }
             addView(batteryBand)
         }
-        if (batterySeek?.isPressed != true) batterySeek?.progress = (Box.chargeLimit - 50).coerceIn(0, 50)
+        // A limit set before the steps (62) shows on its nearest step until the slider is moved
+        if (batterySeek?.isPressed != true) batterySeek?.progress = ((Box.chargeLimit - 50 + CHARGE_STEP / 2) / CHARGE_STEP).coerceIn(0, 10)
         updateBatteryLabels()
         batteryCare = card
         return card
     }
 
     private fun updateBatteryLabels() {
-        val target = (batterySeek?.progress ?: (Box.chargeLimit - 50)).coerceIn(0, 50) + 50
+        val target = batterySeek?.let { it.progress * CHARGE_STEP + 50 } ?: Box.chargeLimit
         batteryTarget?.text = getString(R.string.battery_care_target, target)
         batteryBand?.text = if (target >= 100) getString(R.string.battery_care_off)
             else getString(R.string.battery_care_band, (target - 3).coerceAtLeast(30), (target + 2).coerceAtMost(95))
