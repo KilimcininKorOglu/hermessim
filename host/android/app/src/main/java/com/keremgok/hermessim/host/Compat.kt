@@ -91,7 +91,7 @@ object Compat {
                     }?.let { local(it, "reason") }
                 }.orEmpty()
             }
-            list.firstOrNull { p -> strings(p, "models").any { it.equals(Build.MODEL, ignoreCase = true) } }?.let { p ->
+            modelRow(list, Build.MODEL, Build.DEVICE)?.let { p ->
                 return Verdict(tierOf(p), p.optString("name", fallbackName), note(p))
             }
             // Same codename, other model number (another region of the same phone): at most "expected".
@@ -112,6 +112,17 @@ object Compat {
             return Verdict(tier, fallbackName, f?.let { local(it, "about") }.orEmpty())
         }
         return Verdict(Tier.UNKNOWN, fallbackName, "")
+    }
+
+    /**
+     * The row naming [model], the one naming [device] (the codename) too first: Xiaomi's model is a marketing name two
+     * phones can share ("Redmi Note 9 Pro" is joyeuse, and in India curtana, where only joyeuse passed the call test;
+     * 10 Nov 2026). Pure (CompatTest).
+     */
+    fun modelRow(list: List<JSONObject>, model: String, device: String): JSONObject? {
+        fun strings(p: JSONObject, k: String) = p.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+        val named = list.filter { p -> strings(p, "models").any { it.equals(model, ignoreCase = true) } }
+        return named.firstOrNull { p -> device in strings(p, "devices") } ?: named.firstOrNull()
     }
 
     /**
@@ -191,9 +202,14 @@ object Compat {
         }.getOrNull()
     }
 
-    fun soc(): String =
-        (if (Build.VERSION.SDK_INT >= 31) "${Build.SOC_MANUFACTURER} ${Build.SOC_MODEL}".trim() else "")
-            .ifEmpty { prop("ro.board.platform") }
+    /** The chip as Android names it; some custom ROMs say "unknown unknown" (a Galaxy J7 Prime): the board platform then. */
+    fun soc(): String = socName(if (Build.VERSION.SDK_INT >= 31) "${Build.SOC_MANUFACTURER} ${Build.SOC_MODEL}" else "",
+        { prop("ro.board.platform") }, { Build.HARDWARE })
+
+    /** [named] without its "unknown" words, else [platform], else [hardware]. Pure (CompatTest). */
+    fun socName(named: String, platform: () -> String, hardware: () -> String): String =
+        named.split(' ').filter { it.isNotEmpty() && !it.equals(Build.UNKNOWN, ignoreCase = true) }.joinToString(" ")
+            .ifEmpty { platform() }.ifEmpty { hardware() }
 
     /** Root works for this app (asks Magisk; the user grants it once). Call only on a user action. */
     fun rootWorks(): Boolean = Root.sh("id -u", 20_000).last == "0"
