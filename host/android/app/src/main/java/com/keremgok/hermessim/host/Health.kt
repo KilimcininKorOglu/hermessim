@@ -3,6 +3,7 @@ package com.keremgok.hermessim.host
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.keremgok.hermessim.protocol.v1.Box
 import com.keremgok.hermessim.protocol.v1.HostNotice
 import com.keremgok.hermessim.protocol.v1.HostStatus
 import com.keremgok.hermessim.protocol.v1.Sim
@@ -11,12 +12,14 @@ import com.keremgok.hermessim.protocol.v1.Sim
  * Health notices (protocol/README.md "Push"): what a status gives rise to, each once per event. The battery warns at
  * 15 % and at 5 % while not charging and is armed again once it charges or passes 30 %; a SIM warns when it newly asks
  * for its PIN or PUK; a SIM tells once when it starts roaming (value 1 when its data roaming is allowed) and is armed
- * again once it stops. Pure: [Health] keeps its state across host restarts.
+ * again once it stops; the charge limit tells once when the phone keeps undoing it (value = the limit) and is armed
+ * again once it holds. Pure: [Health] keeps its state across host restarts.
  */
 class HealthCore(
     var batteryStep: Int = 0,
     lockedSlots: Set<Int> = emptySet(),
     roamingSlots: Set<Int> = emptySet(),
+    var chargeStuck: Boolean = false,
 ) {
     val lockedSlots: MutableSet<Int> = lockedSlots.toMutableSet()
     val roamingSlots: MutableSet<Int> = roamingSlots.toMutableSet()
@@ -30,7 +33,15 @@ class HealthCore(
         newlyRoaming(roaming.keys).forEach { slot ->
             out += notice(HostNotice.Kind.ROAMING, if (roaming.getValue(slot).dataRoaming) 1 else 0, slot, now)
         }
+        if (newlyStuck(s.box.chargeState)) out += notice(HostNotice.Kind.CHARGE_CONTROL_STUCK, s.box.chargeLimit, 0, now)
         return out
+    }
+
+    /** True when the charge limit has just become stuck. An unknown state changes nothing; any other state re-arms. */
+    fun newlyStuck(state: Box.ChargeState): Boolean {
+        if (state == Box.ChargeState.CHARGE_STATE_UNSPECIFIED) return false
+        val stuck = state == Box.ChargeState.STUCK
+        return (stuck && !chargeStuck).also { chargeStuck = stuck }
     }
 
     /** The slots roaming now that weren't before; a SIM that stops roaming and starts again tells again. */
@@ -85,7 +96,7 @@ object Health {
     fun init(ctx: Context) {
         val stored = ctx.getSharedPreferences("health", Context.MODE_PRIVATE)
         prefs = stored
-        core = with(stored) { HealthCore(getInt("battery_step", 0), slots("locked"), slots("roaming")) }
+        core = with(stored) { HealthCore(getInt("battery_step", 0), slots("locked"), slots("roaming"), getBoolean("charge_stuck", false)) }
     }
 
     private fun SharedPreferences.slots(key: String): Set<Int> =
@@ -97,7 +108,8 @@ object Health {
         val out = core.notices(s, System.currentTimeMillis())
         prefs.edit().putInt("battery_step", core.batteryStep)
             .putStringSet("locked", core.lockedSlots.map { it.toString() }.toSet())
-            .putStringSet("roaming", core.roamingSlots.map { it.toString() }.toSet()).apply()
+            .putStringSet("roaming", core.roamingSlots.map { it.toString() }.toSet())
+            .putBoolean("charge_stuck", core.chargeStuck).apply()
         return out
     }
 }

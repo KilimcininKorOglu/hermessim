@@ -1,13 +1,16 @@
 // HermesSIM host. Copyright (C) 2026 SIM Relay authors. GPL-3.0-or-later.
 package com.keremgok.hermessim.host
 
+import com.keremgok.hermessim.protocol.v1.Box
+import com.keremgok.hermessim.protocol.v1.Box.ChargeState
 import com.keremgok.hermessim.protocol.v1.HostNotice.Kind
 import com.keremgok.hermessim.protocol.v1.HostStatus
 import com.keremgok.hermessim.protocol.v1.Sim
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** Health notices fire once per event: the battery on its way down, a SIM that newly asks for its PIN or PUK. */
+/** Health notices fire once per event: the battery on its way down, a SIM that newly asks for its PIN or PUK, a charge
+ *  limit the phone keeps undoing. */
 class HealthCoreTest {
     @Test fun theBatteryWarnsOnceAtEachStepOnItsWayDown() {
         val c = HealthCore()
@@ -58,5 +61,20 @@ class HealthCoreTest {
             .addSims(sim(0, Sim.Lock.UNLOCKED)).addSims(sim(1, Sim.Lock.PUK_REQUIRED)).build()
         val got = HealthCore().notices(s, now = 42).map { listOf(it.kind, it.value, it.slot, it.atMs) }
         assertEquals(listOf(listOf(Kind.BATTERY_CRITICAL, 4, 0, 42L), listOf(Kind.SIM_LOCKED, 0, 1, 42L)), got)
+    }
+
+    @Test fun aStuckChargeLimitTellsOnceAndAgainOnlyAfterItHeld() {
+        val c = HealthCore()
+        val heard = listOf(ChargeState.HELD, ChargeState.STUCK, ChargeState.STUCK,
+            ChargeState.CHARGE_STATE_UNSPECIFIED, ChargeState.STUCK,   // an unknown state changes nothing
+            ChargeState.DRAINING, ChargeState.STUCK).map { c.newlyStuck(it) }
+        assertEquals(listOf(false, true, false, false, false, false, true), heard)
+    }
+
+    @Test fun theStuckNoticeCarriesTheLimit() {
+        val box = Box.newBuilder().setChargeLimit(70).setChargeState(ChargeState.STUCK)
+        val s = HostStatus.newBuilder().setBatteryPercent(90).setCharging(true).setBox(box).build()
+        val got = HealthCore().notices(s, now = 7).map { listOf(it.kind, it.value, it.slot, it.atMs) }
+        assertEquals(listOf(listOf(Kind.CHARGE_CONTROL_STUCK, 70, 0, 7L)), got)
     }
 }
