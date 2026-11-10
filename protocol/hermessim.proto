@@ -497,7 +497,8 @@ message Uplink {
 // `notice` push. The client shows it as a notification.
 message HostNotice {
   Kind kind = 1;
-  int32 value = 2;               // BATTERY_*: the battery percent; DATA_LIMIT_*: the percent of the monthly limit used
+  int32 value = 2;               // BATTERY_*: the battery percent; DATA_LIMIT_*: the percent of the monthly limit used;
+                                 // ROAMING: 1 when the SIM's data roaming is allowed, else 0
   int32 slot = 3;                // SIM_LOCKED, ROAMING: the SIM slot; else 0
   int64 at_ms = 4;               // when it happened (unix ms)
   enum Kind {
