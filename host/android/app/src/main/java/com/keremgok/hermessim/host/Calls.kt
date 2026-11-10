@@ -210,6 +210,14 @@ object CallRegistry {
 
     // ------------------------------------------------------------------ mapping
 
+    /** An incoming, ringing call the call rules block: its number is blocked, or it is hidden while hidden ones are. */
+    fun blocked(call: Call): Boolean {
+        val d = call.details
+        if (d.callDirection != Call.Details.DIRECTION_INCOMING || call.stateCompat != Call.STATE_RINGING) return false
+        val raw = d.handle?.schemeSpecificPart.orEmpty()
+        return CallRuleStore.blocksCall(raw, d.handlePresentation != TelecomManager.PRESENTATION_ALLOWED || raw.isEmpty())
+    }
+
     private fun event(call: Call, forceEnded: Boolean = false, id: String? = null): CallEvent {
         val d = call.details
         val raw = d.handle?.schemeSpecificPart.orEmpty()

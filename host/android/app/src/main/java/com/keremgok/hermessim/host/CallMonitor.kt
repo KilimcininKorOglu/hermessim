@@ -17,12 +17,15 @@ class CallMonitor : InCallService() {
     override fun onCreate() {
         super.onCreate()
         CallRegistry.init(this)
-        HostService.ensure(this)                 // a call is the worst moment to find the host down
+        CallRuleStore.init(this)
+        HostService.ensure(this)                // a call is the worst moment to find the host down
     }
 
     override fun onCallAdded(call: Call) {
         // The removal ran: the owner's own call, not ours to relay or silence
         if (Retire.givenBack(this)) { Log.i(TAG, "call added: phone given back, left alone"); return }
+        // A blocked caller: rejected before any client, push or Mac hears of it (removed() skips unknown calls)
+        if (CallRegistry.blocked(call)) { Log.i(TAG, "call added: blocked, rejected"); call.reject(false, null); return }
         val cb = object : Call.Callback() {
             override fun onStateChanged(c: Call, state: Int) = CallRegistry.changed(c)
             override fun onConnectionEvent(c: Call, event: String, extras: android.os.Bundle?) = CallRegistry.connectionEvent(c, event)
