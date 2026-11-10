@@ -14,6 +14,7 @@ import android.provider.Settings
 import android.telecom.TelecomManager
 import android.telephony.TelephonyManager
 import android.util.Log
+import com.keremgok.hermessim.protocol.v1.Box.ChargeState
 import org.json.JSONObject
 
 /**
@@ -93,6 +94,29 @@ object Box {
         val p = percent.coerceIn(50, 100)
         prefs.edit().putInt("charge_limit", p).apply()
         Daemon.charge(p)
+        askChargeState()                                    // a new limit changes the state now, not at the next ask
+    }
+
+    /** What the charge limit does now (protocol Box.charge_state), from the daemon's CHARGE? and the battery. */
+    @Volatile var chargeState = ChargeState.CHARGE_STATE_UNSPECIFIED; private set
+    private const val CHARGE_ASK_MS = 30_000L
+    private var chargeAskedAt = 0L
+    private var batteryLevel = -1
+    private var batteryPlugged = false
+
+    /** Main: a battery broadcast. Asks the daemon at most every 30 s; the answer comes back on main. */
+    fun batteryChanged(level: Int, plugged: Boolean) {
+        batteryLevel = level; batteryPlugged = plugged
+        if (android.os.SystemClock.elapsedRealtime() - chargeAskedAt >= CHARGE_ASK_MS) askChargeState()
+    }
+
+    private fun askChargeState() {
+        if (!ready || batteryLevel < 0) return
+        chargeAskedAt = android.os.SystemClock.elapsedRealtime()
+        Daemon.query("CHARGE?") { reply ->
+            val s = ChargeStateCore.state(reply, chargeLimit, chargeSupported, batteryPlugged, batteryLevel)
+            if (s != chargeState) { chargeState = s; onChange() }
+        }
     }
 
     /** Main: hermessimd answered a CHARGE (now or after it came back). */
@@ -101,7 +125,7 @@ object Box {
         val changed = ok != chargeSupported
         chargeSupported = ok
         if (!ok) reportChargeNodes()
-        if (changed) onChange()
+        if (changed) { onChange(); askChargeState() }
     }
 
     /**

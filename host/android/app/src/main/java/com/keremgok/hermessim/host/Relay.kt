@@ -128,6 +128,8 @@ object Relay {
                 val level = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
                 val plugged = i.getIntExtra(BatteryManager.EXTRA_STATUS, -1) == BatteryManager.BATTERY_STATUS_CHARGING
                 if ((level to plugged) != lastBattery) { lastBattery = level to plugged; statusChanged() }
+                // A held limit stops charging with the charger still in: the charge state needs "plugged", not "charging"
+                Box.batteryChanged(level, i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0)
             }
         }, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
         DataUsage.init(app, statusChanged)
@@ -762,7 +764,7 @@ object Relay {
         b.addAllSims(Sims.status(app))
         b.setBox(com.keremgok.hermessim.protocol.v1.Box.newBuilder()
             .setOn(Box.on).setSuspended(Box.pausedNow).setSuspendedUntilMs(if (Box.pausedNow) Box.suspendedUntil else 0)
-            .setChargeLimit(Box.chargeLimit).setChargeLimitSupported(Box.chargeSupported)
+            .setChargeLimit(Box.chargeLimit).setChargeLimitSupported(Box.chargeSupported).setChargeState(Box.chargeState)
             .setCallScreenHidden(Box.callScreenHidden()))
         b.setRemote(Remote.newBuilder().setEnabled(RemoteLink.enabled).setOnline(RemoteLink.online))
         b.setMobileData(MobileData.isOn(app))
