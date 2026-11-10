@@ -788,7 +788,7 @@ object Relay {
         return MacStatus.newBuilder()
             .setState(MacCore.state(hs.on, hs.starting, hotspotFailed))
             .setSsid(hs.ssid).setFrequencyMhz(hs.frequencyMhz).setGateway(hs.gateway)
-            .setBatteryPercent(bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY))
+            .setBatteryPercent(bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)).setCharging(bm.isCharging)
             .setSignalLevel(app.getSystemService(TelephonyManager::class.java).signalStrength?.level ?: 0)
             .setHostName(name?.takeIf { it.isNotBlank() } ?: Build.MODEL)
             .setControllable(hs.supported && HostWifi.clientOverride == null)
