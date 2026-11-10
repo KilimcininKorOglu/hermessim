@@ -28,6 +28,8 @@ object Hotspot {
 
     private val exec = Bg.single("hotspot")
     @Volatile private var clients: List<HotspotMsg.Client> = emptyList()
+    /** Device names Android's TetheredClient gave, by lowercase MAC: NEIGH has MAC and IP only. */
+    @Volatile private var names: Map<String, String> = emptyMap()
     @Volatile private var tetheredWifi = false
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
     @Volatile private var listener: (() -> Unit)? = null
@@ -55,6 +57,7 @@ object Hotspot {
                     "onClientsChanged" -> {
                         val raw = (args?.get(0) as? Collection<*>).orEmpty()
                         if (raw.isNotEmpty()) clients = raw.mapNotNull { c -> client(c) }   // usually empty on Android 13
+                        names = clients.filter { it.name.isNotEmpty() }.associate { it.mac.lowercase() to it.name }
                         Log.i(TAG, "hotspot clients: ${clients.size} (raw ${raw.size}) ${clients.map { it.name.ifEmpty { "?" } }}")
                         changed()
                     }
@@ -89,11 +92,10 @@ object Hotspot {
      * (audit, 1 Nov 2026). [done] (main) hears whether the list is fresh.
      */
     fun refreshClients(iface: String, done: ((Boolean) -> Unit)? = null) = Daemon.query("NEIGH $iface") { reply ->
-        val fresh = reply?.startsWith("OK") == true
-        if (fresh) {
-            val list = reply!!.removePrefix("OK ").substringAfter(' ', "").split(';').filter { it.contains(',') }
-                .map { e -> HotspotMsg.Client.newBuilder().setMac(e.substringBefore(',')).setName(e.substringAfter(',')).build() }
-            if (list.map { it.mac } != clients.map { it.mac }) {
+        val list = HotspotClients.parse(reply, names)
+        val fresh = list != null
+        if (list != null) {
+            if (list != clients) {
                 clients = list
                 Log.i(TAG, "hotspot devices: ${list.size}")
                 changed()
