@@ -222,9 +222,11 @@ object Daemon {
                 profile = AutoProfile.build { n -> send("HAS $n") }
                 Log.i(TAG, "profile: ${profile?.let { "${it.id} (auto)" } ?: "none, Basic mode"}")
                 if (profile != null) Relay.voiceChanged()          // the phone's Host tab offers the call test now
-                // What the auto profile found (or why not) is the one thing we can't learn from firmware dumps
+                // What the auto profile found (or why not) is the one thing we can't learn from firmware dumps.
+                // Once per firmware, app version and outcome: every start sent it again, 42 of the first 320 reports
                 Diag.event("auto_profile", org.json.JSONObject().put("what", if (profile != null) "built" else "none")
-                    .put("profile", profile?.json ?: org.json.JSONObject.NULL).put("why", AutoProfile.why).put("audio", Discovery.audio()))
+                    .put("profile", profile?.json ?: org.json.JSONObject.NULL).put("why", AutoProfile.why).put("audio", Discovery.audio()),
+                    onceFor = "${android.os.Build.FINGERPRINT}|${BuildConfigInfo.version(appCtx)}|${profile?.id}")
             }
             profile?.daemonSetLines()?.forEach { send(it) }
             if (Box.blocksPowerKey) send("POWERKEY 1")      // a restarted daemon has let go of the power key
