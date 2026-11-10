@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import com.keremgok.hermessim.protocol.v1.HostSmsSent
 import com.keremgok.hermessim.protocol.v1.MacAccess
 import com.keremgok.hermessim.protocol.v1.MacCommand
 import com.keremgok.hermessim.protocol.v1.MacSecret
@@ -45,6 +46,7 @@ class MacLink(
         val SECRET: UUID = UUID.fromString("0e9c0014-0971-48af-ba0b-2c5c254faec0")
         val PAIR: UUID = UUID.fromString("0e9c0015-0971-48af-ba0b-2c5c254faec0")
         val TEXTS: UUID = UUID.fromString("0e9c0016-0971-48af-ba0b-2c5c254faec0")
+        val REPLY: UUID = UUID.fromString("0e9c0017-0971-48af-ba0b-2c5c254faec0")
         private const val INSUFFICIENT_AUTHORIZATION = 0x08     // ATT error; BluetoothGatt names it only from Android 14
         private const val INVALID_OFFSET = 0x07
     }
@@ -90,6 +92,8 @@ class MacLink(
             addCharacteristic(BluetoothGattCharacteristic(SECRET, BluetoothGattCharacteristic.PROPERTY_READ,
                 BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED))
             addCharacteristic(textsChar)
+            addCharacteristic(BluetoothGattCharacteristic(REPLY, BluetoothGattCharacteristic.PROPERTY_WRITE,
+                BluetoothGattCharacteristic.PERMISSION_WRITE_ENCRYPTED))
         }
     }
 
@@ -131,14 +135,36 @@ class MacLink(
         written(device, requestId, uuid, true, value)
     }
 
+    /** A whole write: answered first, then acted on (a command or a reply the value is valid for). */
     private fun written(device: BluetoothDevice, requestId: Int, uuid: UUID, responseNeeded: Boolean, value: ByteArray) {
         val ok = allowed(device, uuid)
-        val cmd = if (ok && uuid == COMMAND) runCatching { MacCommand.parseFrom(value) }.getOrNull() else null
-        val code = when { !ok -> INSUFFICIENT_AUTHORIZATION; cmd == null -> BluetoothGatt.GATT_FAILURE; else -> BluetoothGatt.GATT_SUCCESS }
+        val action = if (!ok) null else when (uuid) {
+            COMMAND -> commandFrom(device, value)
+            REPLY -> replyFrom(device, value)
+            else -> null
+        }
+        val code = when { !ok -> INSUFFICIENT_AUTHORIZATION; action == null -> BluetoothGatt.GATT_FAILURE; else -> BluetoothGatt.GATT_SUCCESS }
         if (responseNeeded) respond(device, requestId, code, null)
-        if (cmd != null) {
+        action?.invoke()
+    }
+
+    private fun commandFrom(device: BluetoothDevice, value: ByteArray): (() -> Unit)? {
+        val cmd = runCatching { MacCommand.parseFrom(value) }.getOrNull() ?: return null
+        return {
             Log.i(TAG, "Mac ${device.address}: hotspot ${if (cmd.on) "on" else "off"}${if (cmd.offWhenUnusedS > 0) " once unused ${cmd.offWhenUnusedS} s" else ""}")
             command(cmd)
+        }
+    }
+
+    /** MacReply: only to a text still on the shelf, to its sender, on its line; the clients see it as HostSmsSent. */
+    private fun replyFrom(device: BluetoothDevice, value: ByteArray): (() -> Unit)? {
+        val reply = MacReplyCore.reply(value, shelf)
+        if (reply == null) Log.w(TAG, "Mac ${device.address}: reply refused (unknown or old text, or a bad body)")
+        return reply?.let { r ->
+            {
+                Log.i(TAG, "Mac ${device.address}: reply on slot ${r.slot} (${r.body.length} chars)")
+                SmsSender.sendFromHost(ctx, r.to, r.body, r.slot, HostSmsSent.Origin.MAC)
+            }
         }
     }
 
@@ -152,8 +178,8 @@ class MacLink(
     /** A listed Mac is served (the texts only where allowed); inside the window a bonded newcomer is put on the list first. */
     private fun allowed(device: BluetoothDevice, uuid: UUID): Boolean {
         if (!allowed(device)) return false
-        if (uuid != TEXTS || core.texts(device.address)) return true
-        Log.w(TAG, "Mac service: ${device.address} may not read the texts")
+        if ((uuid != TEXTS && uuid != REPLY) || core.texts(device.address)) return true
+        Log.w(TAG, "Mac service: ${device.address} may not read or answer the texts")
         return false
     }
 
@@ -196,7 +222,8 @@ class MacLink(
 
     /** A text arrived: it goes on the shelf, and every Mac subscribed to the texts is told to read them. */
     fun textArrived(m: SmsReceived) = main.post {
-        shelf.add(MacText.newBuilder().setId(m.id).setSender(m.fromE164.ifEmpty { m.fromRaw }).setBody(m.body).setAtMs(m.receivedMs).build())
+        shelf.add(MacText.newBuilder().setId(m.id).setSender(m.fromE164.ifEmpty { m.fromRaw }).setBody(m.body).setAtMs(m.receivedMs).build(),
+            from = m.fromRaw, slot = m.slot)
         notifier.subscribers(TEXTS).filter(core::texts).forEach { notifier.notify(it, TEXTS) }
     }
 

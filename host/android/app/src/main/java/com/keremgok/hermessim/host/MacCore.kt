@@ -100,10 +100,18 @@ class MacTextShelf(private val now: () -> Long) {
     }
 
     private var texts: List<MacText> = emptyList()
+    /** Where each text on the shelf came from, for a Mac's reply: the sender as the network gave it, and the line. */
+    private val origins = HashMap<String, Pair<String, Int>>()
 
-    fun add(text: MacText) {
+    fun add(text: MacText, from: String = text.sender, slot: Int = -1) {
         texts = (listOf(text) + texts.filterNot { it.id == text.id }).sortedByDescending { it.atMs }.take(MAX_TEXTS)
+        origins[text.id] = from to slot
+        origins.keys.retainAll(texts.map { it.id }.toSet())
     }
+
+    /** The sender and line of text [id] while it is still shown (on the shelf, younger than [WINDOW_MS]), else null. */
+    fun origin(id: String): Pair<String, Int>? =
+        origins[id]?.takeIf { texts.any { it.id == id && now() - it.atMs < WINDOW_MS } }
 
     fun value(): MacTexts {
         val recent = texts.filter { now() - it.atMs < WINDOW_MS }
