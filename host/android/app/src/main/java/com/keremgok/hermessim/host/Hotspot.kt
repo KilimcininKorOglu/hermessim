@@ -95,6 +95,7 @@ object Hotspot {
         val list = HotspotClients.parse(reply, names)
         val fresh = list != null
         if (list != null) {
+            HotspotGuard.seen(list)
             if (list != clients) {
                 clients = list
                 Log.i(TAG, "hotspot devices: ${list.size}")

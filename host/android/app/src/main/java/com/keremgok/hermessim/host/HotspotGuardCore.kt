@@ -52,10 +52,10 @@ object HotspotGuardCore {
             fresh.flatMap { listOf("iptables -w -A $COUNT -s $it", "iptables -w -A $COUNT -d $it") }).joinToString("\n")
     }
 
-    /** Both chains unhooked and gone, in both families. */
+    /** Both chains unhooked and gone, in both families; a chain that isn't there is no failure. */
     fun teardownScript(): String = listOf("iptables", "ip6tables").flatMap { tool ->
         listOf(BLOCK, COUNT).flatMap { chain ->
-            listOf("$tool -w -D FORWARD -j $chain 2>/dev/null", "$tool -w -F $chain 2>/dev/null", "$tool -w -X $chain 2>/dev/null")
+            listOf("-D FORWARD -j $chain", "-F $chain", "-X $chain").map { "$tool -w $it 2>/dev/null || true" }
         }
     }.joinToString("\n")
 

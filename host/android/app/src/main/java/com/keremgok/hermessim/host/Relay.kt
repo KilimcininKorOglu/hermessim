@@ -133,6 +133,7 @@ object Relay {
             }
         }, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
         DataUsage.init(app, statusChanged)
+        HotspotGuard.init(app, statusChanged)
         Hotspot.watch(app, statusChanged)
         HostWifi.start(app, near = ::bleNear, inCall = { CallRegistry.snapshot().any { it.state != CallEvent.State.ENDED } },
             paired = { pinned() != null }, hotspotOn = { Hotspot.isOnOrStarting(app) }, changed = statusChanged)

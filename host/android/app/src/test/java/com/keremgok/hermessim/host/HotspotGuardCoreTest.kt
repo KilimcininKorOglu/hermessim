@@ -54,7 +54,7 @@ class HotspotGuardCoreTest {
 
     @Test fun teardownRemovesBothChainsInBothFamilies() {
         val s = HotspotGuardCore.teardownScript().lines()
-        assertTrue("iptables -w -X hermessim_hsblock 2>/dev/null" in s)
-        assertTrue("ip6tables -w -X hermessim_hscount 2>/dev/null" in s)
+        assertTrue("iptables -w -X hermessim_hsblock 2>/dev/null || true" in s)
+        assertTrue("ip6tables -w -X hermessim_hscount 2>/dev/null || true" in s)
     }
 }

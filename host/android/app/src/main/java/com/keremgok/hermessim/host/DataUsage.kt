@@ -37,6 +37,7 @@ object DataUsage {
         val wasOn = ifaces.isNotEmpty()
         ifaces = wifiIfaces
         if (!wasOn && wifiIfaces.isNotEmpty()) {
+            HotspotGuard.up(wifiIfaces.first(), fresh = !continuing)
             if (continuing) continuing = false                  // back after a call pause: the same session goes on
             else prefs.edit().putLong("session_down", 0).putLong("session_up", 0).apply()
             wifiIfaces.forEach { forgetLast(it) }        // a new session starts from the counter's current value
@@ -44,6 +45,7 @@ object DataUsage {
         } else if (wasOn && wifiIfaces.isEmpty()) {
             main.removeCallbacks(poll)
             Hotspot.clearClients()
+            HotspotGuard.down(paused = HotspotPause.paused)
         }
     }
 
