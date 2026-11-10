@@ -8,6 +8,7 @@ import android.util.Base64
 import android.util.Log
 import com.keremgok.hermessim.protocol.v1.CallEvent
 import com.keremgok.hermessim.protocol.v1.Envelope
+import com.keremgok.hermessim.protocol.v1.HostNotice
 import com.keremgok.hermessim.protocol.v1.SmsReceived
 import org.json.JSONObject
 
@@ -80,6 +81,13 @@ object Push {
             if (!SmsStore.isPending(app, m.id)) return@postDelayed
             send("sms", Envelope.newBuilder().setSmsReceived(fitted(m)).build().toByteArray(), m.id, "text ${m.id.take(8)}")
         }, SMS_ACK_WAIT_MS)
+    }
+
+    /** Relay.hostNotice, main: a health notice no client on Bluetooth heard. One per kind and slot is kept. */
+    fun notice(n: HostNotice) {
+        if (!::app.isInitialized) return
+        send("notice", Envelope.newBuilder().setHostNotice(n).build().toByteArray(), "notice-${n.kindValue}-${n.slot}",
+            "notice ${n.kind}")
     }
 
     /** adb test: push a made-up call or text whatever the link (Relay's rules are not involved). */

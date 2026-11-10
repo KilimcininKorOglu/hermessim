@@ -16,6 +16,7 @@ import com.keremgok.hermessim.protocol.v1.Envelope
 import com.keremgok.hermessim.protocol.v1.Error
 import com.keremgok.hermessim.protocol.v1.Hello
 import com.keremgok.hermessim.protocol.v1.Unpair
+import com.keremgok.hermessim.protocol.v1.HostNotice
 import com.keremgok.hermessim.protocol.v1.HostStatus
 import com.keremgok.hermessim.protocol.v1.Sim
 import com.keremgok.hermessim.protocol.v1.Uplink
@@ -94,6 +95,7 @@ object Relay {
         val adapter = (app.getSystemService(android.content.Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager).adapter
         audio = AudioBridge(adapter, ble).also { it.start() }
         Push.start(app)
+        Health.init(app)
         RemoteLink.start(app, { bytes -> main.post { runCatching { onPeerFrame(Peer.Internet, bytes) }.onFailure { Log.e(TAG, "remote frame failed: $it") } } }) { present, wasThere ->
             main.post {
                 // A room blip mid-call doesn't touch the call's audio (TURN carries it); it ends with the call.
@@ -230,6 +232,13 @@ object Relay {
     }
 
     fun smsSendResult(r: SmsSendResult) = broadcast(Envelope.newBuilder().setSmsSendResult(r))
+
+    /** A health notice (Health): to the clients served now and, with none on Bluetooth, as a push too. */
+    private fun hostNotice(n: HostNotice) {
+        Log.i(TAG, "notice ${n.kind} value=${n.value} slot=${n.slot}")
+        broadcast(Envelope.newBuilder().setHostNotice(n))
+        if (!bleNear()) Push.notice(n)
+    }
 
     /** Bluetooth clients when any is serving, else the remote room. */
     private fun targets(): List<Peer> {
@@ -600,7 +609,11 @@ object Relay {
 
     // Runs on the main thread after every change: a failure here must cost one status, not the process.
     private val pushStatus = Runnable {
-        Bg.guard("status") { broadcast(Envelope.newBuilder().setHostStatus(status())) }
+        Bg.guard("status") {
+            val s = status()
+            broadcast(Envelope.newBuilder().setHostStatus(s))
+            Health.notices(s).forEach(::hostNotice)
+        }
         if (::macLink.isInitialized) macLink.statusChanged()            // the Macs hear the same changes
     }
 
