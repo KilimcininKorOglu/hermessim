@@ -33,6 +33,25 @@ class HealthCoreTest {
         assertEquals(listOf(listOf(0), emptyList(), emptyList(), listOf(0)), heard)
     }
 
+    /** "slot:value" of each ROAMING notice; the pairs are the roaming SIMs (slot to data roaming allowed). */
+    private fun HealthCore.roaming(vararg sims: Pair<Int, Boolean>): List<String> {
+        val status = HostStatus.newBuilder().setBatteryPercent(80)
+        sims.forEach { (slot, data) -> status.addSims(Sim.newBuilder().setSlot(slot).setRoaming(true).setDataRoaming(data)) }
+        return notices(status.build(), now = 1).filter { it.kind == Kind.ROAMING }.map { "${it.slot}:${it.value}" }
+    }
+
+    @Test fun aSimTellsWhenItStartsRoamingWithItsDataRoamingAndAgainAfterItStops() {
+        val c = HealthCore(roamingSlots = setOf(0))      // slot 0 was roaming before the restart
+        val heard = listOf(
+            c.roaming(0 to false),
+            c.roaming(0 to false, 1 to true),
+            c.roaming(0 to false, 1 to true),
+            c.roaming(),
+            c.roaming(0 to false),
+        )
+        assertEquals(listOf(emptyList(), listOf("1:1"), emptyList(), emptyList(), listOf("0:0")), heard)
+    }
+
     @Test fun aStatusGivesTheNoticesWithTheirValueSlotAndTime() {
         val sim = { slot: Int, lock: Sim.Lock -> Sim.newBuilder().setSlot(slot).setLock(lock).build() }
         val s = HostStatus.newBuilder().setBatteryPercent(4).setCharging(false)
