@@ -91,6 +91,7 @@ class HostService : Service() {
         Onboarding.hostRunning(this)
         Daemon.start(this)
         Relay.start(this)
+        RootSms.set(this, "allow", "host start")
         android.os.Handler(mainLooper).postDelayed({ Onboarding.selfHeal(this) }, 30_000)   // after service.sh's own pass
         welcomeOnce()
     }
@@ -153,8 +154,21 @@ class HostService : Service() {
             // Debug (root only: this service is not exported): relay a synthetic SMS through the normal path.
             "INJECT_SMS" -> injectSms(intent.getStringExtra("from") ?: "+905550000000",
                                       intent.getStringExtra("body") ?: "Test")
+            "SEND_SMS", "SHORT_CODES" -> textTest(intent)
         }
         return START_STICKY
+    }
+
+    /**
+     * adb debug (root only). SEND_SMS sends a text as the phone would (no client needed), e.g. to a short code:
+     * --es to 12345 [--es body Test] [--ei slot 0]; the result is the log's "SMS <id> sent=..." line. SHORT_CODES puts
+     * Android's short-code question back on (--es answer ask) or answers it (allow).
+     */
+    private fun textTest(intent: Intent) {
+        if (intent.action == "SHORT_CODES") { RootSms.set(this, intent.getStringExtra("answer") ?: "allow", "adb"); return }
+        val to = intent.getStringExtra("to") ?: return
+        SmsSender.send(this, com.keremgok.hermessim.protocol.v1.SmsSend.newBuilder().setClientMsgId("adb-" + System.currentTimeMillis())
+            .setTo(to).setBody(intent.getStringExtra("body") ?: "Test").setSlot(intent.getIntExtra("slot", -1)).build())
     }
 
     /** adb debug: --ez on true|false, exactly what a SetHotspot from the iPhone does (the user's switch ends a call pause). */

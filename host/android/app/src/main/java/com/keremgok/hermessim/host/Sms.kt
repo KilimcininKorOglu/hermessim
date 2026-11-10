@@ -183,11 +183,23 @@ object SmsSender {
                 val waited = android.os.SystemClock.elapsedRealtime() - (sentAt[id] ?: android.os.SystemClock.elapsedRealtime())
                 val unconfirmed = !ok && resultCode == android.telephony.SmsManager.RESULT_ERROR_GENERIC_FAILURE && waited > 60_000
                 Log.i(TAG, "SMS $id sent=$ok (result $resultCode after ${waited / 1000} s)${if (unconfirmed) ": not confirmed" else ""}")
-                if (!ok) Diag.event("sms_send_failed", org.json.JSONObject().put("what", if (unconfirmed) "unconfirmed" else "result $resultCode")
-                    .put("seconds", waited / 1000))
+                if (!ok) failed(ctx, unconfirmed, resultCode, waited)
                 Relay.smsSendResult(SmsSendResult.newBuilder().setClientMsgId(id).setOk(ok)
                     .setError(if (ok) "" else if (unconfirmed) "unconfirmed: the network didn't confirm in time" else "result code $resultCode").build())
             }
+        }
+
+        /**
+         * A failed text's report. A short code refused means Android asked on the host's screen whether to text it, and
+         * nobody answered (RootSms): the answer is given again for the next one.
+         */
+        private fun failed(ctx: Context, unconfirmed: Boolean, result: Int, waited: Long) {
+            val shortCode = result == android.telephony.SmsManager.RESULT_ERROR_SHORT_CODE_NOT_ALLOWED ||
+                result == android.telephony.SmsManager.RESULT_ERROR_SHORT_CODE_NEVER_ALLOWED
+            val detail = org.json.JSONObject().put("what", if (unconfirmed) "unconfirmed" else "result $result").put("seconds", waited / 1000)
+            if (shortCode) detail.put("short_codes", RootSms.last)
+            Diag.event("sms_send_failed", detail)
+            if (shortCode) RootSms.set(ctx, "allow", "a text was refused")
         }
     }
 }
