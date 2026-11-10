@@ -26,6 +26,7 @@
 //                     starved= live=   (this call's totals: the call test, the app's end-of-call check)
 //   Box mode (box.c): SCREEN_OFF | WAKE | POWERKEY 1|0 | ROLE <role> <pkg> | CHARGE <target> | CHARGE? -> OK <node> target=..|ERR
 //                     NETBLOCK <uid> <0|1> (iptables chain hermessim_block)
+//   NETCYCLE <seconds> -> OK | ERR busy | ERR failed   (airplane mode on for 3-30 s, then off, from a detached script)
 //                     + the Volume Up x3 / Volume Down x3 escape gesture, reported to the app by broadcast
 // Debug client: hermessimd --client "CMD|SLEEP n|CMD..." (one connection)
 
@@ -817,6 +818,10 @@ static void handle_line(conn_t *c, char *line) {
     } else if (strcmp(cmd, "NETBLOCK") == 0) {          // NETBLOCK <uid> <0|1>
         char *u = strtok(NULL, " "), *on = strtok(NULL, " ");
         reply(c, u && on && box_netblock(atoi(u), atoi(on)) == 0 ? "OK" : "ERR bad uid");
+    } else if (strcmp(cmd, "NETCYCLE") == 0) {          // NETCYCLE <seconds>
+        char *s = strtok(NULL, " ");
+        int rc = box_net_cycle(s ? atoi(s) : 0);
+        reply(c, rc == 0 ? "OK" : rc == -2 ? "ERR busy" : "ERR failed");
     } else if (strcmp(cmd, "CHARGE?") == 0) {
         const char *node = box_charge_node();
         if (node) {

@@ -16,6 +16,7 @@ void box_charge_status(char *out, size_t size); // target/resume/drain state for
 int box_uevent_open(void);                      // netlink socket for power_supply events
 void box_uevent(int fd);
 int box_netblock(int uid, int on);
+int box_net_cycle(int seconds);                 // airplane mode on for 3-30 s, then off (detached). 0 ok, -1 failed, -2 one running
 void box_reap(void);                            // collect finished fire-and-forget children (main loop)              // box mode: block/unblock an app uid's network (iptables)
 int box_keys_open(void);                        // open volume-key input devices; returns how many
 int box_key_count(void);

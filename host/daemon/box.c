@@ -577,12 +577,40 @@ static void nb_next(void) {
     }
 }
 
+// ------------------------------------------------------------------ network cycle (HostAction RECONNECT_NETWORK)
+//
+// Airplane mode on, a few seconds, off: the radio registers again, which clears a mobile network that is attached but
+// carries nothing. A detached script does it, so airplane mode goes off even if the app or this daemon dies in the
+// gap; it checks the setting at the end and turns it off once more if it stuck. `cmd connectivity airplane-mode` sends
+// the change like the quick settings tile; where it is missing, the setting plus the system's broadcast (root may send it).
+#define CYCLE_MIN 3
+#define CYCLE_MAX 30
+static pid_t g_cycle_pid = 0;
+
+int box_net_cycle(int seconds) {
+    if (seconds < CYCLE_MIN || seconds > CYCLE_MAX) return -1;
+    if (g_cycle_pid > 0) return -2;                                    // one at a time
+    char cmd[900];
+    snprintf(cmd, sizeof(cmd),
+        "air() { cmd connectivity airplane-mode $1 2>/dev/null || { "
+        "settings put global airplane_mode_on $2; am broadcast -a android.intent.action.AIRPLANE_MODE --ez state $3; }; }; "
+        "air enable 1 true; sleep %d; air disable 0 false; sleep 2; "
+        "[ \"$(settings get global airplane_mode_on)\" = 1 ] && air disable 0 false; exit 0", seconds);
+    char *argv[] = { "/system/bin/sh", "-c", cmd, NULL };
+    pid_t pid;
+    if (spawn_pid(argv, &pid) != 0) return -1;
+    g_cycle_pid = pid;
+    LOGI("network cycle: airplane mode for %d s", seconds);
+    return 0;
+}
+
 // Collect finished fire-and-forget children (same thread as everything that spawns them), then start the next
 // network-block script if one is waiting. SIGCHLD wakes the main loop, so that happens at once.
 void box_reap(void) {
     pid_t pid;
     int st;
     while ((pid = waitpid(-1, &st, WNOHANG)) > 0) {
+        if (pid == g_cycle_pid) { g_cycle_pid = 0; LOGI("network cycle done (status %d)", st); continue; }
         if (pid != g_nb_pid) continue;
         if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) LOGW("network block script for uid %d ended with status %d", g_nb[g_nb_running].uid, st);
         g_nb[g_nb_running].done = g_nb_running_on;

@@ -22,7 +22,8 @@ Logs: `adb logcat -s hermessimd HermesSimHost`, boot script log `/data/local/tmp
 
 Daemon commands (debug client `--client "A|SLEEP n|B"`): `HELLO`, `STATUS`, `SET <key> <value>`,
 `CALL_START <session>`, `CALL_END`, `IFSTATS <iface>` (hotspot data counter), `NEIGH <iface>` (hotspot devices),
-`CHARGE <target>` / `CHARGE?` (battery care; 100 = off).
+`CHARGE <target>` / `CHARGE?` (battery care; 100 = off), `NETCYCLE <seconds>` (airplane mode on for 3-30 s, then
+off, from a detached script: a client's "Reconnect the network").
 Host service debug actions (root only, the service is not exported): `PAIR`, `STATUS`, `INJECT_SMS --es from --es body`.
 
 ## Battery care
