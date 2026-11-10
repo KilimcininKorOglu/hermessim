@@ -143,6 +143,7 @@ object Relay {
                 i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)?.let(::pairingRequest)
             }
         }, android.content.IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST).apply { priority = 1000 })
+        CallRuleStore.init(app)
         Sims.protectNewSims(app)
         Sims.volteOn(app)
         Sims.log(app)
@@ -400,6 +401,7 @@ object Relay {
             Envelope.BodyCase.USSD_REQUEST -> Ussd.run(app, env.ussdRequest, main) { r ->
                 send(d, Envelope.newBuilder().setUssdResult(r), env.seq)
             }
+            Envelope.BodyCase.SET_CALL_RULES -> { CallRuleStore.set(env.setCallRules.rules); main.post(pushStatus) }
             Envelope.BodyCase.SET_HOST_WIFI -> HostWifi.setUseWhenAway(env.setHostWifi.useWhenAway, remote = d !is Peer.Ble)
             // Network names and passwords travel over Bluetooth only (18 Oct).
             Envelope.BodyCase.WIFI_SCAN, Envelope.BodyCase.WIFI_ADD, Envelope.BodyCase.WIFI_FORGET -> {
@@ -767,6 +769,7 @@ object Relay {
         b.setUpdate(Updater.status())
         if (::macLink.isInitialized) b.setMac(macLink.access())
         b.setUssd(true)
+        b.setCallRules(CallRuleStore.rules)
         return b.build()
     }
 
