@@ -37,23 +37,23 @@ class MacCore(private val now: () -> Long) {
     var macs: List<Mac> = emptyList()
         private set
     private var windowUntil = 0L
-    private var readers: Set<String> = emptySet()
+    private val readers = MacPermission(::isMac)
+    private val controllers = MacPermission(::isMac)
 
     fun load(stored: Collection<String>) { macs = stored.mapNotNull(::decode).distinctBy { it.address }.take(MAX_MACS) }
     fun stored(): Set<String> = macs.map(::encode).toSet()
 
-    /** The Macs that may read the texts (PairedMac.texts), stored apart from the list: older lists stay readable. */
-    fun loadTexts(stored: Collection<String>) { readers = stored.filter(::isMac).toSet() }
-    fun storedTexts(): Set<String> = readers
-    fun texts(address: String): Boolean = address in readers
+    /** The Macs that may read the texts (PairedMac.texts). */
+    fun loadTexts(stored: Collection<String>) = readers.load(stored)
+    fun storedTexts(): Set<String> = readers.granted
+    fun texts(address: String): Boolean = address in readers.granted
+    fun setTexts(address: String, on: Boolean): Boolean = readers.set(address, on)
 
-    /** True if the setting changed; only a listed Mac can be allowed. */
-    fun setTexts(address: String, on: Boolean): Boolean {
-        val next = if (on && isMac(address)) readers + address else readers - address
-        if (next == readers) return false
-        readers = next
-        return true
-    }
+    /** The Macs that may change host settings (PairedMac.control). */
+    fun loadControl(stored: Collection<String>) = controllers.load(stored)
+    fun storedControl(): Set<String> = controllers.granted
+    fun control(address: String): Boolean = address in controllers.granted
+    fun setControl(address: String, on: Boolean): Boolean = controllers.set(address, on)
 
     fun windowOpen(): Boolean = now() < windowUntil
     fun secondsLeft(): Int = secondsLeft(windowUntil, now())
@@ -82,9 +82,26 @@ class MacCore(private val now: () -> Long) {
     fun remove(address: String): Boolean {
         val before = macs.size
         macs = macs.filterNot { it.address == address }
-        readers = readers - address
+        readers.drop(address)
+        controllers.drop(address)
         return macs.size != before
     }
+}
+
+/** A per-Mac permission of the [listed] Macs, stored apart from the list so older lists stay readable. */
+class MacPermission(private val listed: (String) -> Boolean) {
+    var granted: Set<String> = emptySet()
+        private set
+
+    fun load(stored: Collection<String>) { granted = stored.filter(listed).toSet() }
+
+    /** True if the setting changed; only a listed Mac can be allowed. */
+    fun set(address: String, on: Boolean): Boolean {
+        val next = if (on && listed(address)) granted + address else granted - address
+        return (next != granted).also { granted = next }
+    }
+
+    fun drop(address: String) { granted = granted - address }
 }
 
 /**

@@ -37,6 +37,8 @@ class MacLink(
     private val command: (MacCommand) -> Unit,
     private val changed: () -> Unit,
     private val unbond: (String) -> Unit,
+    /** A control write from a Mac allowed to change host settings: runs it and gives the write's ATT status. */
+    private val control: (address: String, value: ByteArray) -> Int,
 ) {
     companion object {
         private const val TAG = "HermesSimHost"
@@ -47,6 +49,7 @@ class MacLink(
         val PAIR: UUID = UUID.fromString("0e9c0015-0971-48af-ba0b-2c5c254faec0")
         val TEXTS: UUID = UUID.fromString("0e9c0016-0971-48af-ba0b-2c5c254faec0")
         val REPLY: UUID = UUID.fromString("0e9c0017-0971-48af-ba0b-2c5c254faec0")
+        val CONTROL: UUID = UUID.fromString("0e9c0018-0971-48af-ba0b-2c5c254faec0")
         private const val INSUFFICIENT_AUTHORIZATION = 0x08     // ATT error; BluetoothGatt names it only from Android 14
         private const val INVALID_OFFSET = 0x07
     }
@@ -92,8 +95,10 @@ class MacLink(
             addCharacteristic(BluetoothGattCharacteristic(SECRET, BluetoothGattCharacteristic.PROPERTY_READ,
                 BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED))
             addCharacteristic(textsChar)
-            addCharacteristic(BluetoothGattCharacteristic(REPLY, BluetoothGattCharacteristic.PROPERTY_WRITE,
-                BluetoothGattCharacteristic.PERMISSION_WRITE_ENCRYPTED))
+            listOf(REPLY, CONTROL).forEach { uuid ->
+                addCharacteristic(BluetoothGattCharacteristic(uuid, BluetoothGattCharacteristic.PROPERTY_WRITE,
+                    BluetoothGattCharacteristic.PERMISSION_WRITE_ENCRYPTED))
+            }
         }
     }
 
@@ -141,6 +146,7 @@ class MacLink(
         val action = if (!ok) null else when (uuid) {
             COMMAND -> commandFrom(device, value)
             REPLY -> replyFrom(device, value)
+            CONTROL -> return controlWritten(device, requestId, responseNeeded, value)
             else -> null
         }
         val code = when { !ok -> INSUFFICIENT_AUTHORIZATION; action == null -> BluetoothGatt.GATT_FAILURE; else -> BluetoothGatt.GATT_SUCCESS }
@@ -154,6 +160,13 @@ class MacLink(
             Log.i(TAG, "Mac ${device.address}: hotspot ${if (cmd.on) "on" else "off"}${if (cmd.offWhenUnusedS > 0) " once unused ${cmd.offWhenUnusedS} s" else ""}")
             command(cmd)
         }
+    }
+
+    /** MacControl: run before the answer, whose status says how it went (0x80: the host is in a call). */
+    private fun controlWritten(device: BluetoothDevice, requestId: Int, responseNeeded: Boolean, value: ByteArray) {
+        val code = control(device.address, value)
+        if (responseNeeded) respond(device, requestId, code, null)
+        if (code == BluetoothGatt.GATT_SUCCESS) changed()
     }
 
     /** MacReply: only to a text still on the shelf, to its sender, on its line; the clients see it as HostSmsSent. */
@@ -175,12 +188,19 @@ class MacLink(
         if (responseNeeded) respond(device, requestId, if (ok) BluetoothGatt.GATT_SUCCESS else INSUFFICIENT_AUTHORIZATION, null)
     }
 
-    /** A listed Mac is served (the texts only where allowed); inside the window a bonded newcomer is put on the list first. */
+    /**
+     * A listed Mac is served (the texts and the control only where allowed); inside the window a bonded newcomer is put
+     * on the list first.
+     */
     private fun allowed(device: BluetoothDevice, uuid: UUID): Boolean {
         if (!allowed(device)) return false
-        if ((uuid != TEXTS && uuid != REPLY) || core.texts(device.address)) return true
-        Log.w(TAG, "Mac service: ${device.address} may not read or answer the texts")
-        return false
+        val permitted = when (uuid) {
+            TEXTS, REPLY -> core.texts(device.address)
+            CONTROL -> core.control(device.address)
+            else -> true
+        }
+        if (!permitted) Log.w(TAG, "Mac service: ${device.address} may not use $uuid")
+        return permitted
     }
 
     private fun allowed(device: BluetoothDevice): Boolean = when (core.access(device.address)) {

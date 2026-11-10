@@ -89,7 +89,8 @@ object Relay {
         if (pinned() == null) openPairing(FIRST_PAIRING_WINDOW_MS)
         macLink = MacLink(app, ::macStatus, { Hotspot.info(app).passphrase }, ::macCommand,
             changed = { main.removeCallbacks(pushStatus); main.postDelayed(pushStatus, 250) },
-            unbond = { address -> pairExec.execute { RootBt.unbond(app, address) } })
+            unbond = { address -> pairExec.execute { RootBt.unbond(app, address) } },
+            control = { address, value -> MacControlRunner.run(app, main, address, value) })
         ble = BleLink(app, ::onFrame, ::onLink, ::pairable, macLink)
         ble.onServiceReady = { askForHello() }
         ble.start()
