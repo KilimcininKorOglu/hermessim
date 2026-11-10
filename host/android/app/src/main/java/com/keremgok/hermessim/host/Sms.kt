@@ -60,6 +60,9 @@ class SmsDeliverReceiver : BroadcastReceiver() {
             put(Telephony.Sms.DATE, System.currentTimeMillis()); put(Telephony.Sms.DATE_SENT, ts)
             put(Telephony.Sms.READ, 0); put(Telephony.Sms.SUBSCRIPTION_ID, subId)
         })
+        CallRuleStore.init(ctx)
+        // A blocked sender's text stays in the phone's inbox only: no client, push or Mac gets it
+        if (CallRuleStore.blocksText(from)) { Log.i(TAG, "SMS received on slot $slot from a blocked number: kept, not relayed"); return }
         val msg = SmsReceived.newBuilder()
             .setId(UUID.randomUUID().toString())
             .setFromRaw(from)
