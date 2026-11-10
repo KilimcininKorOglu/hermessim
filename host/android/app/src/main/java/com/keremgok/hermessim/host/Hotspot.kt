@@ -309,13 +309,17 @@ object Hotspot {
             .setBand(band).setSecurity(security)
             .setHidden(cfg.hidden).setMaxClients(cfg.maxClients)
             .setAutoOff(cfg.autoOff).setAutoOffMinutes((cfg.timeoutMs / 60_000L).toInt())
-            .addAllClients(if (on) clients else emptyList())
+            .addAllClients(if (on) clients.map(::withUsage) else emptyList()).addAllBlocked(HotspotGuard.blocked())
             .setCapabilities(runCatching { capabilities(ctx, wm) }.getOrDefault(HotspotMsg.Capabilities.getDefaultInstance()))
             .setCallPause(HotspotPause.setting && callPauseOffered(ctx)).setPausedForCall(HotspotPause.paused && !on)
             .setUsage(usage).setMonthlyLimitBytes(DataLimit.limitBytes).setLimitReached(DataLimit.reached(usage.month))
             .setAppleMarker(cfg.appleMarker).setFrequencyMhz(if (on) SoftApWatch.frequencyMhz else 0)
             .build()
     }.getOrElse { Log.w(TAG, "hotspot info unavailable: ${cause(it)}"); HotspotMsg.newBuilder().setSupported(false).build() }
+
+    /** A device with its bytes since the hotspot came on (HotspotGuard's counters, by its IP). */
+    private fun withUsage(c: HotspotMsg.Client): HotspotMsg.Client =
+        HotspotGuard.usage(c.ip).let { u -> c.toBuilder().setDown(u.down).setUp(u.up).build() }
 
     /** Android 11, before the root read of the settings is back (a second or two after start): on/off only. */
     private fun loading(on: Boolean): HotspotMsg = HotspotMsg.newBuilder().setSupported(true).setOn(on).build()
@@ -330,6 +334,7 @@ object Hotspot {
     private fun capabilities(ctx: Context, wm: WifiManager): HotspotMsg.Capabilities {
         val b = HotspotMsg.Capabilities.newBuilder().setHiddenSsid(true).setMaxClients(false).setAutoOff(true).setOffWhenUnused(true)
             .setCallPause(callPauseOffered(ctx)).setAppleMarker(android.os.Build.VERSION.SDK_INT >= 33).setMonthlyLimit(true)
+            .setClientUsage(HotspotGuard.ready).setBlockClients(HotspotGuard.ready)
         b.addBands(HotspotMsg.Band.BAND_2GHZ)
         if (wm.is5GHzBandSupported) b.addBands(HotspotMsg.Band.BAND_5GHZ).addBands(HotspotMsg.Band.BAND_AUTO)
         if (wm.is5GHzBandSupported && android.os.Build.VERSION.SDK_INT >= 31 && wm.isBridgedApConcurrencySupported) b.addBands(HotspotMsg.Band.BAND_DUAL_2_5)

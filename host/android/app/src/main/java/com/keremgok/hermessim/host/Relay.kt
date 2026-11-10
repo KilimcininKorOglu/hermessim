@@ -398,6 +398,9 @@ object Relay {
                 error(d, env.seq, code, detail)
             }
             Envelope.BodyCase.SET_HOTSPOT_CALL_PAUSE -> setCallPause(d, env.seq, env.setHotspotCallPause.on)
+            Envelope.BodyCase.SET_HOTSPOT_BLOCK -> with(env.setHotspotBlock) {
+                if (!HotspotGuard.set(mac, blocked, name)) error(d, env.seq, Error.Code.BAD_REQUEST, "hotspot block: list full or bad MAC")
+            }
             Envelope.BodyCase.SET_MAC_PAIRING -> macLink.setPairing(env.setMacPairing.on)
             Envelope.BodyCase.REMOVE_MAC -> macLink.remove(env.removeMac.address)
             Envelope.BodyCase.SET_MAC_TEXTS -> macLink.setTexts(env.setMacTexts.address, env.setMacTexts.on)
@@ -794,6 +797,7 @@ object Relay {
             .setHostName(name?.takeIf { it.isNotBlank() } ?: Build.MODEL)
             .setControllable(hs.supported && HostWifi.clientOverride == null)
             .setPausedForCall(hs.pausedForCall).setOffWhenUnused(true).setLimitReached(hs.limitReached)
+            .setDevices(hs.clientsCount)
             .build()
     }
 
