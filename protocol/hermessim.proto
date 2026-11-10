@@ -385,6 +385,14 @@ message MacText {
   int64 at_ms = 4;               // SmsReceived.received_ms
 }
 
+// Reply (write, prepared write allowed): a Mac with PairedMac.texts answers a text it was shown. The host sends `body`
+// to that text's sender on the line the text came in on, as HostSmsSent{origin MAC}; a text no longer in the texts
+// value (older than 10 minutes), an empty body or one over 500 bytes is refused.
+message MacReply {
+  string text_id = 1;            // MacText.id
+  string body = 2;
+}
+
 // Per-SIM settings from the client. Only the fields that are present are changed.
 message SetSim {
   int32 slot = 1;

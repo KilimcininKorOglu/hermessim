@@ -121,6 +121,7 @@ texts characteristic and its notifications answer only a Mac with `PairedMac.tex
 | `0e9c0014-0971-48af-ba0b-2c5c254faec0` | secret: `MacSecret` | read, encrypted |
 | `0e9c0015-0971-48af-ba0b-2c5c254faec0` | Mac pairing | advertised in place of the Mac service while the pairing window is open |
 | `0e9c0016-0971-48af-ba0b-2c5c254faec0` | texts: `MacTexts` | read, notify (no value: read again), encrypted, only with `PairedMac.texts` |
+| `0e9c0017-0971-48af-ba0b-2c5c254faec0` | reply: `MacReply` | write with response (prepared write allowed), encrypted, only with `PairedMac.texts` |
 
 Each value is one serialised message; a long read continues at its offset. **Pairing.** The client sends
 `SetMacPairing{on}`; for 120 s the host advertises the pairing UUID and confirms the one Bluetooth pairing request
@@ -128,6 +129,10 @@ that arrives, then puts that Mac on its list. The Mac starts the pairing by read
 `RemoveMac` takes a Mac off the list and drops its bond. A host whose Bluetooth can't run two advertising sets reports
 `supported = false`. **Texts.** `SetMacTexts{address, on}` lets one Mac read the texts (off for a new Mac);
 `MacStatus.texts` tells the Mac. On each new text the host notifies the subscribed Macs, and each reads `MacTexts`.
+**Reply.** A Mac answers a text it was shown by writing `MacReply` to the reply characteristic. The host answers only a
+text still in `MacTexts` (so a Mac can't text any number), on the line it came in on, and the clients see the reply as
+`HostSmsSent{origin MAC}`. A refused write gets `GATT_FAILURE`; a host without the characteristic has no replies. The
+write is acknowledged when the host starts sending: its outcome reaches the clients, not the Mac.
 
 ## Updates
 
