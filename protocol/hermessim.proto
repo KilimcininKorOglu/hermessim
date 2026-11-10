@@ -55,6 +55,8 @@ message Envelope {
     RemoveMac remove_mac = 67;                   // client -> host: forget a paired Mac
     HostNotice host_notice = 68;                 // host -> client: something the user should hear about (README "Push")
     SetMacTexts set_mac_texts = 69;              // client -> host: let a paired Mac read the recent texts (README "Mac")
+    UssdRequest ussd_request = 70;               // client -> host: run a USSD code on a line (where HostStatus.ussd)
+    UssdResult ussd_result = 71;                 // host -> client (reply)
   }
 }
 
@@ -116,6 +118,7 @@ message HostStatus {
   Uplink uplink = 15;            // what the host's own internet runs on right now
   bytes push_key_id = 16;        // first 8 bytes of sha256(PushSetup.key) the host holds; empty = none (README "Push")
   MacAccess mac = 17;            // Macs that may ask this host for its hotspot (README "Mac")
+  bool ussd = 18;                // this host runs USSD codes (UssdRequest)
   enum VoiceTier { VOICE_TIER_UNSPECIFIED = 0; BASIC = 1; FULL_VOICE = 2; }
 }
 
@@ -509,6 +512,26 @@ message HostNotice {
     DATA_LIMIT_NEAR = 4;         // the hotspot used 80 % of its monthly limit
     DATA_LIMIT_REACHED = 5;      // the monthly limit is used up: the host turned the hotspot off
     ROAMING = 6;                 // a SIM started roaming; the host changes nothing (Sim.data_roaming says whether data runs)
+  }
+}
+
+// A USSD code (balance, packages: "*123#") run once on a line; the network's answer comes back as text. Menus that wait
+// for a reply cannot be answered: Android's API runs one request only.
+message UssdRequest {
+  int32 slot = 1;                // the SIM slot; -1 = the host's default line
+  string code = 2;               // starts with * or #, ends with #, only 0-9 * #, at most 32 characters
+}
+
+message UssdResult {
+  bool ok = 1;
+  string text = 2;               // the network's answer when ok
+  Failure failure = 3;
+  enum Failure {
+    NONE = 0;
+    BAD_CODE = 1;                // not a USSD code (the host checks it as above)
+    NO_SERVICE = 2;              // the line is off, locked or has no network
+    NETWORK = 3;                 // the network refused it, or another code is still running
+    TIMEOUT = 4;                 // no answer within 30 s
   }
 }
 

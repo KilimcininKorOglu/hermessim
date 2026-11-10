@@ -39,6 +39,9 @@ connection event can't take 100 single-packet writes a second. Receivers parse t
   arrives within 1 s. Without it (older hosts, or a phone whose precise call state the host can't read),
   the local ringback starts with dialing. Network audio always silences the local ringback for the rest
   of the dialing phase. The same DIALING event may arrive again (replays): it changes nothing.
+- USSD (where `HostStatus.ussd`): `UssdRequest` runs one code on a line and the host answers `UssdResult` with
+  `reply_to`. One code runs at a time; a second one meanwhile gets `NETWORK`. A code that opens a menu returns the
+  menu's text, but the menu cannot be answered: Android's API sends a single request.
 
 ## Remote mode (internet)
 
