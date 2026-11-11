@@ -10,7 +10,8 @@ use libc::{c_char, c_int, c_long};
 use crate::alsa::*;
 use crate::platform::{self, kernel_name};
 use crate::protocol::{
-    c_atoi, c_strtoll, c_strtoll_prefix, parse_call_orig_values, MAX_VALUES, NAME_LEN,
+    c_atoi, c_strtoll, c_strtoll_prefix, parse_call_orig_values, CallValuesError, MAX_VALUES,
+    NAME_LEN,
 };
 
 pub const MAX_MANAGED: usize = 64;
@@ -453,29 +454,17 @@ impl Mixer {
         if eq >= NAME_LEN {
             return false;
         }
-        let mut values = Vec::new();
-        let mut rest = &spec[eq + 1..];
-        while !rest.is_empty() {
-            if values.len() == MAX_VALUES {
+        let values = match crate::protocol::parse_call_values(&spec[eq + 1..]) {
+            Ok(values) => values,
+            Err(CallValuesError::TooMany) => {
                 crate::loge!("call control '{}': more than {} values", spec, MAX_VALUES);
                 return false;
             }
-            let comma = rest.find(',');
-            let (token, next) = match comma {
-                Some(c) => (&rest[..c], Some(&rest[c + 1..])),
-                None => (rest, None),
-            };
-            let (value, used) = c_strtoll(token);
-            if used == 0 || used != token.len() {
+            Err(CallValuesError::NotANumber) => {
                 crate::loge!("call control '{}': not a number", spec);
                 return false;
             }
-            values.push(value);
-            match next {
-                Some(n) => rest = n,
-                None => break,
-            }
-        }
+        };
         self.call_controls.push(CallControl {
             name: spec[..eq].to_string(),
             values,
@@ -511,42 +500,48 @@ impl Mixer {
     }
 
     pub fn set_key(&mut self, key: &str, val: &str) -> bool {
-        let mut dst: Option<&mut String> = None;
-        match key {
-            "capture" => dst = Some(&mut self.profile.capture),
-            "rec_config" => dst = Some(&mut self.profile.rec_config),
-            "inject.1" => dst = Some(&mut self.profile.inject1),
-            "inject.2" => dst = Some(&mut self.profile.inject2),
-            "mute.tx" => dst = Some(&mut self.profile.mute_tx),
-            "mute.rx" => dst = Some(&mut self.profile.mute_rx),
-            _ => {}
-        }
-        if let Some(dst) = dst {
-            if val == "-" {
-                dst.clear();
-            } else {
-                let mut n = (NAME_LEN - 1).min(val.len());
-                while !val.is_char_boundary(n) {
-                    n -= 1;
-                }
-                *dst = val[..n].to_string();
-            }
+        if let Some(dst) = self.name_key(key) {
+            set_name(dst, val);
             return true;
         }
         match key {
-            "mute.vsid" => self.profile.vsid = c_strtoll_prefix(val),
-            "mute.ramp" => self.profile.ramp = c_strtoll_prefix(val),
-            "capture.pcm" => self.profile.capture_pcm = c_atoi(val),
-            "inject.pcm" => self.profile.inject_pcm = c_atoi(val),
-            "capture.rate" => self.profile.capture_rate = c_atoi(val),
-            "capture.channels" => self.profile.capture_channels = c_atoi(val),
-            "call" => return self.call_control_add(val),
-            "call.clear" => self.call_controls.clear(),
-            "inject.rate" => self.profile.inject_rate = c_atoi(val),
-            "inject.channels" => self.profile.inject_channels = c_atoi(val),
-            "loopback" => self.profile.loopback = c_atoi(val) != 0,
-            "silence" => return self.silence_add(val),
-            _ => return false,
+            "call" => self.call_control_add(val),
+            "call.clear" => {
+                self.call_controls.clear();
+                true
+            }
+            "silence" => self.silence_add(val),
+            _ => self.number_key(key, val),
+        }
+    }
+
+    /// The profile field a control-name key sets.
+    fn name_key(&mut self, key: &str) -> Option<&mut String> {
+        let p = &mut self.profile;
+        Some(match key {
+            "capture" => &mut p.capture,
+            "rec_config" => &mut p.rec_config,
+            "inject.1" => &mut p.inject1,
+            "inject.2" => &mut p.inject2,
+            "mute.tx" => &mut p.mute_tx,
+            "mute.rx" => &mut p.mute_rx,
+            _ => return None,
+        })
+    }
+
+    /// A number key; false for an unknown key.
+    fn number_key(&mut self, key: &str, val: &str) -> bool {
+        let p = &mut self.profile;
+        match key {
+            "mute.vsid" => p.vsid = c_strtoll_prefix(val),
+            "mute.ramp" => p.ramp = c_strtoll_prefix(val),
+            "loopback" => p.loopback = c_atoi(val) != 0,
+            _ => {
+                let Some(dst) = int_key(p, key) else {
+                    return false;
+                };
+                *dst = c_atoi(val);
+            }
         }
         true
     }
@@ -817,6 +812,32 @@ struct Want<'a> {
     write_only: bool,
 }
 
+/// "-" clears a control name; any other value is cut to NAME_LEN - 1 bytes at a char boundary.
+fn set_name(dst: &mut String, val: &str) {
+    if val == "-" {
+        dst.clear();
+        return;
+    }
+    let mut n = (NAME_LEN - 1).min(val.len());
+    while !val.is_char_boundary(n) {
+        n -= 1;
+    }
+    *dst = val[..n].to_string();
+}
+
+/// The profile field an atoi key sets.
+fn int_key<'a>(p: &'a mut Profile, key: &str) -> Option<&'a mut i32> {
+    Some(match key {
+        "capture.pcm" => &mut p.capture_pcm,
+        "inject.pcm" => &mut p.inject_pcm,
+        "capture.rate" => &mut p.capture_rate,
+        "capture.channels" => &mut p.capture_channels,
+        "inject.rate" => &mut p.inject_rate,
+        "inject.channels" => &mut p.inject_channels,
+        _ => return None,
+    })
+}
+
 fn manage_in(
     ctl: RawFd,
     safe: bool,
@@ -826,39 +847,9 @@ fn manage_in(
     w: &Want,
 ) -> bool {
     let (name, want, n, write_only) = (w.name, w.values, w.n, w.write_only);
-    if name.is_empty() {
-        return false;
-    }
-    if !(1..=MAX_VALUES).contains(&n) {
-        crate::loge!(
-            "'{}': {} value(s) (max {}): not managed",
-            name,
-            n,
-            MAX_VALUES
-        );
-        return false;
-    }
-    let Some(info) = ctl_info(ctl, name) else {
-        crate::logw!("no control '{}'", name);
+    let Some(info) = admit(ctl, list.len(), other, w) else {
         return false;
     };
-    if list.len() == MAX_MANAGED {
-        crate::loge!("too many managed controls");
-        return false;
-    }
-    if !value_ok(name, &info, want, n) {
-        return false;
-    }
-    if other
-        .iter()
-        .any(|m| m.numid == info.id.numid && m.want[..n] != want[..n])
-    {
-        crate::loge!(
-            "'{}' is already held at another value: not managed twice",
-            name
-        );
-        return false;
-    }
     let mut m = Managed::empty(name, info.id.numid, info);
     m.write_only = write_only;
     m.nwant = n;
@@ -870,22 +861,66 @@ fn manage_in(
         }
     }
     ctl_write(ctl, safe, crumb, &mut m, want, n);
-    let orig_value = if !m.have_orig {
-        -1
-    } else if m.enumerated {
-        elem_enum(&m.orig, 0) as i64
-    } else {
-        elem_integer(&m.orig, 0) as i64
-    };
     crate::logi!(
         "managed '{}' numid={} -> {} (orig {})",
         name,
         m.numid,
         want.first().copied().unwrap_or(0),
-        orig_value
+        orig_first(&m)
     );
     list.push(m);
     true
+}
+
+/// The control's info when `w` may be managed: 1..MAX_VALUES values, the control exists, a slot
+/// is free, the values fit the control, and no other list holds it at other values.
+fn admit(ctl: RawFd, held: usize, other: &[Managed], w: &Want) -> Option<ElemInfo> {
+    let (name, want, n) = (w.name, w.values, w.n);
+    if name.is_empty() {
+        return None;
+    }
+    if !(1..=MAX_VALUES).contains(&n) {
+        crate::loge!(
+            "'{}': {} value(s) (max {}): not managed",
+            name,
+            n,
+            MAX_VALUES
+        );
+        return None;
+    }
+    let Some(info) = ctl_info(ctl, name) else {
+        crate::logw!("no control '{}'", name);
+        return None;
+    };
+    if held == MAX_MANAGED {
+        crate::loge!("too many managed controls");
+        return None;
+    }
+    if !value_ok(name, &info, want, n) {
+        return None;
+    }
+    let clash = other
+        .iter()
+        .any(|m| m.numid == info.id.numid && m.want[..n] != want[..n]);
+    if clash {
+        crate::loge!(
+            "'{}' is already held at another value: not managed twice",
+            name
+        );
+        return None;
+    }
+    Some(info)
+}
+
+/// The first original value, for the log (-1 when none was read).
+fn orig_first(m: &Managed) -> i64 {
+    if !m.have_orig {
+        -1
+    } else if m.enumerated {
+        elem_enum(&m.orig, 0) as i64
+    } else {
+        elem_integer(&m.orig, 0) as i64
+    }
 }
 
 fn ctl_write_value(

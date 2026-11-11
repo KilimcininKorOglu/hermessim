@@ -117,57 +117,63 @@ pub fn parse_c_int(s: &str) -> Option<i64> {
     (used != 0 && used == s.len()).then_some(value)
 }
 
+/// Why a `SET call` value list was refused.
+#[derive(Debug, PartialEq)]
+pub enum CallValuesError {
+    TooMany,
+    NotANumber,
+}
+
+/// "v1[,v2...]": up to MAX_VALUES complete base-0 numbers; an empty list and one trailing comma
+/// are accepted, an empty value between commas is not.
+pub fn parse_call_values(mut rest: &str) -> Result<Vec<i64>, CallValuesError> {
+    let mut values = Vec::new();
+    while !rest.is_empty() {
+        if values.len() == MAX_VALUES {
+            return Err(CallValuesError::TooMany);
+        }
+        let (token, next) = match rest.find(',') {
+            Some(c) => (&rest[..c], &rest[c + 1..]),
+            None => (rest, ""),
+        };
+        values.push(parse_c_int(token).ok_or(CallValuesError::NotANumber)?);
+        rest = next;
+    }
+    Ok(values)
+}
+
+/// The timestamp ("MM-DD hh:mm:ss.mmm", 18 bytes) of the last whole logcat line in `tail`, so a
+/// restarted logcat continues after it. The first line is skipped: it may be cut.
+pub fn last_log_time(tail: &[u8]) -> Option<String> {
+    let looks_timed =
+        |l: &[u8]| l.len() >= 18 && l[2] == b'-' && l[5] == b' ' && l[8] == b':' && l[14] == b'.';
+    tail.split(|&b| b == b'\n')
+        .skip(1)
+        .filter(|l| looks_timed(l))
+        .last()
+        .map(|l| String::from_utf8_lossy(&l[..18]).into_owned())
+}
+
 /// "name=v1[,v2...]" from `SET call`; returns the name and up to MAX_VALUES values, or None on
 /// exactly the cases the C rejects (no '=', empty name, too long, non-number, more than four).
 pub fn parse_call_spec(spec: &str) -> Option<(&str, Vec<i64>)> {
-    let eq = spec.rfind('=')?;
-    if eq == 0 {
-        return None;
-    }
-    let name = &spec[..eq];
-    if name.len() >= NAME_LEN {
-        return None;
-    }
-    let mut values = Vec::new();
-    let mut rest = &spec[eq + 1..];
-    while !rest.is_empty() {
-        if values.len() == MAX_VALUES {
-            return None;
-        }
-        let comma = rest.find(',');
-        let (token, next) = match comma {
-            Some(c) => (&rest[..c], Some(&rest[c + 1..])),
-            None => (rest, None),
-        };
-        let (value, used) = c_strtoll(token);
-        if used == 0 || used != token.len() {
-            return None;
-        }
-        values.push(value);
-        match next {
-            Some(n) => rest = n,
-            None => break,
-        }
-    }
-    Some((name, values))
+    parse_spec(spec, |raw| parse_call_values(raw).ok())
 }
 
 /// "name=value" from `SET silence`; exactly one complete number, as the C requires.
 pub fn parse_silence_spec(spec: &str) -> Option<(&str, i64)> {
+    parse_spec(spec, parse_c_int)
+}
+
+/// "name=rest" split at the last '=': a non-empty name shorter than NAME_LEN, and `value` of
+/// the rest.
+fn parse_spec<T>(spec: &str, value: impl Fn(&str) -> Option<T>) -> Option<(&str, T)> {
     let eq = spec.rfind('=')?;
-    if eq == 0 {
-        return None;
-    }
     let name = &spec[..eq];
-    if name.len() >= NAME_LEN {
+    if eq == 0 || name.len() >= NAME_LEN {
         return None;
     }
-    let raw = &spec[eq + 1..];
-    let (value, used) = c_strtoll(raw);
-    if used == 0 || used != raw.len() {
-        return None;
-    }
-    Some((name, value))
+    Some((name, value(&spec[eq + 1..])?))
 }
 
 pub fn valid_iface(iface: &str) -> bool {
@@ -802,6 +808,30 @@ mod tests {
         assert_eq!(accepted_channels(1, 2, 8), 2);
         assert_eq!(accepted_channels(4, 1, 2), 2);
         assert_eq!(accepted_channels(2, 1, 8), 2);
+    }
+
+    #[test]
+    fn call_values_take_one_trailing_comma() {
+        use CallValuesError::{NotANumber, TooMany};
+        let cases: [(&str, Result<Vec<i64>, CallValuesError>); 6] = [
+            ("", Ok(vec![])),
+            ("1,0x2,", Ok(vec![1, 2])),
+            ("1,2,3,4,", Ok(vec![1, 2, 3, 4])),
+            ("1,2,3,4,5", Err(TooMany)),
+            ("1,,2", Err(NotANumber)),
+            ("On", Err(NotANumber)),
+        ];
+        for (input, want) in cases {
+            assert_eq!(parse_call_values(input), want, "{input:?}");
+        }
+    }
+
+    #[test]
+    fn a_restarted_logcat_continues_after_the_last_whole_line() {
+        let tail = b"11-10 09:00:00.000 cut first line\n11-11 10:20:30.456  1  2 I x: a\nno time\n11-11 10:20:31.789  1  2 I x: b\npartial";
+        assert_eq!(last_log_time(tail).as_deref(), Some("11-11 10:20:31.789"));
+        assert_eq!(last_log_time(b"11-11 10:20:31.789 only line"), None);
+        assert_eq!(last_log_time(b"x\nshort"), None);
     }
 
     #[test]

@@ -328,17 +328,9 @@ pub fn value_ok(name: &str, info: &ElemInfo, values: &[i64], n: usize) -> bool {
         return false;
     }
     for &v in values.iter().take(n) {
-        let ok = match info.type_ {
-            ELEM_TYPE_BOOLEAN => v == 0 || v == 1,
-            ELEM_TYPE_INTEGER => {
-                let (min, max) = info_integer(info);
-                max <= min || (v >= min && v <= max)
-            }
-            ELEM_TYPE_ENUMERATED => v >= 0 && v < info_enum_items(info) as i64,
-            other => {
-                crate::loge!("'{}': control type {} is never written", name, other);
-                return false;
-            }
+        let Some(ok) = value_fits(info, v) else {
+            crate::loge!("'{}': control type {} is never written", name, info.type_);
+            return false;
         };
         if !ok {
             crate::loge!(
@@ -350,6 +342,20 @@ pub fn value_ok(name: &str, info: &ElemInfo, values: &[i64], n: usize) -> bool {
         }
     }
     true
+}
+
+/// Whether `v` is inside the control's range; None for a type the daemon never writes. An integer
+/// control with max <= min takes any value.
+fn value_fits(info: &ElemInfo, v: i64) -> Option<bool> {
+    match info.type_ {
+        ELEM_TYPE_BOOLEAN => Some(v == 0 || v == 1),
+        ELEM_TYPE_INTEGER => {
+            let (min, max) = info_integer(info);
+            Some(max <= min || (v >= min && v <= max))
+        }
+        ELEM_TYPE_ENUMERATED => Some(v >= 0 && v < info_enum_items(info) as i64),
+        _ => None,
+    }
 }
 
 /// Enum item names joined with '|', cut at a whole item. The C daemon reads one ELEM_INFO per

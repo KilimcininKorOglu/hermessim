@@ -155,28 +155,32 @@ fn load_ta() -> Option<Ta> {
         format!("/system_ext/{}/libtinyalsa.so", libdir),
         format!("/odm/{}/libtinyalsa.so", libdir),
     ];
-    let mut handle: *mut c_void = std::ptr::null_mut();
-    for path in &paths {
-        let Ok(c) = CString::new(path.as_str()) else {
-            continue;
-        };
-        handle = unsafe { libc::dlopen(c.as_ptr(), libc::RTLD_NOW) };
-        if !handle.is_null() {
-            break;
+    let handle = paths
+        .iter()
+        .filter_map(|path| CString::new(path.as_str()).ok())
+        .map(|c| unsafe { libc::dlopen(c.as_ptr(), libc::RTLD_NOW) })
+        .find(|h| !h.is_null());
+    let Some(handle) = handle else {
+        crate::loge!("dlopen libtinyalsa: {}", dl_error());
+        return None;
+    };
+    unsafe { ta_symbols(handle) }
+}
+
+/// dlerror()'s text, or "" when it has none.
+fn dl_error() -> String {
+    unsafe {
+        let p = libc::dlerror();
+        if p.is_null() {
+            String::new()
+        } else {
+            CStr::from_ptr(p).to_string_lossy().into_owned()
         }
     }
-    if handle.is_null() {
-        let err = unsafe {
-            let p = libc::dlerror();
-            if p.is_null() {
-                String::new()
-            } else {
-                CStr::from_ptr(p).to_string_lossy().into_owned()
-            }
-        };
-        crate::loge!("dlopen libtinyalsa: {}", err);
-        return None;
-    }
+}
+
+/// The tinyalsa functions from an opened library; pcm_stop is optional.
+unsafe fn ta_symbols(handle: *mut c_void) -> Option<Ta> {
     unsafe {
         let open = symbol(handle, b"pcm_open\0");
         let is_ready = symbol(handle, b"pcm_is_ready\0");
@@ -186,14 +190,8 @@ fn load_ta() -> Option<Ta> {
         let close = symbol(handle, b"pcm_close\0");
         let prepare = symbol(handle, b"pcm_prepare\0");
         let stop = symbol(handle, b"pcm_stop\0");
-        if open.is_null()
-            || is_ready.is_null()
-            || get_error.is_null()
-            || read.is_null()
-            || write.is_null()
-            || close.is_null()
-            || prepare.is_null()
-        {
+        let required = [open, is_ready, get_error, read, write, close, prepare];
+        if required.iter().any(|p| p.is_null()) {
             crate::loge!("libtinyalsa: missing symbols");
             return None;
         }
@@ -454,26 +452,43 @@ fn jb_put(seq: u16, data: &[u8]) {
         jb.next = seq;
         jb.highest = seq.wrapping_sub(1);
     }
-    if (seq.wrapping_sub(jb.next) as i16) < 0 {
-        st_inc(|s| &mut s.late);
-        jb.consecutive_late += 1;
-        if jb.consecutive_late >= 50 {
-            jb.valid = [false; JB_SLOTS];
-            jb.next = seq;
-            jb.highest = seq.wrapping_sub(1);
-            jb.playing = false;
-            jb.consecutive_late = 0;
-            crate::logw!("audio jitter buffer resync at seq {}", seq);
-        } else {
-            return;
-        }
+    if !jb_accept_late(&mut jb, seq) {
+        return;
     }
     jb.consecutive_late = 0;
     let prime = JB_PRIME.load(Ordering::Relaxed);
     if (seq.wrapping_sub(jb.next) as i16) >= (JB_SLOTS - 1) as i16 {
-        jb.next = seq.wrapping_sub(if prime > 1 { (prime - 1) as u16 } else { 0 });
+        jb.next = seq.wrapping_sub(prime.saturating_sub(1).max(0) as u16);
         jb.playing = false;
     }
+    jb_store(&mut jb, seq, data, prime);
+    st_inc(|s| &mut s.recv);
+    st_inc(|s| &mut s.tot_recv);
+}
+
+/// A packet behind the playout point is dropped, unless 50 in a row were late: then the
+/// buffer starts over at this packet. False when the packet is dropped.
+fn jb_accept_late(jb: &mut Jitter, seq: u16) -> bool {
+    if (seq.wrapping_sub(jb.next) as i16) >= 0 {
+        return true;
+    }
+    st_inc(|s| &mut s.late);
+    jb.consecutive_late += 1;
+    if jb.consecutive_late < 50 {
+        return false;
+    }
+    jb.valid = [false; JB_SLOTS];
+    jb.next = seq;
+    jb.highest = seq.wrapping_sub(1);
+    jb.playing = false;
+    jb.consecutive_late = 0;
+    crate::logw!("audio jitter buffer resync at seq {}", seq);
+    true
+}
+
+/// Put the packet in its slot; playing starts once `prime` frames are buffered.
+fn jb_store(jb: &mut Jitter, seq: u16, data: &[u8], prime: i32) {
+    let len = data.len();
     let i = (seq & JB_MASK) as usize;
     jb.slots[i].len = len;
     jb.slots[i].seq = seq;
@@ -482,11 +497,9 @@ fn jb_put(seq: u16, data: &[u8]) {
     if (seq.wrapping_sub(jb.highest) as i16) > 0 {
         jb.highest = seq;
     }
-    if !jb.playing && jb_depth(&jb) + 1 >= prime as i16 {
+    if !jb.playing && jb_depth(jb) + 1 >= prime as i16 {
         jb.playing = true;
     }
-    st_inc(|s| &mut s.recv);
-    st_inc(|s| &mut s.tot_recv);
 }
 
 /// The jitter buffer saw this client's first packet: the per-call loss totals start there.
@@ -503,56 +516,71 @@ fn jb_take(out: &mut [u8; MAX_PACKET], outlen: &mut usize, mode: &mut i32) -> bo
         jb.playing = false;
         return false;
     }
+    *mode = jb_pull(&mut jb, out, outlen);
+    jb.next = jb.next.wrapping_add(1);
+    jb_window(&mut jb);
+    let keep = JB_KEEP.load(Ordering::Relaxed);
+    if jb.trim > 0 && jb_depth(&jb) as i32 > keep {
+        jb.trim -= 1;
+        jb_skip(&mut jb);
+    }
+    if jb_depth(&jb) > JB_MAX {
+        jb_skip(&mut jb);
+    }
+    true
+}
+
+/// Copy the frame to play: 0 = the next packet, 1 = the one after it (its FEC part), 2 = none
+/// (concealment).
+fn jb_pull(jb: &mut Jitter, out: &mut [u8; MAX_PACKET], outlen: &mut usize) -> i32 {
     let next = jb.next;
-    if jb_has(&jb, next) {
-        let i = (next & JB_MASK) as usize;
-        let len = jb.slots[i].len;
-        out[..len].copy_from_slice(&jb.slots[i].data[..len]);
-        *outlen = len;
-        *mode = 0;
-        jb.valid[i] = false;
-    } else if jb_has(&jb, next.wrapping_add(1)) {
-        let i = (next.wrapping_add(1) & JB_MASK) as usize;
-        let len = jb.slots[i].len;
-        out[..len].copy_from_slice(&jb.slots[i].data[..len]);
-        *outlen = len;
-        *mode = 1;
-        st_inc(|s| &mut s.fec);
+    let mode = if jb_has(jb, next) {
+        0
+    } else if jb_has(jb, next.wrapping_add(1)) {
+        1
     } else {
-        *mode = 2;
         st_inc(|s| &mut s.plc);
         st_inc(|s| &mut s.tot_plc);
+        return 2;
+    };
+    let i = (next.wrapping_add(mode as u16) & JB_MASK) as usize;
+    let len = jb.slots[i].len;
+    out[..len].copy_from_slice(&jb.slots[i].data[..len]);
+    *outlen = len;
+    if mode == 0 {
+        jb.valid[i] = false;
+    } else {
+        st_inc(|s| &mut s.fec);
     }
-    jb.next = next.wrapping_add(1);
-    let d = jb_depth(&jb) as i32;
+    mode
+}
+
+/// Track the lowest depth over each JB_WINDOW pulls; depth above `keep` across a whole window
+/// is trimmed one frame per pull.
+fn jb_window(jb: &mut Jitter) {
+    let d = jb_depth(jb) as i32;
     st_jb_depth(d);
     if d < jb.win_min {
         jb.win_min = d;
     }
     jb.win_n += 1;
-    if jb.win_n >= JB_WINDOW {
-        let keep = JB_KEEP.load(Ordering::Relaxed);
-        if jb.win_min > keep {
-            jb.trim = jb.win_min - keep;
-        }
-        jb.win_min = 1000;
-        jb.win_n = 0;
+    if jb.win_n < JB_WINDOW {
+        return;
     }
     let keep = JB_KEEP.load(Ordering::Relaxed);
-    if jb.trim > 0 && jb_depth(&jb) as i32 > keep {
-        let i = (jb.next & JB_MASK) as usize;
-        jb.valid[i] = false;
-        jb.next = jb.next.wrapping_add(1);
-        jb.trim -= 1;
-        st_inc(|s| &mut s.catchup);
+    if jb.win_min > keep {
+        jb.trim = jb.win_min - keep;
     }
-    if jb_depth(&jb) > JB_MAX {
-        let i = (jb.next & JB_MASK) as usize;
-        jb.valid[i] = false;
-        jb.next = jb.next.wrapping_add(1);
-        st_inc(|s| &mut s.catchup);
-    }
-    true
+    jb.win_min = 1000;
+    jb.win_n = 0;
+}
+
+/// Drop the next frame to catch up.
+fn jb_skip(jb: &mut Jitter) {
+    let i = (jb.next & JB_MASK) as usize;
+    jb.valid[i] = false;
+    jb.next = jb.next.wrapping_add(1);
+    st_inc(|s| &mut s.catchup);
 }
 
 // ------------------------------------------------------------------ statistics
@@ -699,44 +727,12 @@ fn st_jb_depth(d: i32) {
 // ------------------------------------------------------------------ io thread
 
 fn io_main() {
-    let ls = match crate::platform::bind_abstract(SOCK_NAME, libc::SOCK_SEQPACKET, 1) {
-        Ok(fd) => fd,
-        Err(e) => {
-            crate::loge!(
-                "audio socket @{}: {}",
-                String::from_utf8_lossy(SOCK_NAME),
-                crate::platform::err_text(&e)
-            );
-            return;
-        }
+    let Some(ls) = audio_listen() else {
+        return;
     };
-    crate::logi!(
-        "audio socket @{} listening",
-        String::from_utf8_lossy(SOCK_NAME)
-    );
-
     let mut buf = [0u8; HDR + MAX_PACKET];
     let mut fd: RawFd = -1;
-    loop {
-        let mut pf = [
-            libc::pollfd {
-                fd: ls,
-                events: libc::POLLIN,
-                revents: 0,
-            },
-            libc::pollfd {
-                fd,
-                events: libc::POLLIN,
-                revents: 0,
-            },
-        ];
-        let n = unsafe { libc::poll(pf.as_mut_ptr(), if fd >= 0 { 2 } else { 1 }, -1) };
-        if n < 0 {
-            if std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
-                continue;
-            }
-            break;
-        }
+    while let Some(pf) = io_wait(ls, fd) {
         if pf[0].revents & libc::POLLIN != 0 {
             if let Some(nfd) = accept_client(ls, fd) {
                 fd = nfd;
@@ -748,6 +744,54 @@ fn io_main() {
         }
     }
     unsafe { libc::close(ls) };
+}
+
+/// Bind the audio socket @hermessimd-audio (SEQPACKET, backlog 1).
+fn audio_listen() -> Option<RawFd> {
+    match crate::platform::bind_abstract(SOCK_NAME, libc::SOCK_SEQPACKET, 1) {
+        Ok(fd) => {
+            crate::logi!(
+                "audio socket @{} listening",
+                String::from_utf8_lossy(SOCK_NAME)
+            );
+            Some(fd)
+        }
+        Err(e) => {
+            crate::loge!(
+                "audio socket @{}: {}",
+                String::from_utf8_lossy(SOCK_NAME),
+                crate::platform::err_text(&e)
+            );
+            None
+        }
+    }
+}
+
+/// Wait for the listener and the client (when there is one). An interrupted poll returns no
+/// events; None is a poll error, which ends the io thread.
+fn io_wait(ls: RawFd, fd: RawFd) -> Option<[libc::pollfd; 2]> {
+    let mut pf = [
+        libc::pollfd {
+            fd: ls,
+            events: libc::POLLIN,
+            revents: 0,
+        },
+        libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        },
+    ];
+    let n = unsafe { libc::poll(pf.as_mut_ptr(), if fd >= 0 { 2 } else { 1 }, -1) };
+    if n >= 0 {
+        return Some(pf);
+    }
+    if std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+        return None;
+    }
+    pf[0].revents = 0;
+    pf[1].revents = 0;
+    Some(pf)
 }
 
 /// Accept one audio client: root or the app's uid (SO_PEERCRED) replaces the current client `fd`;

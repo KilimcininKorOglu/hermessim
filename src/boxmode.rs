@@ -65,6 +65,87 @@ const KEY_VOLUMEDOWN: u16 = 114;
 const KEY_VOLUMEUP: u16 = 115;
 const KEY_POWER: u16 = 116;
 
+/// The last 2047 bytes of the captured log (empty when it cannot be read).
+fn log_tail() -> Vec<u8> {
+    use std::os::unix::fs::FileExt;
+    let size = std::fs::metadata(LOG_FILE).map(|m| m.len()).unwrap_or(0);
+    let Ok(f) = std::fs::File::open(LOG_FILE) else {
+        return Vec::new();
+    };
+    let mut buf = [0u8; 2047];
+    match f.read_at(&mut buf, size.saturating_sub(2047)) {
+        Ok(n) => buf[..n].to_vec(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// An open input device with a volume or power key.
+struct KeyDevice {
+    fd: RawFd,
+    power: bool,
+    up: bool,
+    down: bool,
+}
+
+/// Open an input device and keep it when it has a volume or power key and no absolute axes (a
+/// touch screen also reports keys); any other device is closed.
+fn probe_keys(path: &str) -> Option<KeyDevice> {
+    let cpath = std::ffi::CString::new(path).ok()?;
+    let fd = unsafe {
+        libc::open(
+            cpath.as_ptr(),
+            libc::O_RDONLY | libc::O_NONBLOCK | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return None;
+    }
+    let mut keys = [0u64; 16];
+    let mut types = [0u64; 4];
+    unsafe {
+        libc::ioctl(
+            fd,
+            crate::alsa::eviocgbit(0, types.len() * 8) as c_int,
+            types.as_mut_ptr(),
+        );
+    }
+    let keys_rc = unsafe {
+        libc::ioctl(
+            fd,
+            crate::alsa::eviocgbit(EV_KEY as u32, keys.len() * 8) as c_int,
+            keys.as_mut_ptr(),
+        )
+    };
+    let k = KeyDevice {
+        fd,
+        power: has_bit(&keys, KEY_POWER),
+        up: has_bit(&keys, KEY_VOLUMEUP),
+        down: has_bit(&keys, KEY_VOLUMEDOWN),
+    };
+    if !has_bit(&types, EV_ABS) && keys_rc >= 0 && (k.up || k.down || k.power) {
+        return Some(k);
+    }
+    unsafe { libc::close(fd) };
+    None
+}
+
+/// The input device's name; a device that won't give its name is "?".
+fn device_name(fd: RawFd) -> String {
+    let mut namebuf = [0u8; 64];
+    let rc = unsafe {
+        libc::ioctl(
+            fd,
+            crate::alsa::eviocgname(64) as c_int,
+            namebuf.as_mut_ptr(),
+        )
+    };
+    if rc < 0 {
+        "?".to_string()
+    } else {
+        crate::platform::kernel_name(&namebuf)
+    }
+}
+
 fn spawn(argv: &[&str]) -> bool {
     match crate::platform::spawn(argv) {
         Ok(_) => true,
@@ -565,18 +646,10 @@ impl Charge {
     /// The cut node holds the limit, with the capacity cap node beside it when there is one.
     fn check_cut(&mut self, level: i32, plugged: bool, cut: usize, with_cap: bool) {
         let now = crate::platform::boot_seconds();
-        if self.recut_paused_until != 0 {
-            if now < self.recut_paused_until {
-                return;
-            }
-            self.recut_paused_until = 0;
+        if self.recut_paused(now) {
+            return;
         }
-        let release_at = if with_cap { self.limit } else { self.resume };
-        let should_cut = if with_cap {
-            plugged && level > self.drain
-        } else {
-            plugged && level >= self.limit
-        };
+        let (release_at, should_cut) = self.cut_band(level, plugged, with_cap);
         let (node, stop) = CUT_NODES[cut];
         if self.cutting && read_int(node) != stop as i32 {
             self.cutting = false;
@@ -590,6 +663,29 @@ impl Charge {
         } else if self.cutting && level <= release_at {
             self.set_cut(false);
         }
+    }
+
+    /// The level at which a cut is released, and whether to cut now. With a cap node the kernel
+    /// stops at the limit, so the cut only drains above the drain level; without one the cut
+    /// holds the limit and releases at the resume level.
+    fn cut_band(&self, level: i32, plugged: bool, with_cap: bool) -> (i32, bool) {
+        if with_cap {
+            (self.limit, plugged && level > self.drain)
+        } else {
+            (self.resume, plugged && level >= self.limit)
+        }
+    }
+
+    /// Re-cutting is paused for the rest of the hour; the pause ends once that time has passed.
+    fn recut_paused(&mut self, now: i64) -> bool {
+        if self.recut_paused_until == 0 {
+            return false;
+        }
+        if now < self.recut_paused_until {
+            return true;
+        }
+        self.recut_paused_until = 0;
+        false
     }
 
     /// The kernel reset our cut: cut again, at most RECUT_MAX times an hour.
@@ -615,6 +711,33 @@ impl Charge {
         self.set_cut(true);
     }
 
+    /// Write the band to the charge start and end (cap) nodes that exist. Raising the band writes
+    /// the end first, so the start is never above the end.
+    fn write_band(&self) {
+        let start = first_writable(&START_NODES);
+        let (new_start, new_end) = (self.resume, self.limit);
+        let Some(cap) = cap_node() else {
+            if let Some(start) = start {
+                write_int(start, new_start);
+            }
+            return;
+        };
+        let old_end = read_int(cap);
+        match start {
+            Some(start) if old_end >= 0 && new_start > old_end => {
+                write_int(cap, new_end);
+                write_int(start, new_start);
+            }
+            Some(start) => {
+                write_int(start, new_start);
+                write_int(cap, new_end);
+            }
+            None => {
+                write_int(cap, new_end);
+            }
+        }
+    }
+
     fn apply(&mut self, percent: i32) -> i32 {
         if !(CHARGE_MIN..=100).contains(&percent) {
             return -1;
@@ -634,28 +757,7 @@ impl Charge {
             crate::logi!("battery care: off");
             return 0;
         }
-        let start = first_writable(&START_NODES);
-        let cap = cap_node();
-        let new_end = self.limit;
-        let new_start = self.resume;
-        if let Some(cap) = cap {
-            let old_end = read_int(cap);
-            match start {
-                // Raising the band: the end goes up first, so the start is never above the end.
-                Some(start) if old_end >= 0 && new_start > old_end => {
-                    write_int(cap, new_end);
-                    write_int(start, new_start);
-                }
-                _ => {
-                    if let Some(start) = start {
-                        write_int(start, new_start);
-                    }
-                    write_int(cap, new_end);
-                }
-            }
-        } else if let Some(start) = start {
-            write_int(start, new_start);
-        }
+        self.write_band();
         mkdir_mode(LIMIT_DIR, 0o700);
         if write_file(LIMIT_FILE, &format!("{}\n", percent)) < 0 {
             crate::logw!("save {}: {}", LIMIT_FILE, crate::platform::errstr());
@@ -959,73 +1061,30 @@ impl BoxState {
                 break;
             }
             let name = entry.file_name();
-            let Some(name) = name.to_str() else { continue };
-            if !name.starts_with("event") {
+            let Some(name) = name.to_str().filter(|n| n.starts_with("event")) else {
                 continue;
-            }
+            };
             let path = format!("/dev/input/{}", name);
-            let Ok(cpath) = std::ffi::CString::new(path.as_str()) else {
-                continue;
-            };
-            let fd = unsafe {
-                libc::open(
-                    cpath.as_ptr(),
-                    libc::O_RDONLY | libc::O_NONBLOCK | libc::O_CLOEXEC,
-                )
-            };
-            if fd < 0 {
-                continue;
-            }
-            let mut keys = [0u64; 16];
-            let mut types = [0u64; 4];
-            unsafe {
-                libc::ioctl(
-                    fd,
-                    crate::alsa::eviocgbit(0, types.len() * 8) as c_int,
-                    types.as_mut_ptr(),
-                );
-            }
-            let keys_rc = unsafe {
-                libc::ioctl(
-                    fd,
-                    crate::alsa::eviocgbit(EV_KEY as u32, keys.len() * 8) as c_int,
-                    keys.as_mut_ptr(),
-                )
-            };
-            let has_power = has_bit(&keys, KEY_POWER);
-            let has_up = has_bit(&keys, KEY_VOLUMEUP);
-            let has_down = has_bit(&keys, KEY_VOLUMEDOWN);
-            if !has_bit(&types, EV_ABS) && keys_rc >= 0 && (has_up || has_down || has_power) {
-                let mut namebuf = [0u8; 64];
-                let name_rc = unsafe {
-                    libc::ioctl(
-                        fd,
-                        crate::alsa::eviocgname(64) as c_int,
-                        namebuf.as_mut_ptr(),
-                    )
-                };
-                // A device that won't give its name is logged as "?".
-                let dev_name = if name_rc < 0 {
-                    "?".to_string()
-                } else {
-                    crate::platform::kernel_name(&namebuf)
-                };
-                self.power[self.nkeys] = has_power;
-                self.volup[self.nkeys] = has_up;
-                self.voldown[self.nkeys] = has_down;
-                crate::logi!(
-                    "box keys: watching {} ({}){}",
-                    path,
-                    dev_name,
-                    if has_power { " with the power key" } else { "" }
-                );
-                self.keys[self.nkeys] = fd;
-                self.nkeys += 1;
-            } else {
-                unsafe { libc::close(fd) };
+            if let Some(k) = probe_keys(&path) {
+                self.watch_keys(&path, k);
             }
         }
         self.nkeys as i32
+    }
+
+    fn watch_keys(&mut self, path: &str, k: KeyDevice) {
+        let i = self.nkeys;
+        self.power[i] = k.power;
+        self.volup[i] = k.up;
+        self.voldown[i] = k.down;
+        crate::logi!(
+            "box keys: watching {} ({}){}",
+            path,
+            device_name(k.fd),
+            if k.power { " with the power key" } else { "" }
+        );
+        self.keys[i] = k.fd;
+        self.nkeys += 1;
     }
 
     pub fn key_count(&self) -> i32 {
@@ -1250,43 +1309,7 @@ impl BoxState {
         if now - self.log_started_sec < 60 || Self::log_pid() != 0 {
             return;
         }
-        let size = std::fs::metadata(LOG_FILE).map(|m| m.len()).unwrap_or(0);
-        let mut tail = Vec::new();
-        if let Ok(f) = std::fs::File::open(LOG_FILE) {
-            use std::os::unix::fs::FileExt;
-            let off = size.saturating_sub(2047);
-            let mut buf = [0u8; 2047];
-            if let Ok(n) = f.read_at(&mut buf, off) {
-                tail.extend_from_slice(&buf[..n]);
-            }
-        }
-        let mut since: Option<String> = None;
-        let mut starts = Vec::new();
-        let mut st = 0usize;
-        for (i, &b) in tail.iter().enumerate() {
-            if b == b'\n' {
-                starts.push((st, i));
-                st = i + 1;
-            }
-        }
-        if st < tail.len() {
-            starts.push((st, tail.len()));
-        }
-        for &(start, end) in starts.iter().rev() {
-            if start == 0 {
-                continue;
-            }
-            let line = &tail[start..end];
-            if line.len() >= 18
-                && line[2] == b'-'
-                && line[5] == b' '
-                && line[8] == b':'
-                && line[14] == b'.'
-            {
-                since = Some(String::from_utf8_lossy(&line[..18]).into_owned());
-                break;
-            }
-        }
+        let since = crate::protocol::last_log_time(&log_tail());
         crate::logw!("log capture: logcat is gone, restarting it");
         self.log_spawn(since.as_deref());
     }

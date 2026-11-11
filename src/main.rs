@@ -150,7 +150,26 @@ mod daemon {
             self.flush();
         }
 
+        /// Read what the client sent and handle every whole line. False when the client is gone.
         fn read(&mut self, mixer: &mut Mixer, boxm: &mut BoxState) -> bool {
+            if let Some(keep) = self.recv_more() {
+                return keep;
+            }
+            while let Some(line) = self.take_line() {
+                handle_line(self, &line, mixer, boxm);
+                if self.fd < 0 {
+                    return false;
+                }
+            }
+            if self.used == self.buf.len() - 1 {
+                self.used = 0; // an overlong line is dropped
+            }
+            true
+        }
+
+        /// Append received bytes to the line buffer. None when bytes came in; Some(keep) when
+        /// nothing did: true for a would-block or interrupted read, false for an error or EOF.
+        fn recv_more(&mut self) -> Option<bool> {
             let n = unsafe {
                 libc::recv(
                     self.fd,
@@ -159,34 +178,29 @@ mod daemon {
                     libc::MSG_DONTWAIT,
                 )
             };
-            if n < 0 {
-                let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-                if errno == libc::EAGAIN || errno == libc::EWOULDBLOCK || errno == libc::EINTR {
-                    return true;
-                }
-                return false;
+            if n > 0 {
+                self.used += n as usize;
+                return None;
             }
-            if n <= 0 {
-                return false;
+            if n == 0 {
+                return Some(false);
             }
-            self.used += n as usize;
-            while let Some(pos) = self.buf[..self.used].iter().position(|&b| b == b'\n') {
-                let mut end = pos;
-                if end > 0 && self.buf[end - 1] == b'\r' {
-                    end -= 1;
-                }
-                let line = String::from_utf8_lossy(&self.buf[..end]).into_owned();
-                self.buf.copy_within(pos + 1..self.used, 0);
-                self.used -= pos + 1;
-                handle_line(self, &line, mixer, boxm);
-                if self.fd < 0 {
-                    return false;
-                }
-            }
-            if self.used == self.buf.len() - 1 {
-                self.used = 0;
-            }
-            true
+            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            Some(errno == libc::EAGAIN || errno == libc::EWOULDBLOCK || errno == libc::EINTR)
+        }
+
+        /// The next whole line without its "\n" or "\r\n", removed from the buffer.
+        fn take_line(&mut self) -> Option<String> {
+            let pos = self.buf[..self.used].iter().position(|&b| b == b'\n')?;
+            let end = if pos > 0 && self.buf[pos - 1] == b'\r' {
+                pos - 1
+            } else {
+                pos
+            };
+            let line = String::from_utf8_lossy(&self.buf[..end]).into_owned();
+            self.buf.copy_within(pos + 1..self.used, 0);
+            self.used -= pos + 1;
+            Some(line)
         }
     }
 
@@ -194,22 +208,29 @@ mod daemon {
     fn handle_line(c: &mut Conn, line: &str, mixer: &mut Mixer, boxm: &mut BoxState) {
         let mut t = Tokens::new(line);
         let Some(cmd) = t.next() else { return };
-        let reply = match cmd {
+        let reply = mixer_command(cmd, &mut t, mixer)
+            .or_else(|| box_command(cmd, &mut t, boxm))
+            .or_else(|| other_command(cmd, &mut t))
+            .unwrap_or_else(|| "ERR unknown command".into());
+        c.reply(reply);
+    }
+
+    /// The mixer and call commands; None for any other command.
+    fn mixer_command(cmd: &str, t: &mut Tokens, mixer: &mut Mixer) -> Option<String> {
+        Some(match cmd {
             "HELLO" => format!(
                 "OK hermessimd {} card={} call={} session={}",
                 VERSION, mixer.card, mixer.call as i32, mixer.session
             ),
             "STATUS" => cmd_status(mixer),
-            "SET" => cmd_set(&mut t, mixer),
-            "CALL_START" => cmd_call_start(&mut t, mixer),
-            "IFSTATS" => cmd_ifstats(&mut t),
-            "NEIGH" => cmd_neigh(&mut t),
+            "SET" => cmd_set(t, mixer),
+            "CALL_START" => cmd_call_start(t, mixer),
             "CALL_END" => {
                 mixer.restore_all("CALL_END");
                 "OK".into()
             }
             "INVENTORY" => cmd_inventory(mixer),
-            "HAS" => cmd_has(&mut t, mixer),
+            "HAS" => cmd_has(t, mixer),
             "AUDIO?" => format!(
                 "OK call={} session={} silence={} {}",
                 mixer.call as i32,
@@ -217,21 +238,37 @@ mod daemon {
                 mixer.perm.len(),
                 crate::audio::totals()
             ),
+            _ => return None,
+        })
+    }
+
+    /// The box mode commands; None for any other command.
+    fn box_command(cmd: &str, t: &mut Tokens, boxm: &mut BoxState) -> Option<String> {
+        Some(match cmd {
+            "POWERKEY" => cmd_powerkey(t, boxm),
+            "SCREEN_OFF" => ok_or(boxmode::screen(false) == 0, "ERR spawn failed"),
+            "WAKE" => ok_or(boxmode::screen(true) == 0, "ERR spawn failed"),
+            "ROLE" => cmd_role(t),
+            "NETBLOCK" => cmd_netblock(t, boxm),
+            "NETCYCLE" => cmd_netcycle(t, boxm),
+            "CHARGE?" => cmd_charge_query(boxm),
+            "CHARGE" => cmd_charge(t, boxm),
+            _ => return None,
+        })
+    }
+
+    /// The hotspot and audio tuning commands; None for any other command.
+    fn other_command(cmd: &str, t: &mut Tokens) -> Option<String> {
+        Some(match cmd {
+            "IFSTATS" => cmd_ifstats(t),
+            "NEIGH" => cmd_neigh(t),
             "STALL" => {
                 crate::audio::stall(t.next().map(c_atoi).unwrap_or(0));
                 "OK".into()
             }
-            "TUNE" => cmd_tune(&mut t),
-            "POWERKEY" => cmd_powerkey(&mut t, boxm),
-            "SCREEN_OFF" | "WAKE" => ok_or(boxmode::screen(cmd == "WAKE") == 0, "ERR spawn failed"),
-            "ROLE" => cmd_role(&mut t),
-            "NETBLOCK" => cmd_netblock(&mut t, boxm),
-            "NETCYCLE" => cmd_netcycle(&mut t, boxm),
-            "CHARGE?" => cmd_charge_query(boxm),
-            "CHARGE" => cmd_charge(&mut t, boxm),
-            _ => "ERR unknown command".into(),
-        };
-        c.reply(reply);
+            "TUNE" => cmd_tune(t),
+            _ => return None,
+        })
     }
 
     fn ok_or(ok: bool, err: &str) -> String {
