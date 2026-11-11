@@ -6,7 +6,9 @@ use std::os::unix::io::RawFd;
 
 use libc::{c_int, c_void, pid_t};
 
-use crate::protocol::{c_atoi, charge_band, netblock_script, valid_pkg, valid_role, EscapeGesture};
+use crate::protocol::{
+    c_atoi, charge_band, net_cycle_script, netblock_script, valid_pkg, valid_role, EscapeGesture,
+};
 
 pub const BOX_MAX_KEYDEVS: usize = 32;
 
@@ -690,6 +692,7 @@ pub struct BoxState {
     nb_pid: pid_t,
     nb_running: i32,
     nb_running_on: i32,
+    cycle_pid: pid_t,
     log_started_sec: i64,
     log_last_sec: i64,
 }
@@ -710,6 +713,7 @@ impl BoxState {
             nb_pid: 0,
             nb_running: -1,
             nb_running_on: 0,
+            cycle_pid: 0,
             log_started_sec: 0,
             log_last_sec: 0,
         }
@@ -842,6 +846,11 @@ impl BoxState {
             if pid <= 0 {
                 break;
             }
+            if pid == self.cycle_pid {
+                self.cycle_pid = 0;
+                crate::logi!("network cycle done (status {})", status);
+                continue;
+            }
             if pid != self.nb_pid {
                 continue;
             }
@@ -866,6 +875,26 @@ impl BoxState {
             self.nb_running = -1;
         }
         self.nb_next();
+    }
+
+    /// Airplane mode on for 3-30 s, then off, from a detached script. 0 ok, -1 failed, -2 one running.
+    pub fn net_cycle(&mut self, seconds: i32) -> i32 {
+        let Some(script) = net_cycle_script(seconds) else {
+            return -1;
+        };
+        if self.cycle_pid > 0 {
+            return -2;
+        }
+        let argv = ["/system/bin/sh", "-c", script.as_str()];
+        match crate::platform::spawn(&argv) {
+            Ok(pid) => self.cycle_pid = pid,
+            Err(e) => {
+                crate::logw!("spawn {}: {}", argv[0], e);
+                return -1;
+            }
+        }
+        crate::logi!("network cycle: airplane mode for {} s", seconds);
+        0
     }
 
     pub fn netblock(&mut self, uid: i32, on: bool) -> i32 {

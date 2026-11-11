@@ -348,6 +348,23 @@ impl<'a> Tokens<'a> {
     }
 }
 
+pub const CYCLE_MIN: i32 = 3;
+pub const CYCLE_MAX: i32 = 30;
+
+/// The detached airplane-mode cycle (NETCYCLE <seconds>): on, a few seconds, off, then off once more if the
+/// setting stuck, so the radio registers again even if the app or the daemon dies in the gap. `cmd connectivity
+/// airplane-mode` changes it like the quick settings tile; where it is missing, the setting plus the system's
+/// broadcast. None when the seconds are outside 3-30.
+pub fn net_cycle_script(seconds: i32) -> Option<String> {
+    if !(CYCLE_MIN..=CYCLE_MAX).contains(&seconds) {
+        return None;
+    }
+    Some(format!(
+        "air() {{ cmd connectivity airplane-mode $1 2>/dev/null || {{ settings put global airplane_mode_on $2; am broadcast -a android.intent.action.AIRPLANE_MODE --ez state $3; }}; }}; air enable 1 true; sleep {}; air disable 0 false; sleep 2; [ \"$(settings get global airplane_mode_on)\" = 1 ] && air disable 0 false; exit 0",
+        seconds
+    ))
+}
+
 /// The volume escape gesture: six presses, +1 up and -1 down, inside five seconds.
 #[derive(Default)]
 pub struct EscapeGesture {
@@ -545,6 +562,19 @@ mod tests {
         c.error();
         assert_eq!(c.read(1522 * ms), 22); // 500 ms of failing stream is not slow capture
         assert_eq!(c.read(1534 * ms), 34);
+    }
+
+    #[test]
+    fn the_network_cycle_runs_three_to_thirty_seconds() {
+        assert_eq!(net_cycle_script(2), None);
+        assert_eq!(net_cycle_script(31), None);
+        assert_eq!(net_cycle_script(0), None);
+        assert_eq!(
+            net_cycle_script(5).as_deref(),
+            Some("air() { cmd connectivity airplane-mode $1 2>/dev/null || { settings put global airplane_mode_on $2; am broadcast -a android.intent.action.AIRPLANE_MODE --ez state $3; }; }; air enable 1 true; sleep 5; air disable 0 false; sleep 2; [ \"$(settings get global airplane_mode_on)\" = 1 ] && air disable 0 false; exit 0")
+        );
+        assert!(net_cycle_script(3).is_some());
+        assert!(net_cycle_script(30).is_some());
     }
 
     #[test]

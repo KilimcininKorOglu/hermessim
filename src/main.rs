@@ -328,6 +328,17 @@ mod daemon {
                     c.reply("ERR bad uid".into());
                 }
             }
+            "NETCYCLE" => {
+                let rc = boxm.net_cycle(t.next().map(c_atoi).unwrap_or(0));
+                c.reply(
+                    match rc {
+                        0 => "OK",
+                        -2 => "ERR busy",
+                        _ => "ERR failed",
+                    }
+                    .into(),
+                );
+            }
             "CHARGE?" => {
                 if let Some(node) = boxm.charge_node() {
                     c.reply(format!("OK {} {}", node, boxm.charge_status()));
