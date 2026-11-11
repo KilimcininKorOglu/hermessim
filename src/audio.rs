@@ -738,74 +738,91 @@ fn io_main() {
             break;
         }
         if pf[0].revents & libc::POLLIN != 0 {
-            let nfd = unsafe {
-                libc::accept4(
-                    ls,
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    libc::SOCK_CLOEXEC,
-                )
-            };
-            if nfd >= 0 {
-                let mut cr: libc::ucred = unsafe { std::mem::zeroed() };
-                let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
-                let ok = unsafe {
-                    libc::getsockopt(
-                        nfd,
-                        libc::SOL_SOCKET,
-                        libc::SO_PEERCRED,
-                        &mut cr as *mut libc::ucred as *mut c_void,
-                        &mut len,
-                    )
-                } == 0;
-                let uid = cr.uid as i32;
-                if !ok || (cr.uid != 0 && uid != ALLOWED_UID.load(Ordering::Relaxed)) {
-                    crate::logw!(
-                        "audio client uid={} REJECTED",
-                        if len != 0 { uid } else { -1 }
-                    );
-                    unsafe { libc::close(nfd) };
-                } else {
-                    crate::logi!(
-                        "audio client connected (uid={}){}",
-                        uid,
-                        if fd >= 0 {
-                            ", replacing the previous one"
-                        } else {
-                            ""
-                        }
-                    );
-                    client_set(nfd);
-                    fd = nfd;
-                    jb_reset();
-                    continue;
-                }
+            if let Some(nfd) = accept_client(ls, fd) {
+                fd = nfd;
+                continue;
             }
         }
         if fd >= 0 && pf[1].revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) != 0 {
-            let got = unsafe { libc::recv(fd, buf.as_mut_ptr() as *mut c_void, buf.len(), 0) };
-            if got <= 0 {
-                crate::logi!("audio client gone");
-                let mine = {
-                    let mut client = lock(&CLIENT);
-                    let mine = *client == fd;
-                    if mine {
-                        *client = -1;
-                        CLIENT_UP.store(false, Ordering::Relaxed);
-                    }
-                    mine
-                };
-                if mine {
-                    unsafe { libc::close(fd) };
-                }
-                fd = -1;
-            } else if got as usize >= HDR {
-                let seq = u16::from_le_bytes([buf[0], buf[1]]);
-                jb_put(seq, &buf[HDR..got as usize]);
-            }
+            fd = read_client(fd, &mut buf);
         }
     }
     unsafe { libc::close(ls) };
+}
+
+/// Accept one audio client: root or the app's uid (SO_PEERCRED) replaces the current client `fd`;
+/// any other peer is closed. Returns the new client socket.
+fn accept_client(ls: RawFd, fd: RawFd) -> Option<RawFd> {
+    let nfd = unsafe {
+        libc::accept4(
+            ls,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            libc::SOCK_CLOEXEC,
+        )
+    };
+    if nfd < 0 {
+        return None;
+    }
+    let mut cr: libc::ucred = unsafe { std::mem::zeroed() };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let ok = unsafe {
+        libc::getsockopt(
+            nfd,
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            &mut cr as *mut libc::ucred as *mut c_void,
+            &mut len,
+        )
+    } == 0;
+    let uid = cr.uid as i32;
+    if !ok || (cr.uid != 0 && uid != ALLOWED_UID.load(Ordering::Relaxed)) {
+        crate::logw!(
+            "audio client uid={} REJECTED",
+            if len != 0 { uid } else { -1 }
+        );
+        unsafe { libc::close(nfd) };
+        return None;
+    }
+    crate::logi!(
+        "audio client connected (uid={}){}",
+        uid,
+        if fd >= 0 {
+            ", replacing the previous one"
+        } else {
+            ""
+        }
+    );
+    client_set(nfd);
+    jb_reset();
+    Some(nfd)
+}
+
+/// Read one packet from the client into the jitter buffer. Returns the client socket, or -1 when
+/// the client is gone (the socket is closed if it is still the current client).
+fn read_client(fd: RawFd, buf: &mut [u8]) -> RawFd {
+    let got = unsafe { libc::recv(fd, buf.as_mut_ptr() as *mut c_void, buf.len(), 0) };
+    if got > 0 {
+        if got as usize >= HDR {
+            let seq = u16::from_le_bytes([buf[0], buf[1]]);
+            jb_put(seq, &buf[HDR..got as usize]);
+        }
+        return fd;
+    }
+    crate::logi!("audio client gone");
+    let mine = {
+        let mut client = lock(&CLIENT);
+        let mine = *client == fd;
+        if mine {
+            *client = -1;
+            CLIENT_UP.store(false, Ordering::Relaxed);
+        }
+        mine
+    };
+    if mine {
+        unsafe { libc::close(fd) };
+    }
+    -1
 }
 
 // ------------------------------------------------------------------ capture
@@ -830,35 +847,13 @@ fn set_realtime(who: &str) {
 fn capture_main() {
     set_realtime("capture");
     let cfg = cfg();
-    let mut crate_ = if opus_rate_ok(cfg.capture_rate) {
-        cfg.capture_rate
-    } else {
-        CAP_RATE
+    let (rate, ch) = capture_format(&cfg);
+    let Some(enc) = capture_encoder(rate) else {
+        return;
     };
-    let mut cch = if cfg.capture_channels == 2 { 2 } else { 1 };
-    if let Some((r, c)) = alsa::pcm_negotiate(cfg.card, cfg.capture_pcm, false, crate_, cch) {
-        crate_ = r;
-        cch = c;
-    }
-    if !opus_rate_ok(crate_) {
-        crate_ = CAP_RATE;
-    }
-    if !(1..=2).contains(&cch) {
-        cch = 1;
-    }
-    let cframe = crate_ / 100;
-    let mut enc = match opus::Encoder::new(crate_, 1, opus::APPLICATION_VOIP) {
-        Some(e) => e,
-        None => return,
-    };
-    enc.ctl(opus::SET_BITRATE, BITRATE);
-    enc.ctl(opus::SET_INBAND_FEC, 1);
-    enc.ctl(opus::SET_PACKET_LOSS_PERC, LOSS_PERC);
-    enc.ctl(opus::SET_SIGNAL, opus::SIGNAL_VOICE);
-
-    let mut pcm = pcm_hold(
+    let pcm = pcm_hold(
         LIVE_CAP,
-        open_pcm(cfg.capture_pcm, false, crate_, cch, cframe),
+        open_pcm(cfg.capture_pcm, false, rate, ch, rate / 100),
     );
     if pcm.is_none() {
         return;
@@ -867,129 +862,227 @@ fn capture_main() {
         pcm_release(LIVE_CAP, pcm);
         return;
     };
-
-    let mut pcmbuf = [0i16; 480 * 2];
-    let mut pkt = [0u8; HDR + MAX_PACKET];
-    let mut seq: u16 = 0;
-    let mut t0 = crate::platform::now_ns(libc::CLOCK_MONOTONIC);
-    let mut frames: u32 = 0;
-
-    let mut err_log: i64 = 0;
-    let mut consecutive_err: u32 = 0;
-    let mut cap_clock = crate::protocol::CapClock::default();
+    let mut cap = Capture {
+        cfg,
+        rate,
+        ch,
+        frame: rate / 100,
+        enc,
+        ta,
+        pcm,
+        pcmbuf: [0i16; 480 * 2],
+        pkt: [0u8; HDR + MAX_PACKET],
+        seq: 0,
+        t0: crate::platform::now_ns(libc::CLOCK_MONOTONIC),
+        frames: 0,
+        err_log: 0,
+        consecutive_err: 0,
+        clock: crate::protocol::CapClock::default(),
+    };
     while CALL_RUNNING.load(Ordering::Relaxed) {
-        if pcm.is_none() {
-            pcm = pcm_hold(
-                LIVE_CAP,
-                open_pcm(cfg.capture_pcm, false, crate_, cch, cframe),
-            );
-            if pcm.is_none() {
-                consecutive_err += 1;
-                if consecutive_err >= CAP_MAX_ERRORS {
-                    crate::loge!("capture: cannot reopen, giving up for this call");
-                    break;
-                }
-                crate::platform::sleep_ns(100_000_000);
-                continue;
-            }
+        if !cap.step() {
+            break;
         }
-        let Some(p) = pcm else {
-            continue; // reopened above
+    }
+    pcm_release(LIVE_CAP, cap.pcm);
+}
+
+/// The capture rate and channel count: the profile's (an Opus rate, mono or stereo), refined by
+/// what the PCM accepts now, then forced back to 16 kHz / mono if that left the Opus range.
+fn capture_format(cfg: &AudioCfg) -> (i32, i32) {
+    let mut rate = if opus_rate_ok(cfg.capture_rate) {
+        cfg.capture_rate
+    } else {
+        CAP_RATE
+    };
+    let mut ch = if cfg.capture_channels == 2 { 2 } else { 1 };
+    if let Some((r, c)) = alsa::pcm_negotiate(cfg.card, cfg.capture_pcm, false, rate, ch) {
+        rate = r;
+        ch = c;
+    }
+    if !opus_rate_ok(rate) {
+        rate = CAP_RATE;
+    }
+    if !(1..=2).contains(&ch) {
+        ch = 1;
+    }
+    (rate, ch)
+}
+
+fn capture_encoder(rate: i32) -> Option<opus::Encoder> {
+    let enc = opus::Encoder::new(rate, 1, opus::APPLICATION_VOIP)?;
+    enc.ctl(opus::SET_BITRATE, BITRATE);
+    enc.ctl(opus::SET_INBAND_FEC, 1);
+    enc.ctl(opus::SET_PACKET_LOSS_PERC, LOSS_PERC);
+    enc.ctl(opus::SET_SIGNAL, opus::SIGNAL_VOICE);
+    Some(enc)
+}
+
+/// The capture thread's state for one call.
+struct Capture {
+    cfg: AudioCfg,
+    rate: i32,
+    ch: i32,
+    frame: i32,
+    enc: opus::Encoder,
+    ta: Ta,
+    pcm: Option<PcmPtr>,
+    pcmbuf: [i16; 480 * 2],
+    pkt: [u8; HDR + MAX_PACKET],
+    seq: u16,
+    t0: i64,
+    frames: u32,
+    err_log: i64,
+    consecutive_err: u32,
+    clock: crate::protocol::CapClock,
+}
+
+impl Capture {
+    fn open(&self) -> Option<PcmPtr> {
+        pcm_hold(
+            LIVE_CAP,
+            open_pcm(self.cfg.capture_pcm, false, self.rate, self.ch, self.frame),
+        )
+    }
+
+    /// One read, encode and send. False ends the capture for this call.
+    fn step(&mut self) -> bool {
+        if self.pcm.is_none() && !self.reopen() {
+            return false;
+        }
+        let Some(p) = self.pcm else {
+            return true; // the reopen failed and waited: try again
         };
         let rc = unsafe {
-            (ta.read)(
+            (self.ta.read)(
                 p.0,
-                pcmbuf.as_mut_ptr() as *mut c_void,
-                (cframe * cch * 2) as u32,
+                self.pcmbuf.as_mut_ptr() as *mut c_void,
+                (self.frame * self.ch * 2) as u32,
             )
         };
         if rc != 0 {
-            if log_throttle(&mut err_log, 2) {
-                crate::logw!("capture read failed: {}", pcm_error(p));
-            }
-            consecutive_err += 1;
-            if consecutive_err >= CAP_MAX_ERRORS {
-                crate::loge!(
-                    "capture: {} consecutive errors, giving up for this call (protecting the audio DSP)",
-                    consecutive_err
-                );
-                break;
-            }
-            st_inc(|s| &mut s.caperr);
-            st_inc(|s| &mut s.tot_caperr);
-            cap_clock.error();
-            if consecutive_err >= CAP_SLOW_AFTER {
-                crate::platform::sleep_ns(100_000_000);
-            }
-            seq = seq.wrapping_add(CAP_FRAMES_PER_READ as u16);
-            if consecutive_err == 1 {
-                continue;
-            }
-            pcm_release(LIVE_CAP, pcm);
-            crate::platform::sleep_ns(10_000_000);
-            pcm = pcm_hold(
-                LIVE_CAP,
-                open_pcm(cfg.capture_pcm, false, crate_, cch, cframe),
-            );
-            continue;
+            return self.read_failed(p);
         }
-        consecutive_err = 0;
-        let capms = cap_clock.read(crate::platform::now_ns(libc::CLOCK_MONOTONIC));
+        self.consecutive_err = 0;
+        let capms = self
+            .clock
+            .read(crate::platform::now_ns(libc::CLOCK_MONOTONIC));
         st_umax(|s| &mut s.tot_capms, capms);
-        if cch == 2 {
-            for i in 0..cframe as usize {
-                pcmbuf[i] = ((pcmbuf[2 * i] as i32 + pcmbuf[2 * i + 1] as i32) / 2) as i16;
+        self.count_level();
+        for f in 0..CAP_FRAMES_PER_READ as usize {
+            self.send_frame(f);
+        }
+        self.window_log();
+        true
+    }
+
+    /// The PCM was closed after an error: open it again, giving up after CAP_MAX_ERRORS tries.
+    fn reopen(&mut self) -> bool {
+        self.pcm = self.open();
+        if self.pcm.is_some() {
+            return true;
+        }
+        self.consecutive_err += 1;
+        if self.consecutive_err >= CAP_MAX_ERRORS {
+            crate::loge!("capture: cannot reopen, giving up for this call");
+            return false;
+        }
+        crate::platform::sleep_ns(100_000_000);
+        true
+    }
+
+    /// A failed read skips its frames' sequence numbers; from the second error in a row the PCM
+    /// is reopened, from the fifth the thread backs off, and at CAP_MAX_ERRORS it gives up.
+    fn read_failed(&mut self, p: PcmPtr) -> bool {
+        if log_throttle(&mut self.err_log, 2) {
+            crate::logw!("capture read failed: {}", pcm_error(p));
+        }
+        self.consecutive_err += 1;
+        if self.consecutive_err >= CAP_MAX_ERRORS {
+            crate::loge!(
+                "capture: {} consecutive errors, giving up for this call (protecting the audio DSP)",
+                self.consecutive_err
+            );
+            return false;
+        }
+        st_inc(|s| &mut s.caperr);
+        st_inc(|s| &mut s.tot_caperr);
+        self.clock.error();
+        if self.consecutive_err >= CAP_SLOW_AFTER {
+            crate::platform::sleep_ns(100_000_000);
+        }
+        self.seq = self.seq.wrapping_add(CAP_FRAMES_PER_READ as u16);
+        if self.consecutive_err == 1 {
+            return true;
+        }
+        pcm_release(LIVE_CAP, self.pcm);
+        crate::platform::sleep_ns(10_000_000);
+        self.pcm = self.open();
+        true
+    }
+
+    /// Down-mix stereo to mono in place, then count the read's peak and voiced frames.
+    fn count_level(&mut self) {
+        let n = self.frame as usize;
+        if self.ch == 2 {
+            for i in 0..n {
+                self.pcmbuf[i] =
+                    ((self.pcmbuf[2 * i] as i32 + self.pcmbuf[2 * i + 1] as i32) / 2) as i16;
             }
         }
-        let mut rpeak = 0i32;
-        for &s in pcmbuf.iter().take(cframe as usize) {
-            let a = if s < 0 { -(s as i32) } else { s as i32 };
-            if a > rpeak {
-                rpeak = a;
-            }
-        }
+        let rpeak = self.pcmbuf[..n]
+            .iter()
+            .map(|&s| (s as i32).abs())
+            .max()
+            .unwrap_or(0);
         st_peak(|s| &mut s.peak, rpeak);
         st_peak(|s| &mut s.tot_peak, rpeak);
         st_add(|s| &mut s.tot_cap, CAP_FRAMES_PER_READ);
         if rpeak > VOICED_PEAK {
             st_add(|s| &mut s.tot_voiced, CAP_FRAMES_PER_READ);
         }
-        for f in 0..CAP_FRAMES_PER_READ as usize {
-            let start = f * cframe as usize;
-            let len = enc.encode(
-                &pcmbuf[start..start + cframe as usize],
-                cframe,
-                &mut pkt[HDR..],
-            );
-            if len < 0 {
-                crate::logw!("opus encode: {}", len);
-                continue;
-            }
-            if len <= 2 {
-                seq = seq.wrapping_add(1);
-                continue;
-            }
-            pkt[0] = (seq & 0xff) as u8;
-            pkt[1] = (seq >> 8) as u8;
-            pkt[2] = 0;
-            client_send(&pkt[..HDR + len as usize]);
-            if cfg.loopback {
-                jb_put(seq, &pkt[HDR..HDR + len as usize]);
-            }
-            seq = seq.wrapping_add(1);
-            st_inc(|s| &mut s.sent);
-            st_inc(|s| &mut s.tot_sent);
-        }
-        frames += CAP_FRAMES_PER_READ;
-        if frames >= 500 {
-            let now = crate::platform::now_ns(libc::CLOCK_MONOTONIC);
-            let fps = frames as f64 / ((now - t0) as f64 / 1e9);
-            crate::logi!("{}", crate::protocol::audio_5s_line(&take_window(fps)));
-            frames = 0;
-            t0 = now;
-        }
     }
-    pcm_release(LIVE_CAP, pcm);
+
+    /// Encode frame `f` of the read and send it; a DTX frame (2 bytes or less) only uses a number.
+    fn send_frame(&mut self, f: usize) {
+        let n = self.frame as usize;
+        let start = f * n;
+        let len = self.enc.encode(
+            &self.pcmbuf[start..start + n],
+            self.frame,
+            &mut self.pkt[HDR..],
+        );
+        if len < 0 {
+            crate::logw!("opus encode: {}", len);
+            return;
+        }
+        let seq = self.seq;
+        self.seq = seq.wrapping_add(1);
+        if len <= 2 {
+            return;
+        }
+        let end = HDR + len as usize;
+        self.pkt[..HDR].copy_from_slice(&[(seq & 0xff) as u8, (seq >> 8) as u8, 0]);
+        client_send(&self.pkt[..end]);
+        if self.cfg.loopback {
+            jb_put(seq, &self.pkt[HDR..end]);
+        }
+        st_inc(|s| &mut s.sent);
+        st_inc(|s| &mut s.tot_sent);
+    }
+
+    /// Every 500 frames (5 s), log the window's counters.
+    fn window_log(&mut self) {
+        self.frames += CAP_FRAMES_PER_READ;
+        if self.frames < 500 {
+            return;
+        }
+        let now = crate::platform::now_ns(libc::CLOCK_MONOTONIC);
+        let fps = self.frames as f64 / ((now - self.t0) as f64 / 1e9);
+        crate::logi!("{}", crate::protocol::audio_5s_line(&take_window(fps)));
+        self.frames = 0;
+        self.t0 = now;
+    }
 }
 
 // ------------------------------------------------------------------ playback
@@ -1009,215 +1102,305 @@ fn playback_main() {
             want
         );
     }
-    let mut drate = want;
-    let mut ich = if cfg.inject_channels == 2 { 2 } else { 1 };
-    if let Some((r, c)) = alsa::pcm_negotiate(cfg.card, cfg.inject_pcm, true, want, ich) {
-        drate = r;
-        ich = c;
-    }
-    if !opus_rate_ok(drate) {
-        drate = DEC_RATE;
-    }
-    if !(1..=2).contains(&ich) {
-        ich = 1;
-    }
-    let mut dframe = drate / 100;
-    let mut dec = match opus::Decoder::new(drate, 1) {
-        Some(d) => d,
-        None => return,
+    let (drate, ich) = inject_format(&cfg, want);
+    let Some(dec) = opus::Decoder::new(drate, 1) else {
+        return;
     };
-
-    let mut base = PLAY_PERIOD.load(Ordering::Relaxed);
-    let mut period = base * drate / 48000;
-    let mut pcm = pcm_hold(
-        LIVE_PLAY,
-        open_pcm(cfg.inject_pcm, true, drate, ich, period),
-    );
-    let mut tries = 1;
-    while pcm.is_none() && CALL_RUNNING.load(Ordering::Relaxed) {
-        let wait = if tries > 85 {
-            1_000_000_000
-        } else if tries > 25 {
-            500_000_000
-        } else {
-            200_000_000
-        };
-        crate::platform::sleep_ns(wait);
-        if let Some((r2, c2)) = alsa::pcm_negotiate(cfg.card, cfg.inject_pcm, true, want, ich) {
-            if (r2 != drate || c2 != ich) && opus_rate_ok(r2) && (1..=2).contains(&c2) {
-                if let Some(d2) = opus::Decoder::new(r2, 1) {
-                    dec = d2;
-                    drate = r2;
-                    ich = c2;
-                    dframe = drate / 100;
-                    period = base * drate / 48000;
-                }
-            }
-        }
-        pcm = pcm_hold(
-            LIVE_PLAY,
-            open_pcm_n(cfg.inject_pcm, true, drate, ich, period, 2),
-        );
-        if pcm.is_some() {
-            crate::logi!("inject PCM opened after {} tries", tries + 1);
-        }
-        tries += 1;
-    }
-    if pcm.is_none() {
+    let base = PLAY_PERIOD.load(Ordering::Relaxed);
+    let mut pb = Playback {
+        cfg,
+        want,
+        drate,
+        ich,
+        dframe: drate / 100,
+        dec,
+        base,
+        period: base * drate / 48000,
+        periods: 2,
+        pcm: None,
+        mono: [0i16; 480],
+        out: [0i16; 480 * 2],
+        pkt: [0u8; MAX_PACKET],
+        win_frames: 0,
+        slow_windows: 0,
+        win_t0: 0,
+        werr_log: 0,
+    };
+    if !pb.first_open() {
         return;
     }
     jb_reset();
-
     let Some(ta) = ta() else {
-        pcm_release(LIVE_PLAY, pcm);
+        pcm_release(LIVE_PLAY, pb.pcm);
         return;
     };
-
-    let mut mono = [0i16; 480];
-    let mut out = [0i16; 480 * 2];
-    let mut pkt = [0u8; MAX_PACKET];
-    let mut periods: u32 = 2;
-    let mut win_frames: u32 = 0;
-    let mut slow_windows: u32 = 0;
-    let mut win_t0 = crate::platform::now_ns(libc::CLOCK_MONOTONIC);
-    let mut werr_log: i64 = 0;
-
+    pb.win_t0 = crate::platform::now_ns(libc::CLOCK_MONOTONIC);
     while CALL_RUNNING.load(Ordering::Relaxed) {
-        let tuned = PLAY_PERIOD.load(Ordering::Relaxed);
-        if base != tuned {
-            pcm_release(LIVE_PLAY, pcm);
-            base = tuned;
-            period = base * drate / 48000;
-            pcm = pcm_hold(
-                LIVE_PLAY,
-                open_pcm_n(cfg.inject_pcm, true, drate, ich, period, periods),
-            );
-            crate::logi!(
-                "inject PCM reopened with {}-frame periods: {}",
-                period,
-                if pcm.is_some() { "ok" } else { "FAILED" }
-            );
-            if pcm.is_none() {
-                PLAY_PERIOD.store(480, Ordering::Relaxed);
-                base = 480;
-                period = dframe;
-                pcm = pcm_hold(
-                    LIVE_PLAY,
-                    open_pcm(cfg.inject_pcm, true, drate, ich, dframe),
-                );
-                if pcm.is_none() {
-                    break;
-                }
-            }
+        if !pb.step(&ta) {
+            break;
         }
+    }
+    pcm_release(LIVE_PLAY, pb.pcm);
+}
+
+/// The inject rate and channel count: `want`, refined by what the PCM accepts now, then forced
+/// back to 48 kHz / mono if that left the Opus range.
+fn inject_format(cfg: &AudioCfg, want: i32) -> (i32, i32) {
+    let mut rate = want;
+    let mut ch = if cfg.inject_channels == 2 { 2 } else { 1 };
+    if let Some((r, c)) = alsa::pcm_negotiate(cfg.card, cfg.inject_pcm, true, want, ch) {
+        rate = r;
+        ch = c;
+    }
+    if !opus_rate_ok(rate) {
+        rate = DEC_RATE;
+    }
+    if !(1..=2).contains(&ch) {
+        ch = 1;
+    }
+    (rate, ch)
+}
+
+/// The wait before the next try to open a busy inject PCM: 200 ms, then 500 ms, then 1 s.
+fn open_retry_ns(tries: u32) -> i64 {
+    if tries > 85 {
+        1_000_000_000
+    } else if tries > 25 {
+        500_000_000
+    } else {
+        200_000_000
+    }
+}
+
+/// The playback thread's state for one call.
+struct Playback {
+    cfg: AudioCfg,
+    want: i32,
+    drate: i32,
+    ich: i32,
+    dframe: i32,
+    dec: opus::Decoder,
+    base: i32,
+    period: i32,
+    periods: u32,
+    pcm: Option<PcmPtr>,
+    mono: [i16; 480],
+    out: [i16; 480 * 2],
+    pkt: [u8; MAX_PACKET],
+    win_frames: u32,
+    slow_windows: u32,
+    win_t0: i64,
+    werr_log: i64,
+}
+
+impl Playback {
+    fn open(&self, period: i32, periods: u32) -> Option<PcmPtr> {
+        pcm_hold(
+            LIVE_PLAY,
+            open_pcm_n(
+                self.cfg.inject_pcm,
+                true,
+                self.drate,
+                self.ich,
+                period,
+                periods,
+            ),
+        )
+    }
+
+    /// Open the inject PCM, retrying while the call runs: another stream may still hold it, and
+    /// the format it accepts may change once that stream is gone.
+    fn first_open(&mut self) -> bool {
+        self.pcm = pcm_hold(
+            LIVE_PLAY,
+            open_pcm(self.cfg.inject_pcm, true, self.drate, self.ich, self.period),
+        );
+        let mut tries: u32 = 1;
+        while self.pcm.is_none() && CALL_RUNNING.load(Ordering::Relaxed) {
+            crate::platform::sleep_ns(open_retry_ns(tries));
+            self.renegotiate();
+            self.pcm = self.open(self.period, 2);
+            if self.pcm.is_some() {
+                crate::logi!("inject PCM opened after {} tries", tries + 1);
+            }
+            tries += 1;
+        }
+        self.pcm.is_some()
+    }
+
+    /// Take a new rate or channel count the busy PCM now accepts, with a decoder for it.
+    fn renegotiate(&mut self) {
+        let Some((r2, c2)) = alsa::pcm_negotiate(
+            self.cfg.card,
+            self.cfg.inject_pcm,
+            true,
+            self.want,
+            self.ich,
+        ) else {
+            return;
+        };
+        let changed = r2 != self.drate || c2 != self.ich;
+        if !changed || !opus_rate_ok(r2) || !(1..=2).contains(&c2) {
+            return;
+        }
+        if let Some(d2) = opus::Decoder::new(r2, 1) {
+            self.dec = d2;
+            self.drate = r2;
+            self.ich = c2;
+            self.dframe = r2 / 100;
+            self.period = self.base * r2 / 48000;
+        }
+    }
+
+    /// One 10 ms frame. False ends the playback for this call.
+    fn step(&mut self, ta: &Ta) -> bool {
+        if !self.retune() {
+            return false;
+        }
+        let samples = self.next_frame();
+        count_played();
+        let Some(p) = self.pcm else {
+            return false; // retune already ends the call on a failed reopen
+        };
+        self.write(ta, p, samples);
+        if !self.window_check() {
+            return false;
+        }
+        let stall = STALL_MS.swap(0, Ordering::Relaxed);
+        if stall > 0 {
+            crate::logw!("debug stall {} ms", stall);
+            crate::platform::sleep_ns(stall as i64 * 1_000_000);
+        }
+        true
+    }
+
+    /// TUNE changed the period: reopen with it, falling back to 480-frame periods.
+    fn retune(&mut self) -> bool {
+        let tuned = PLAY_PERIOD.load(Ordering::Relaxed);
+        if self.base == tuned {
+            return true;
+        }
+        pcm_release(LIVE_PLAY, self.pcm);
+        self.base = tuned;
+        self.period = tuned * self.drate / 48000;
+        self.pcm = self.open(self.period, self.periods);
+        crate::logi!(
+            "inject PCM reopened with {}-frame periods: {}",
+            self.period,
+            if self.pcm.is_some() { "ok" } else { "FAILED" }
+        );
+        if self.pcm.is_some() {
+            return true;
+        }
+        PLAY_PERIOD.store(480, Ordering::Relaxed);
+        self.base = 480;
+        self.period = self.dframe;
+        self.pcm = pcm_hold(
+            LIVE_PLAY,
+            open_pcm(self.cfg.inject_pcm, true, self.drate, self.ich, self.dframe),
+        );
+        self.pcm.is_some()
+    }
+
+    /// Decode the next frame into `mono` (a packet, FEC from the next one, or concealment);
+    /// silence when the buffer is empty or the decoder fails. Returns the sample count.
+    fn next_frame(&mut self) -> i32 {
         let mut len = 0usize;
         let mut mode = 2i32;
-        let have = jb_take(&mut pkt, &mut len, &mut mode);
+        let have = jb_take(&mut self.pkt, &mut len, &mut mode);
         if CLIENT_UP.load(Ordering::Relaxed) && jb_started() {
             st_inc(|s| &mut s.tot_live);
             if !have {
                 st_inc(|s| &mut s.tot_starved);
             }
         }
-        let samples: i32;
-        if !have {
-            samples = dframe;
-            mono = [0i16; 480];
-        } else if mode == 0 {
-            samples = dec.decode(Some(&pkt[..len]), &mut mono, dframe, false);
-        } else if mode == 1 {
-            samples = dec.decode(Some(&pkt[..len]), &mut mono, dframe, true); // FEC from the next packet
-        } else {
-            samples = dec.decode(None, &mut mono, dframe, false); // PLC
-        }
-        let samples = if samples < 0 {
-            mono = [0i16; 480];
-            dframe
-        } else {
-            samples
+        let samples = match (have, mode) {
+            (false, _) => -1,
+            (true, 0) => {
+                self.dec
+                    .decode(Some(&self.pkt[..len]), &mut self.mono, self.dframe, false)
+            }
+            // FEC from the next packet
+            (true, 1) => self
+                .dec
+                .decode(Some(&self.pkt[..len]), &mut self.mono, self.dframe, true),
+            _ => self.dec.decode(None, &mut self.mono, self.dframe, false), // PLC
         };
-
-        st_inc(|s| &mut s.played);
-        st_inc(|s| &mut s.tot_played);
-        {
-            let jb = lock(&JB);
-            let d = jb_depth(&jb);
-            if jb.playing {
-                st_umax(|s| &mut s.depth_max, if d < 0 { 0 } else { d as u32 });
-            }
+        if samples < 0 {
+            self.mono = [0i16; 480];
+            return self.dframe;
         }
-        let Some(p) = pcm else {
-            break; // the reopen above already breaks on failure
-        };
-        let wrote_ok = if ich == 2 {
-            for i in 0..samples as usize {
-                out[2 * i] = mono[i];
-                out[2 * i + 1] = mono[i];
-            }
-            (unsafe {
-                (ta.write)(
-                    p.0,
-                    out.as_ptr() as *const c_void,
-                    (samples as usize * 2 * 2) as u32,
-                )
-            }) == 0
-        } else {
-            (unsafe {
-                (ta.write)(
-                    p.0,
-                    mono.as_ptr() as *const c_void,
-                    (samples as usize * 2) as u32,
-                )
-            }) == 0
-        };
-        if !wrote_ok {
-            if log_throttle(&mut werr_log, 2) {
-                crate::logw!("inject write: {}", pcm_error(p));
-            }
-            unsafe { (ta.prepare)(p.0) };
-            crate::platform::sleep_ns(10_000_000);
-        }
-
-        win_frames += 1;
-        if win_frames >= 100 {
-            let now = crate::platform::now_ns(libc::CLOCK_MONOTONIC);
-            let secs = (now - win_t0) as f64 / 1e9;
-            slow_windows = if secs > 100.0 / 90.0 {
-                slow_windows + 1
-            } else {
-                0
-            };
-            if slow_windows >= 2 {
-                if periods < 4 {
-                    periods += 1;
-                }
-                crate::logw!(
-                    "inject stream running at {:.0} frames/s: reopening with {} periods",
-                    100.0 / secs,
-                    periods
-                );
-                pcm_release(LIVE_PLAY, pcm);
-                pcm = pcm_hold(
-                    LIVE_PLAY,
-                    open_pcm_n(cfg.inject_pcm, true, drate, ich, period, periods),
-                );
-                st_inc(|s| &mut s.reopen);
-                slow_windows = 0;
-                if pcm.is_none() {
-                    break;
-                }
-            }
-            win_frames = 0;
-            win_t0 = now;
-        }
-
-        let stall = STALL_MS.swap(0, Ordering::Relaxed);
-        if stall > 0 {
-            crate::logw!("debug stall {} ms", stall);
-            crate::platform::sleep_ns(stall as i64 * 1_000_000);
-        }
+        samples
     }
-    pcm_release(LIVE_PLAY, pcm);
+
+    /// Write `samples` of `mono` (duplicated for a stereo PCM); a failed write re-prepares it.
+    fn write(&mut self, ta: &Ta, p: PcmPtr, samples: i32) {
+        let n = samples as usize;
+        let rc = if self.ich == 2 {
+            for i in 0..n {
+                self.out[2 * i] = self.mono[i];
+                self.out[2 * i + 1] = self.mono[i];
+            }
+            unsafe { (ta.write)(p.0, self.out.as_ptr() as *const c_void, (n * 2 * 2) as u32) }
+        } else {
+            unsafe { (ta.write)(p.0, self.mono.as_ptr() as *const c_void, (n * 2) as u32) }
+        };
+        if rc == 0 {
+            return;
+        }
+        if log_throttle(&mut self.werr_log, 2) {
+            crate::logw!("inject write: {}", pcm_error(p));
+        }
+        unsafe { (ta.prepare)(p.0) };
+        crate::platform::sleep_ns(10_000_000);
+    }
+
+    /// Every 100 frames: two windows in a row below 90 frames/s reopen the PCM with one more
+    /// period (at most 4). False when that reopen failed.
+    fn window_check(&mut self) -> bool {
+        self.win_frames += 1;
+        if self.win_frames < 100 {
+            return true;
+        }
+        let now = crate::platform::now_ns(libc::CLOCK_MONOTONIC);
+        let secs = (now - self.win_t0) as f64 / 1e9;
+        self.slow_windows = if secs > 100.0 / 90.0 {
+            self.slow_windows + 1
+        } else {
+            0
+        };
+        if self.slow_windows >= 2 && !self.reopen_slow(secs) {
+            return false;
+        }
+        self.win_frames = 0;
+        self.win_t0 = now;
+        true
+    }
+
+    fn reopen_slow(&mut self, secs: f64) -> bool {
+        self.periods = (self.periods + 1).min(4);
+        crate::logw!(
+            "inject stream running at {:.0} frames/s: reopening with {} periods",
+            100.0 / secs,
+            self.periods
+        );
+        pcm_release(LIVE_PLAY, self.pcm);
+        self.pcm = self.open(self.period, self.periods);
+        st_inc(|s| &mut s.reopen);
+        self.slow_windows = 0;
+        self.pcm.is_some()
+    }
+}
+
+/// Count one played frame and the jitter buffer's depth while it plays.
+fn count_played() {
+    st_inc(|s| &mut s.played);
+    st_inc(|s| &mut s.tot_played);
+    let jb = lock(&JB);
+    let d = jb_depth(&jb);
+    if jb.playing {
+        st_umax(|s| &mut s.depth_max, if d < 0 { 0 } else { d as u32 });
+    }
 }
 
 // ------------------------------------------------------------------ lifecycle
