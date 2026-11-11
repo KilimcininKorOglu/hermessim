@@ -353,7 +353,10 @@ fn client_send(buf: &[u8]) {
         };
         if n < 0 {
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-            if errno != libc::EAGAIN {
+            if errno == libc::EAGAIN || errno == libc::EWOULDBLOCK {
+                // The client's socket had no room: its reader fell behind and this packet is dropped.
+                st_inc(|s| &mut s.txdrop);
+            } else {
                 crate::logw!("audio send: {}", std::io::Error::from_raw_os_error(errno));
             }
         }
@@ -537,6 +540,7 @@ fn jb_take(out: &mut [u8; MAX_PACKET], outlen: &mut usize, mode: &mut i32) -> bo
 
 struct Stats {
     sent: u32,
+    txdrop: u32,
     recv: u32,
     plc: u32,
     fec: u32,
@@ -558,6 +562,7 @@ struct Stats {
 
 const EMPTY_STATS: Stats = Stats {
     sent: 0,
+    txdrop: 0,
     recv: 0,
     plc: 0,
     fec: 0,
@@ -605,6 +610,45 @@ fn st_umax(f: impl FnOnce(&mut Stats) -> &mut u32, value: u32) {
     if value > *v {
         *v = value;
     }
+}
+
+/// The 5 s counters as one window, cleared under the same lock so no count is lost between read and reset.
+fn take_window(fps: f64) -> crate::protocol::AudioWindow {
+    let mut s = STATS.lock().unwrap();
+    let w = crate::protocol::AudioWindow {
+        sent: s.sent,
+        txdrop: s.txdrop,
+        recv: s.recv,
+        fec: s.fec,
+        plc: s.plc,
+        late: s.late,
+        catchup: s.catchup,
+        caperr: s.caperr,
+        peak: s.peak,
+        played: s.played,
+        depth_max: s.depth_max,
+        fps,
+        jb_ms: if s.jb_n != 0 { s.jb_sum / s.jb_n as f64 * 10.0 } else { -1.0 },
+        reopen: s.reopen,
+        prime: JB_PRIME.load(Ordering::Relaxed),
+        keep: JB_KEEP.load(Ordering::Relaxed),
+        period: PLAY_PERIOD.load(Ordering::Relaxed),
+    };
+    s.jb_sum = 0.0;
+    s.jb_n = 0;
+    s.reopen = 0;
+    s.sent = 0;
+    s.txdrop = 0;
+    s.recv = 0;
+    s.fec = 0;
+    s.plc = 0;
+    s.late = 0;
+    s.catchup = 0;
+    s.caperr = 0;
+    s.peak = 0;
+    s.played = 0;
+    s.depth_max = 0;
+    w
 }
 
 fn st_jb_depth(d: i32) {
@@ -892,72 +936,8 @@ fn capture_main() {
         frames += CAP_FRAMES_PER_READ;
         if frames >= 500 {
             let now = crate::platform::now_ns(libc::CLOCK_MONOTONIC);
-            let secs = (now - t0) as f64 / 1e9;
-            let (
-                sent,
-                recv,
-                fec,
-                plc,
-                late,
-                catchup,
-                caperr,
-                peak,
-                played,
-                depth_max,
-                reopen,
-                jb_n,
-                jb_sum,
-            ) = {
-                let mut s = STATS.lock().unwrap();
-                let snap = (
-                    s.sent,
-                    s.recv,
-                    s.fec,
-                    s.plc,
-                    s.late,
-                    s.catchup,
-                    s.caperr,
-                    s.peak,
-                    s.played,
-                    s.depth_max,
-                    s.reopen,
-                    s.jb_n,
-                    s.jb_sum,
-                );
-                s.jb_sum = 0.0;
-                s.jb_n = 0;
-                s.reopen = 0;
-                s.sent = 0;
-                s.recv = 0;
-                s.fec = 0;
-                s.plc = 0;
-                s.late = 0;
-                s.catchup = 0;
-                s.caperr = 0;
-                s.peak = 0;
-                s.played = 0;
-                s.depth_max = 0;
-                snap
-            };
-            crate::logi!(
-                "audio 5s: sent={} recv={} fec={} plc={} late={} catchup={} caperr={} peak={} played={} depthmax={} ({:.1} fps) | held: jb={:.1}ms reopen={} (tune prime={} keep={} period={})",
-                sent,
-                recv,
-                fec,
-                plc,
-                late,
-                catchup,
-                caperr,
-                peak,
-                played,
-                depth_max,
-                frames as f64 / secs,
-                if jb_n != 0 { jb_sum / jb_n as f64 * 10.0 } else { -1.0 },
-                reopen,
-                JB_PRIME.load(Ordering::Relaxed),
-                JB_KEEP.load(Ordering::Relaxed),
-                PLAY_PERIOD.load(Ordering::Relaxed)
-            );
+            let fps = frames as f64 / ((now - t0) as f64 / 1e9);
+            crate::logi!("{}", crate::protocol::audio_5s_line(&take_window(fps)));
             frames = 0;
             t0 = now;
         }

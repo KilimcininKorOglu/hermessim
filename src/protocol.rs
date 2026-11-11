@@ -216,6 +216,38 @@ pub fn netblock_script(uid: i32, on: bool) -> String {
     )
 }
 
+/// One 5 s window of the call audio pump, as logged every 500 captured frames.
+#[derive(Default)]
+pub struct AudioWindow {
+    pub sent: u32,
+    pub txdrop: u32,
+    pub recv: u32,
+    pub fec: u32,
+    pub plc: u32,
+    pub late: u32,
+    pub catchup: u32,
+    pub caperr: u32,
+    pub peak: i32,
+    pub played: u32,
+    pub depth_max: u32,
+    pub fps: f64,
+    pub jb_ms: f64,
+    pub reopen: u32,
+    pub prime: i32,
+    pub keep: i32,
+    pub period: i32,
+}
+
+/// The "audio 5s:" log line, field for field as the C daemon writes it: the host app's diagnostics trimmer
+/// matches it by position.
+pub fn audio_5s_line(w: &AudioWindow) -> String {
+    format!(
+        "audio 5s: sent={} txdrop={} recv={} fec={} plc={} late={} catchup={} caperr={} peak={} played={} depthmax={} ({:.1} fps) | held: jb={:.1}ms reopen={} (tune prime={} keep={} period={})",
+        w.sent, w.txdrop, w.recv, w.fec, w.plc, w.late, w.catchup, w.caperr, w.peak, w.played, w.depth_max, w.fps,
+        w.jb_ms, w.reopen, w.prime, w.keep, w.period
+    )
+}
+
 /// The C daemon's strtok over one command line: `next` is strtok(.., " "), `rest` is strtok(NULL, "").
 pub struct Tokens<'a> {
     s: &'a str,
@@ -395,6 +427,30 @@ mod tests {
             fired |= g.push(up, i as i64 * 1_000_000_001);
         }
         assert!(!fired);
+    }
+
+    #[test]
+    fn the_5s_audio_line_keeps_the_c_field_order() {
+        let w = AudioWindow {
+            sent: 500,
+            txdrop: 0,
+            recv: 499,
+            peak: 20458,
+            played: 500,
+            depth_max: 4,
+            fps: 99.94,
+            jb_ms: 22.0,
+            prime: 2,
+            keep: 1,
+            period: 480,
+            ..Default::default()
+        };
+        assert_eq!(
+            audio_5s_line(&w),
+            "audio 5s: sent=500 txdrop=0 recv=499 fec=0 plc=0 late=0 catchup=0 caperr=0 peak=20458 played=500 depthmax=4 (99.9 fps) | held: jb=22.0ms reopen=0 (tune prime=2 keep=1 period=480)"
+        );
+        let idle = AudioWindow { jb_ms: -1.0, ..Default::default() };
+        assert!(audio_5s_line(&idle).contains("| held: jb=-1.0ms reopen=0"));
     }
 
     #[test]
