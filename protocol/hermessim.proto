@@ -499,13 +499,15 @@ message Update {
   int64 deferred_until_ms = 7;   // "Later" pressed: no automatic install before this (unix ms)
   int64 checked_ms = 8;          // last check (unix ms)
   string error = 9;              // last failure, for the Updates screen
-  enum State { IDLE = 0; CHECKING = 1; DOWNLOADING = 2; READY = 3; INSTALLING = 4; FAILED = 5; }
+  bool auto_update = 10;         // the host downloads and installs updates by itself (off: only on INSTALL_NOW)
+  // AVAILABLE: a newer version is known but not downloaded (auto_update off); INSTALL_NOW downloads and installs it.
+  enum State { IDLE = 0; CHECKING = 1; DOWNLOADING = 2; READY = 3; INSTALLING = 4; FAILED = 5; AVAILABLE = 6; }
   message Note { string version = 1; string en = 2; string tr = 3; }
 }
 
 message UpdateAction {
   Action action = 1;
-  enum Action { CHECK = 0; INSTALL_NOW = 1; LATER = 2; }
+  enum Action { CHECK = 0; INSTALL_NOW = 1; LATER = 2; AUTO_ON = 3; AUTO_OFF = 4; }  // AUTO_*: sets Update.auto_update
 }
 
 // The host's own Wi-Fi connection (not its hotspot). One rule on every phone (18 Oct 2026), applied by the host

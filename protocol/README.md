@@ -159,7 +159,10 @@ during a call the application error `0x80`, any other refusal `GATT_FAILURE`.
 `GET /api/v1/releases/host?since=<versionCode>` lists the host releases newer than `since` (newest first: version,
 code, notes `{en, tr}`, apk `{url, sha256, size}`); `/releases/ios` the same for the iPhone app (no file; `store_url`
 once it is in the App Store) and `/releases/android` for the Android app (with its APK, which the app installs itself;
-the Android release channel serves the newest). The host checks daily and on `UpdateAction{CHECK}`, downloads the newest APK, checks its
-sha256 and that it is signed with the installed app's key, and reports `HostStatus.update`. It installs on
-`INSTALL_NOW`, or between 02:00 and 05:00 host time once a client has been shown the update and no call is up, unless
-`LATER` set `deferred_until_ms` (one day). Every release carries notes in English and Turkish.
+the Android release channel serves the newest). The host checks daily and on `UpdateAction{CHECK}` and reports `HostStatus.update`. Automatic updates are a
+setting on the host, `Update.auto_update`, off by default; a client switches it with `AUTO_ON` and `AUTO_OFF`.
+While it is off, a newer version is reported as `AVAILABLE` and nothing is downloaded; `INSTALL_NOW` then downloads
+the APK, checks its sha256 and that it is signed with the installed app's key, and installs it. While it is on, the
+host downloads and checks the newest APK by itself (`READY`) and installs it on `INSTALL_NOW`, or between 02:00 and
+05:00 host time once a client has been shown the update and no call is up, unless `LATER` set `deferred_until_ms`
+(one day). An install never starts during a call. Every release carries notes in English and Turkish.
