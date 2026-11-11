@@ -197,6 +197,15 @@ pub fn charge_band(limit: i32) -> (i32, i32) {
     (resume, drain)
 }
 
+/// The CHARGE? state after the node name. held: charging is stopped by us right now (the input cut, or
+/// charge_behaviour off "auto"); stuck: the kernel kept undoing the cut and the limit is left alone for the hour.
+pub fn charge_status_line(limit: i32, resume: i32, drain: i32, cutting: bool, held: bool, stuck: bool) -> String {
+    format!(
+        "target={} resume={} drain={} cutting={} held={} stuck={}",
+        limit, resume, drain, cutting as i32, held as i32, stuck as i32
+    )
+}
+
 /// The exact shell command the C daemon hands to /system/bin/sh for one uid transition.
 pub fn netblock_script(uid: i32, on: bool) -> String {
     let rule = if on {
@@ -441,6 +450,18 @@ mod tests {
         assert_eq!(charge_band(30), (30, 32));
         assert_eq!(charge_band(95), (92, 95));
         assert_eq!(charge_band(99), (96, 95));
+    }
+
+    #[test]
+    fn charge_status_reports_held_and_stuck() {
+        assert_eq!(
+            charge_status_line(60, 57, 62, false, true, false),
+            "target=60 resume=57 drain=62 cutting=0 held=1 stuck=0"
+        );
+        assert_eq!(
+            charge_status_line(0, 0, 0, true, true, true),
+            "target=0 resume=0 drain=0 cutting=1 held=1 stuck=1"
+        );
     }
 
     #[test]

@@ -7,7 +7,7 @@ use std::os::unix::io::RawFd;
 use libc::{c_int, c_void, pid_t};
 
 use crate::protocol::{
-    c_atoi, charge_band, net_cycle_script, netblock_script, valid_pkg, valid_role, EscapeGesture,
+    c_atoi, charge_band, charge_status_line, net_cycle_script, netblock_script, valid_pkg, valid_role, EscapeGesture,
 };
 
 pub const BOX_MAX_KEYDEVS: usize = 32;
@@ -487,11 +487,14 @@ impl Charge {
         }
     }
 
-    fn status(&self) -> String {
-        format!(
-            "target={} resume={} drain={} cutting={}",
-            self.limit, self.resume, self.drain, self.cutting as i32
-        )
+    fn status(&mut self) -> String {
+        self.find_behaviour();
+        let behaviour_held = !self.behaviour_path.is_empty()
+            && (self.behaviour_active("inhibit-charge") || self.behaviour_active("force-discharge"));
+        let held = self.cutting || behaviour_held;
+        let stuck = self.recut_paused_until != 0
+            && crate::platform::boot_seconds() < self.recut_paused_until;
+        charge_status_line(self.limit, self.resume, self.drain, self.cutting, held, stuck)
     }
 
     fn check(&mut self) {
@@ -737,7 +740,7 @@ impl BoxState {
         self.charge.node_name()
     }
 
-    pub fn charge_status(&self) -> String {
+    pub fn charge_status(&mut self) -> String {
         self.charge.status()
     }
 
