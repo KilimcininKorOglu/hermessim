@@ -106,18 +106,21 @@ impl Decoder {
         }
     }
 
-    pub fn decode(&mut self, data: Option<&[u8]>, pcm: &mut [i16], fec: bool) -> i32 {
+    /// Decodes at most `frame_size` samples into `pcm`. Concealment (no data) and FEC produce exactly
+    /// `frame_size` samples, so it must be one 10 ms frame at the decoder's rate, not the buffer's length.
+    pub fn decode(&mut self, data: Option<&[u8]>, pcm: &mut [i16], frame_size: i32, fec: bool) -> i32 {
         let (ptr, len) = match data {
             Some(d) => (d.as_ptr(), d.len() as c_int),
             None => (std::ptr::null(), 0),
         };
+        let frame_size = frame_size.clamp(0, pcm.len() as i32);
         unsafe {
             opus_decode(
                 self.ptr,
                 ptr,
                 len,
                 pcm.as_mut_ptr(),
-                pcm.len() as c_int,
+                frame_size as c_int,
                 fec as c_int,
             )
         }

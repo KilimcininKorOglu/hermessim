@@ -1091,11 +1091,11 @@ fn playback_main() {
             samples = dframe;
             mono = [0i16; 480];
         } else if mode == 0 {
-            samples = dec.decode(Some(&pkt[..len]), &mut mono, false);
+            samples = dec.decode(Some(&pkt[..len]), &mut mono, dframe, false);
         } else if mode == 1 {
-            samples = dec.decode(Some(&pkt[..len]), &mut mono, true);
+            samples = dec.decode(Some(&pkt[..len]), &mut mono, dframe, true); // FEC from the next packet
         } else {
-            samples = dec.decode(None, &mut mono, false);
+            samples = dec.decode(None, &mut mono, dframe, false); // PLC
         }
         let samples = if samples < 0 {
             mono = [0i16; 480];
