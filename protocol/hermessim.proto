@@ -88,7 +88,11 @@ message Sim {
   string carrier_id = 11;        // stable per SIM card (MCC+MNC+ICCID hash): lets the client keep a nickname
   Lock lock = 12;                // SIM PIN state
   int32 attempts_left = 13;      // PIN (or PUK when lock = PUK_REQUIRED) attempts left; -1 = unknown
+  NetworkMode network_mode = 14; // the highest network generation the user allows on this line
+  repeated NetworkMode network_modes = 15;  // the choices this line's modem offers; empty = not settable here
   enum Lock { UNLOCKED = 0; PIN_REQUIRED = 1; PUK_REQUIRED = 2; PERM_DISABLED = 3; OTHER_LOCK = 4; }
+  // A ceiling: the generations below it stay allowed, so the line falls back to them where the higher one is missing.
+  enum NetworkMode { AUTO = 0; UP_TO_4G = 1; UP_TO_3G = 2; }
 }
 
 // SIM PIN entry from the client. With a PUK, `pin` is the new PIN to set.
@@ -459,6 +463,7 @@ message SetSim {
   optional bool enabled = 2;       // turn the line off/on (UICC applications)
   optional bool data_roaming = 3;
   bool make_default_data = 4;      // route mobile data (and the hotspot) through this SIM
+  optional Sim.NetworkMode network_mode = 5;  // one of Sim.network_modes; refused during a call
 }
 
 message AudioChannel { bool open = 1; }

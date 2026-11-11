@@ -56,6 +56,11 @@ connection event can't take 100 single-packet writes a second. Receivers parse t
   hardware offload may count less). Where `capabilities.block_clients`, `SetHotspotBlock` cuts a device off the
   internet by its MAC address: it stays connected, its forwarded traffic is dropped. The list (`Hotspot.blocked`, at
   most 32) is kept on the host and applied whenever the hotspot comes on.
+- Network mode: `Sim.network_mode` is the highest network generation the user allows on a line (automatic, up to 4G,
+  up to 3G); the generations below it stay allowed. `Sim.network_modes` lists the choices the line's modem offers (no
+  "up to 4G" without a 5G radio); an empty list means the host can't set it. `SetSim.network_mode` takes one of them
+  and is refused (`BAD_REQUEST`) during a call, because the modem registers again and the call could drop. The choice
+  stays on the host's modem across restarts; box mode's 5G cut applies on top of it.
 - Charge limit: `SetBox.charge_limit` takes 50-100 (the clients offer steps of 5; 100 = off). `Box.charge_state` says
   what the limit does now; `STUCK` means the phone kept undoing the cut and the host left it for the hour, and the
   host then sends `HostNotice{CHARGE_CONTROL_STUCK}` once.
