@@ -520,42 +520,50 @@ impl Charge {
             return;
         }
 
-        let online = Self::charger_online();
-        let plugged = online != 0;
+        let plugged = Self::charger_online() != 0;
         let cut = self.cut_index();
-
         if !self.behaviour_path.is_empty() {
-            if level > self.drain && plugged && self.behaviour_force {
-                self.set_cut(false);
-                if self.set_behaviour("force-discharge") == 0 {
-                    return;
-                }
-            }
-            if level > self.drain && plugged && cut >= 0 {
-                self.set_behaviour("auto");
-                self.set_cut(true);
-                return;
-            }
-            if self.cutting {
-                self.set_cut(false);
-            }
-            if level >= self.limit {
-                self.set_behaviour("inhibit-charge");
-            } else if level <= self.resume {
-                self.set_behaviour("auto");
-            }
+            self.check_behaviour(level, plugged, cut);
             return;
         }
-
         let cap = cap_node();
         if let Some(cap) = cap {
             if read_int(cap) != self.limit {
                 write_int(cap, self.limit);
             }
         }
-        if cut < 0 {
+        if cut >= 0 {
+            self.check_cut(level, plugged, cut as usize, cap.is_some());
+        }
+    }
+
+    /// A charge_behaviour node holds the limit: force-discharge (or the cut node) above the drain
+    /// level while plugged, else inhibit-charge at the limit and auto again at the resume level.
+    fn check_behaviour(&mut self, level: i32, plugged: bool, cut: i32) {
+        let draining = level > self.drain && plugged;
+        if draining && self.behaviour_force {
+            self.set_cut(false);
+            if self.set_behaviour("force-discharge") == 0 {
+                return;
+            }
+        }
+        if draining && cut >= 0 {
+            self.set_behaviour("auto");
+            self.set_cut(true);
             return;
         }
+        if self.cutting {
+            self.set_cut(false);
+        }
+        if level >= self.limit {
+            self.set_behaviour("inhibit-charge");
+        } else if level <= self.resume {
+            self.set_behaviour("auto");
+        }
+    }
+
+    /// The cut node holds the limit, with the capacity cap node beside it when there is one.
+    fn check_cut(&mut self, level: i32, plugged: bool, cut: usize, with_cap: bool) {
         let now = crate::platform::boot_seconds();
         if self.recut_paused_until != 0 {
             if now < self.recut_paused_until {
@@ -563,38 +571,18 @@ impl Charge {
             }
             self.recut_paused_until = 0;
         }
-        let with_cap = cap.is_some();
         let release_at = if with_cap { self.limit } else { self.resume };
         let should_cut = if with_cap {
             plugged && level > self.drain
         } else {
             plugged && level >= self.limit
         };
-        let (node, stop) = CUT_NODES[cut as usize];
+        let (node, stop) = CUT_NODES[cut];
         if self.cutting && read_int(node) != stop as i32 {
             self.cutting = false;
-            if level <= release_at {
-                return;
+            if level > release_at {
+                self.recut(node, now);
             }
-            if self.recut_window < 0 || now - self.recut_window >= 3600 {
-                self.recut_window = now;
-                self.recuts = 0;
-            }
-            if self.recuts >= RECUT_MAX {
-                crate::logw!(
-                    "battery care: {} keeps being reset, leaving it this hour",
-                    node
-                );
-                self.recut_paused_until = self.recut_window + 3600;
-                return;
-            }
-            self.recuts += 1;
-            crate::logw!(
-                "battery care: the kernel reset {}, cutting again ({} this hour)",
-                node,
-                self.recuts
-            );
-            self.set_cut(true);
             return;
         }
         if !self.cutting && should_cut {
@@ -602,6 +590,29 @@ impl Charge {
         } else if self.cutting && level <= release_at {
             self.set_cut(false);
         }
+    }
+
+    /// The kernel reset our cut: cut again, at most RECUT_MAX times an hour.
+    fn recut(&mut self, node: &str, now: i64) {
+        if self.recut_window < 0 || now - self.recut_window >= 3600 {
+            self.recut_window = now;
+            self.recuts = 0;
+        }
+        if self.recuts >= RECUT_MAX {
+            crate::logw!(
+                "battery care: {} keeps being reset, leaving it this hour",
+                node
+            );
+            self.recut_paused_until = self.recut_window + 3600;
+            return;
+        }
+        self.recuts += 1;
+        crate::logw!(
+            "battery care: the kernel reset {}, cutting again ({} this hour)",
+            node,
+            self.recuts
+        );
+        self.set_cut(true);
     }
 
     fn apply(&mut self, percent: i32) -> i32 {
@@ -1040,44 +1051,22 @@ impl BoxState {
     }
 
     pub fn power_block(&mut self, on: bool) -> i32 {
-        if on {
-            let mut up = false;
-            let mut down = false;
-            for i in 0..self.nkeys {
-                if self.keys[i] >= 0 {
-                    up |= self.volup[i];
-                    down |= self.voldown[i];
-                }
-            }
-            if !up || !down {
-                crate::logw!("power key not blocked: the volume keys aren't both watched (no escape gesture)");
-                return -1;
-            }
-            self.grab_until_sec = crate::platform::now_sec() + 15 * 60;
-        } else {
-            self.grab_until_sec = 0;
+        if on && !self.escape_keys_watched() {
+            crate::logw!(
+                "power key not blocked: the volume keys aren't both watched (no escape gesture)"
+            );
+            return -1;
         }
+        self.grab_until_sec = if on {
+            crate::platform::now_sec() + 15 * 60
+        } else {
+            0
+        };
         let mut n = 0;
         for i in 0..self.nkeys {
-            if self.keys[i] < 0 || !self.power[i] || self.grabbed[i] == on {
-                continue;
-            }
-            let rc = unsafe {
-                libc::ioctl(
-                    self.keys[i],
-                    crate::alsa::EVIOCGRAB as c_int,
-                    if on { 1 as c_int } else { 0 as c_int },
-                )
-            };
-            if rc == 0 {
-                self.grabbed[i] = on;
+            let pending = self.keys[i] >= 0 && self.power[i] && self.grabbed[i] != on;
+            if pending && self.grab_power(i, on) {
                 n += 1;
-            } else {
-                crate::logw!(
-                    "power key {}: {}",
-                    if on { "grab" } else { "release" },
-                    crate::platform::errstr()
-                );
             }
         }
         if n > 0 {
@@ -1089,6 +1078,38 @@ impl BoxState {
             );
         }
         n
+    }
+
+    /// Both volume keys are on open devices, so the escape gesture can release a blocked power key.
+    fn escape_keys_watched(&self) -> bool {
+        let open = (0..self.nkeys).filter(|&i| self.keys[i] >= 0);
+        let (mut up, mut down) = (false, false);
+        for i in open {
+            up |= self.volup[i];
+            down |= self.voldown[i];
+        }
+        up && down
+    }
+
+    /// EVIOCGRAB on (or off) one power key device; true when the kernel took it.
+    fn grab_power(&mut self, i: usize, on: bool) -> bool {
+        let rc = unsafe {
+            libc::ioctl(
+                self.keys[i],
+                crate::alsa::EVIOCGRAB as c_int,
+                if on { 1 as c_int } else { 0 as c_int },
+            )
+        };
+        if rc != 0 {
+            crate::logw!(
+                "power key {}: {}",
+                if on { "grab" } else { "release" },
+                crate::platform::errstr()
+            );
+            return false;
+        }
+        self.grabbed[i] = on;
+        true
     }
 
     pub fn power_check(&mut self) {

@@ -949,47 +949,8 @@ fn ctl_restore(ctl: RawFd, safe: bool, crumb: &mut Crumb, m: &mut Managed) -> bo
 }
 
 fn reapply_in(ctl: RawFd, safe: bool, crumb: &mut Crumb, list: &mut [Managed], numid: u32) {
-    for m in list.iter_mut() {
-        if m.numid != numid {
-            continue;
-        }
-        if m.write_only {
-            if platform::now_ns(libc::CLOCK_MONOTONIC) - m.last_write_ns < OWN_WRITE_GRACE_NS {
-                continue;
-            }
-        } else {
-            let mut same = true;
-            if let Some(read) = ctl_read(ctl, numid) {
-                for i in 0..m.nwant {
-                    let cur = if m.enumerated {
-                        elem_enum(&read, i) as i64
-                    } else {
-                        elem_integer(&read, i) as i64
-                    };
-                    if cur != m.want[i] {
-                        same = false;
-                        break;
-                    }
-                }
-            } else {
-                same = false;
-            }
-            if same {
-                continue;
-            }
-        }
-        let now = platform::now_sec();
-        if now < m.paused_until_sec {
-            continue;
-        }
-        if now != m.reapply_sec {
-            m.reapply_sec = now;
-            m.reapplies = 0;
-        }
-        m.reapplies += 1;
-        if m.reapplies > 5 {
-            m.paused_until_sec = now + 10;
-            crate::loge!("'{}' won't keep our value: left alone for 10 s", m.name);
+    for m in list.iter_mut().filter(|m| m.numid == numid) {
+        if !lost_value(ctl, m) || !reapply_allowed(m) {
             continue;
         }
         crate::logw!("'{}' rewritten by someone else, re-applying", m.name);
@@ -997,4 +958,42 @@ fn reapply_in(ctl: RawFd, safe: bool, crumb: &mut Crumb, list: &mut [Managed], n
         let n = m.nwant;
         ctl_write(ctl, safe, crumb, m, &want, n);
     }
+}
+
+/// The control changed under us: a write-only control after our own write's grace period (it
+/// cannot be read back), a readable one when it no longer holds our values or cannot be read.
+fn lost_value(ctl: RawFd, m: &Managed) -> bool {
+    if m.write_only {
+        return platform::now_ns(libc::CLOCK_MONOTONIC) - m.last_write_ns >= OWN_WRITE_GRACE_NS;
+    }
+    let Some(read) = ctl_read(ctl, m.numid) else {
+        return true;
+    };
+    (0..m.nwant).any(|i| {
+        let cur = if m.enumerated {
+            elem_enum(&read, i) as i64
+        } else {
+            elem_integer(&read, i) as i64
+        };
+        cur != m.want[i]
+    })
+}
+
+/// At most 5 re-applies in one second; a 6th leaves the control alone for 10 s.
+fn reapply_allowed(m: &mut Managed) -> bool {
+    let now = platform::now_sec();
+    if now < m.paused_until_sec {
+        return false;
+    }
+    if now != m.reapply_sec {
+        m.reapply_sec = now;
+        m.reapplies = 0;
+    }
+    m.reapplies += 1;
+    if m.reapplies > 5 {
+        m.paused_until_sec = now + 10;
+        crate::loge!("'{}' won't keep our value: left alone for 10 s", m.name);
+        return false;
+    }
+    true
 }
