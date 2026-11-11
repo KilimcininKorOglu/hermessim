@@ -149,6 +149,10 @@ class HostService : Service() {
             // adb debug (root only): turn a SIM's PIN lock on/off. --ei slot N --es pin PIN --ez on true|false
             "SIM_LOCK" -> Sims.setLockEnabled(this, intent.getIntExtra("slot", -1), intent.getStringExtra("pin").orEmpty(),
                                               intent.getBooleanExtra("on", false))
+            // adb debug: what a call's numbers would say about the Bluetooth radio now (mode asked, mode in use, scans)
+            "LINK_RADIO" -> Thread {
+                Log.i(TAG, "LINK_RADIO: asks ${LinkRadio.phyName(LinkRadio.mask)}, in use ${LinkRadio.inUse}, log [${LinkRadio.history()}], scans [${LinkRadio.scansNow()}]")
+            }.start()
             // adb debug (root only): push a made-up call or text to the iPhone whatever the link. --es kind call|sms
             "PUSH_TEST" -> Push.test(intent.getStringExtra("kind") ?: "sms")
             // Debug (root only: this service is not exported): relay a synthetic SMS through the normal path.

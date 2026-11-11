@@ -96,8 +96,11 @@ object CallAudioCheck {
     fun totals(reply: String): Map<String, Long> =
         Regex("""\b(\w+)=(-?\d+)""").findAll(reply).associate { it.groupValues[1] to (it.groupValues[2].toLongOrNull() ?: 0) }
 
-    /** A call's numbers: [what] went wrong ("ok": nothing), from [d] (AUDIO?) and the bridge's [b]. */
-    fun detail(what: String, seconds: Long, d: Map<String, Long>, b: Bridge, reply: String): JSONObject {
+    /**
+     * A call's numbers: [what] went wrong ("ok": nothing), from [d] (AUDIO?) and the bridge's [b]; [scans] is who scanned
+     * for Bluetooth devices on this phone ([LinkRadio.scans]; "" when not asked).
+     */
+    fun detail(what: String, seconds: Long, d: Map<String, Long>, b: Bridge, reply: String, scans: String = ""): JSONObject {
         val toClient = ((d["sent"] ?: 0) - (d["noclient"] ?: 0)).coerceAtLeast(1)
         val live = (d["live"] ?: 0).coerceAtLeast(1)
         val capMs = d["capms"] ?: 0
@@ -111,6 +114,8 @@ object CallAudioCheck {
             .put("frames_per_write", if (b.writes > 0) "%.2f".format(java.util.Locale.ROOT, b.framesOut.toDouble() / b.writes) else "-")
             .put("bridges", b.sessions).put("held", held)
             .put("ble_interval_ms", BleLink.lastIntervalMs)
+            // The link's radio mode (sending/receiving), what was asked and heard about it, and the scans sharing the radio
+            .put("phy", LinkRadio.inUse).put("phy_log", LinkRadio.history()).put("bt_scans", scans)
             .put("hotspot", hotspotAtStart).put("radio", runCatching { radio() }.getOrDefault(""))
             .put("daemon", reply.removePrefix("OK ").take(340))
             .put("bridge", "in=${b.framesIn} out=${b.framesOut} writes=${b.writes} dropped=${b.dropped}")
@@ -118,7 +123,7 @@ object CallAudioCheck {
 
     /**
      * [detail] as words, not JSON: the report's scrubber blanks quoted strings, and a JSON line then read
-     * {"<…>":"<…>", …}. The daemon's totals are the line before it ("daemon <- AUDIO? -> OK …"). Pure (CallAudioCheckTest).
+     * {"<…>":"<…>", …}. The daemon's totals are a few lines before it ("daemon <- AUDIO? -> OK …"). Pure (CallAudioCheckTest).
      */
     fun line(detail: JSONObject): String {
         val what = detail.optString("what")
@@ -134,14 +139,14 @@ object CallAudioCheck {
         else -> "none"
     }
 
-    /** Daemon executor, at the call's end: [reply] is AUDIO?, [seconds] since the call connected. */
-    fun check(reply: String, seconds: Long) {
+    /** Daemon executor, at the call's end: [reply] is AUDIO?, [seconds] since the call connected, [scans] as in [detail]. */
+    fun check(reply: String, seconds: Long, scans: String = "") {
         if (!VoiceGate.fullVoice) return
         val d = totals(reply)
         if (d["live"] == null) return                                      // a daemon from before these totals
         val b = bridge()
         val what = judge(seconds, d, b, held)
-        val detail = detail(what ?: "ok", seconds, d, b, reply)
+        val detail = detail(what ?: "ok", seconds, d, b, reply, scans)
         last = detail; lastAt = android.os.SystemClock.elapsedRealtime()
         if (what == null) android.util.Log.i("HermesSimHost", line(detail)) else android.util.Log.w("HermesSimHost", line(detail))
     }
