@@ -248,6 +248,36 @@ pub fn audio_5s_line(w: &AudioWindow) -> String {
     )
 }
 
+/// One call's audio totals (AUDIO? and the "audio call end:" log line): the call test and the host app's
+/// end-of-call check read these keys.
+#[derive(Default)]
+pub struct CallTotals {
+    pub cap: u32,
+    pub voiced: u32,
+    pub sent: u32,
+    pub played: u32,
+    pub peak: i32,
+    /// Caller audio the client's socket had no room for.
+    pub txdrop: u32,
+    /// Caller audio captured while no client was connected.
+    pub noclient: u32,
+    /// Client audio received.
+    pub recv: u32,
+    /// Client audio concealed (PLC).
+    pub plc: u32,
+    /// Playback pulls that found nothing to play while a client was connected.
+    pub starved: u32,
+    /// Playback pulls while a client was connected, after its first packet.
+    pub live: u32,
+}
+
+pub fn call_totals_line(t: &CallTotals) -> String {
+    format!(
+        "cap={} voiced={} sent={} played={} peak={} txdrop={} noclient={} recv={} plc={} starved={} live={}",
+        t.cap, t.voiced, t.sent, t.played, t.peak, t.txdrop, t.noclient, t.recv, t.plc, t.starved, t.live
+    )
+}
+
 /// The C daemon's strtok over one command line: `next` is strtok(.., " "), `rest` is strtok(NULL, "").
 pub struct Tokens<'a> {
     s: &'a str,
@@ -451,6 +481,27 @@ mod tests {
         );
         let idle = AudioWindow { jb_ms: -1.0, ..Default::default() };
         assert!(audio_5s_line(&idle).contains("| held: jb=-1.0ms reopen=0"));
+    }
+
+    #[test]
+    fn call_totals_use_the_c_keys_in_order() {
+        let t = CallTotals {
+            cap: 1200,
+            voiced: 800,
+            sent: 1190,
+            played: 1195,
+            peak: 21000,
+            txdrop: 3,
+            noclient: 7,
+            recv: 1180,
+            plc: 12,
+            starved: 5,
+            live: 1150,
+        };
+        assert_eq!(
+            call_totals_line(&t),
+            "cap=1200 voiced=800 sent=1190 played=1195 peak=21000 txdrop=3 noclient=7 recv=1180 plc=12 starved=5 live=1150"
+        );
     }
 
     #[test]

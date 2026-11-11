@@ -325,6 +325,8 @@ fn pcm_error(pcm: PcmPtr) -> String {
 // ------------------------------------------------------------------ client socket
 
 static CLIENT: Mutex<RawFd> = Mutex::new(-1);
+/// A client is connected: the per-call loss totals count only then (a hang-up's tail isn't a loss).
+static CLIENT_UP: AtomicBool = AtomicBool::new(false);
 static ALLOWED_UID: AtomicI32 = AtomicI32::new(-1);
 
 fn client_set(fd: RawFd) {
@@ -332,6 +334,7 @@ fn client_set(fd: RawFd) {
         let mut client = CLIENT.lock().unwrap();
         let old = *client;
         *client = fd;
+        CLIENT_UP.store(fd >= 0, Ordering::Relaxed);
         old
     };
     if old >= 0 && old != fd {
@@ -342,23 +345,26 @@ fn client_set(fd: RawFd) {
 fn client_send(buf: &[u8]) {
     let client = CLIENT.lock().unwrap();
     let fd = *client;
-    if fd >= 0 {
-        let n = unsafe {
-            libc::send(
-                fd,
-                buf.as_ptr() as *const c_void,
-                buf.len(),
-                libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL,
-            )
-        };
-        if n < 0 {
-            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-            if errno == libc::EAGAIN || errno == libc::EWOULDBLOCK {
-                // The client's socket had no room: its reader fell behind and this packet is dropped.
-                st_inc(|s| &mut s.txdrop);
-            } else {
-                crate::logw!("audio send: {}", std::io::Error::from_raw_os_error(errno));
-            }
+    if fd < 0 {
+        st_inc(|s| &mut s.tot_noclient);
+        return;
+    }
+    let n = unsafe {
+        libc::send(
+            fd,
+            buf.as_ptr() as *const c_void,
+            buf.len(),
+            libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL,
+        )
+    };
+    if n < 0 {
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+        if errno == libc::EAGAIN || errno == libc::EWOULDBLOCK {
+            // The client's socket had no room: its reader fell behind and this packet is dropped.
+            st_inc(|s| &mut s.txdrop);
+            st_inc(|s| &mut s.tot_txdrop);
+        } else {
+            crate::logw!("audio send: {}", std::io::Error::from_raw_os_error(errno));
         }
     }
 }
@@ -474,6 +480,12 @@ fn jb_put(seq: u16, data: &[u8]) {
         jb.playing = true;
     }
     st_inc(|s| &mut s.recv);
+    st_inc(|s| &mut s.tot_recv);
+}
+
+/// The jitter buffer saw this client's first packet: the per-call loss totals start there.
+fn jb_started() -> bool {
+    JB.lock().unwrap().started
 }
 
 fn jb_take(out: &mut [u8; MAX_PACKET], outlen: &mut usize, mode: &mut i32) -> bool {
@@ -503,6 +515,7 @@ fn jb_take(out: &mut [u8; MAX_PACKET], outlen: &mut usize, mode: &mut i32) -> bo
     } else {
         *mode = 2;
         st_inc(|s| &mut s.plc);
+        st_inc(|s| &mut s.tot_plc);
     }
     jb.next = next.wrapping_add(1);
     let d = jb_depth(&jb) as i32;
@@ -558,6 +571,12 @@ struct Stats {
     tot_sent: u32,
     tot_played: u32,
     tot_peak: i32,
+    tot_txdrop: u32,
+    tot_noclient: u32,
+    tot_recv: u32,
+    tot_plc: u32,
+    tot_starved: u32,
+    tot_live: u32,
 }
 
 const EMPTY_STATS: Stats = Stats {
@@ -580,6 +599,12 @@ const EMPTY_STATS: Stats = Stats {
     tot_sent: 0,
     tot_played: 0,
     tot_peak: 0,
+    tot_txdrop: 0,
+    tot_noclient: 0,
+    tot_recv: 0,
+    tot_plc: 0,
+    tot_starved: 0,
+    tot_live: 0,
 };
 
 static STATS: Mutex<Stats> = Mutex::new(EMPTY_STATS);
@@ -752,6 +777,7 @@ fn io_main() {
                     let mine = *client == fd;
                     if mine {
                         *client = -1;
+                        CLIENT_UP.store(false, Ordering::Relaxed);
                     }
                     mine
                 };
@@ -1066,6 +1092,12 @@ fn playback_main() {
         let mut len = 0usize;
         let mut mode = 2i32;
         let have = jb_take(&mut pkt, &mut len, &mut mode);
+        if CLIENT_UP.load(Ordering::Relaxed) && jb_started() {
+            st_inc(|s| &mut s.tot_live);
+            if !have {
+                st_inc(|s| &mut s.tot_starved);
+            }
+        }
         let samples: i32;
         if !have {
             samples = dframe;
@@ -1214,10 +1246,19 @@ pub fn tune_get() -> String {
 
 pub fn totals() -> String {
     let s = STATS.lock().unwrap();
-    format!(
-        "cap={} voiced={} sent={} played={} peak={}",
-        s.tot_cap, s.tot_voiced, s.tot_sent, s.tot_played, s.tot_peak
-    )
+    crate::protocol::call_totals_line(&crate::protocol::CallTotals {
+        cap: s.tot_cap,
+        voiced: s.tot_voiced,
+        sent: s.tot_sent,
+        played: s.tot_played,
+        peak: s.tot_peak,
+        txdrop: s.tot_txdrop,
+        noclient: s.tot_noclient,
+        recv: s.tot_recv,
+        plc: s.tot_plc,
+        starved: s.tot_starved,
+        live: s.tot_live,
+    })
 }
 
 pub fn call_begin(cfg: AudioCfg) {
@@ -1231,6 +1272,12 @@ pub fn call_begin(cfg: AudioCfg) {
         s.tot_sent = 0;
         s.tot_played = 0;
         s.tot_peak = 0;
+        s.tot_txdrop = 0;
+        s.tot_noclient = 0;
+        s.tot_recv = 0;
+        s.tot_plc = 0;
+        s.tot_starved = 0;
+        s.tot_live = 0;
     }
     *CFG.lock().unwrap() = cfg;
     jb_reset();
