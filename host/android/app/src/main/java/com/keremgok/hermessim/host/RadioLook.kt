@@ -84,6 +84,8 @@ object RadioLook {
         Thread {
             val l = look()
             Log.i(TAG, "BLE link: ${l.link.ifEmpty { l.hci }}")
+            // A look that got no answer says nothing: the next Hello looks again
+            if (l.hci.startsWith("no answer") || l.hci.startsWith("failed")) linkLooked = false
         }.apply { isDaemon = true }.start()
     }
 }
