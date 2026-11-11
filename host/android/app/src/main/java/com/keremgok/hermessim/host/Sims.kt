@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * SIM slots: per-SIM status for the client and the per-SIM settings it can change (line on/off, data
- * roaming, which SIM carries mobile data). The setters are @SystemApi: reached by reflection (system APIs
+ * roaming, network mode, which SIM carries mobile data). The setters are @SystemApi: reached by reflection (system APIs
  * are not hidden-API restricted) and allowed by MODIFY_PHONE_STATE, which the Magisk module grants us as a
  * privileged app. Calls and SMS pick their SIM per request (Dial.slot / SmsSend.slot), so the host's own
  * default call/SMS SIM does not matter.
@@ -148,6 +148,7 @@ object Sims {
                 .setDataRoaming(runCatching { tm.isDataRoamingEnabled }.getOrDefault(false))
                 .setVolte(volte(ctx, sub))
                 .setNumberE164(runCatching { number(ctx, info) }.getOrDefault(""))
+            NetworkModes.describe(tm, b)
         }
         val lock = lockOf(ctx, info.simSlotIndex)
         if (lock == Sim.Lock.UNLOCKED) attempts.remove(info.simSlotIndex)
@@ -235,27 +236,44 @@ object Sims {
      * Applies a client SetSim. Returns null on success or a short reason. A SIM seen for the first time gets
      * data roaming switched off (cost protection) before the client ever asks.
      */
-    fun apply(ctx: Context, s: SetSim): String? {
+    fun apply(ctx: Context, s: SetSim, inCall: Boolean = false): String? {
         val info = inserted(ctx).firstOrNull { it.simSlotIndex == s.slot } ?: return "no SIM in slot ${s.slot}"
         val sub = info.subscriptionId
-        val sm = ctx.getSystemService(SubscriptionManager::class.java)
+        return switchLine(ctx, s, info)
+            ?: (if (s.hasDataRoaming()) dataRoaming(ctx, s, sub) else null)
+            ?: (if (s.hasNetworkMode()) NetworkModes.set(ctx, sub, s.slot, s.networkMode, inCall) else null)
+            ?: (if (s.makeDefaultData) defaultData(ctx, s.slot, sub) else null)
+    }
+
+    private fun switchLine(ctx: Context, s: SetSim, info: SubscriptionInfo): String? {
+        if (!s.hasEnabled()) return null
         // An eSIM switched off may leave the list (nothing to switch back on from the iPhone, and the host has no screen)
-        if (s.hasEnabled() && !s.enabled && info.isEmbedded) return "an eSIM line can't be switched off from HermesSIM Host yet"
-        if (s.hasEnabled()) {
-            val ok = call { SubscriptionManager::class.java
-                .getMethod("setUiccApplicationsEnabled", Int::class.java, Boolean::class.java).invoke(sm, sub, s.enabled) }
-            if (!ok) return "this phone cannot switch the SIM ${if (s.enabled) "on" else "off"}"
-            Log.i(TAG, "SIM slot ${s.slot} switched ${if (s.enabled) "on" else "off"}")
+        if (!s.enabled && info.isEmbedded) return "an eSIM line can't be switched off from HermesSIM Host yet"
+        val word = if (s.enabled) "on" else "off"
+        return outcome(subscriptions(ctx, "setUiccApplicationsEnabled", info.subscriptionId, s.enabled),
+            "this phone cannot switch the SIM $word", "SIM slot ${s.slot} switched $word")
+    }
+
+    private fun dataRoaming(ctx: Context, s: SetSim, sub: Int): String? =
+        outcome(setDataRoaming(ctx, sub, s.dataRoaming), "could not change data roaming", "SIM slot ${s.slot} data roaming ${s.dataRoaming}")
+
+    private fun defaultData(ctx: Context, slot: Int, sub: Int): String? =
+        outcome(subscriptions(ctx, "setDefaultDataSubId", sub), "could not move mobile data to this SIM", "mobile data now on SIM slot $slot")
+
+    /** A SubscriptionManager system API taking the subscription id and, for a switch, the new state. */
+    private fun subscriptions(ctx: Context, method: String, sub: Int, on: Boolean? = null): Boolean {
+        val sm = ctx.getSystemService(SubscriptionManager::class.java)
+        val c = SubscriptionManager::class.java
+        return call {
+            if (on == null) c.getMethod(method, Int::class.java).invoke(sm, sub)
+            else c.getMethod(method, Int::class.java, Boolean::class.java).invoke(sm, sub, on)
         }
-        if (s.hasDataRoaming()) {
-            if (!setDataRoaming(ctx, sub, s.dataRoaming)) return "could not change data roaming"
-            Log.i(TAG, "SIM slot ${s.slot} data roaming ${s.dataRoaming}")
-        }
-        if (s.makeDefaultData) {
-            val ok = call { SubscriptionManager::class.java.getMethod("setDefaultDataSubId", Int::class.java).invoke(sm, sub) }
-            if (!ok) return "could not move mobile data to this SIM"
-            Log.i(TAG, "mobile data now on SIM slot ${s.slot}")
-        }
+    }
+
+    /** null when [ok] (logging [done]), else the [failure] reason for the client. */
+    private fun outcome(ok: Boolean, failure: String, done: String): String? {
+        if (!ok) return failure
+        Log.i(TAG, done)
         return null
     }
 

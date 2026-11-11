@@ -369,7 +369,7 @@ object Relay {
             Envelope.BodyCase.SMS_SEND -> SmsSender.send(app, env.smsSend)
             Envelope.BodyCase.SET_HOTSPOT_CONFIG -> hotspotConfig(d, env.seq, env.setHotspotConfig.config)
             Envelope.BodyCase.SET_SIM -> {
-                Sims.apply(app, env.setSim)?.let { error(d, env.seq, Error.Code.BAD_REQUEST, "SIM: $it") }
+                Sims.apply(app, env.setSim, CallRegistry.anyCall())?.let { error(d, env.seq, Error.Code.BAD_REQUEST, "SIM: $it") }
                 // Switching a SIM on/off or moving data takes a few seconds to settle.
                 main.postDelayed(pushStatus, 1500); main.postDelayed(pushStatus, 6000)
             }

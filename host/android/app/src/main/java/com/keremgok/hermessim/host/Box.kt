@@ -299,9 +299,11 @@ object Box {
             val tm = base.createForSubscriptionId(info.subscriptionId)
             if (android.os.Build.VERSION.SDK_INT < 31) return@runCatching setLteOnlyR(tm, info.subscriptionId, info.simSlotIndex, lteOnly)
             val set = TelephonyManager::class.java.getMethod("setAllowedNetworkTypesForReason", Int::class.java, Long::class.java)
-            val get = TelephonyManager::class.java.getMethod("getAllowedNetworkTypesForReason", Int::class.java)
-            val user = get.invoke(tm, 0) as Long                 // REASON_USER: what the user allows
-            set.invoke(tm, REASON_POWER, if (lteOnly) withoutNr(user) else user)
+            // Every type the modem has, not the user's choice: the modem intersects the reasons, and a POWER mask copied
+            // from the user's choice kept an old choice in force after the client changed the network mode.
+            val all = NetworkModes.supported(tm)
+            if (all == 0L) return@runCatching Log.w(TAG, "box: slot ${info.simSlotIndex} network types unknown: left alone")
+            set.invoke(tm, REASON_POWER, if (lteOnly) withoutNr(all) else all)
             Log.i(TAG, "box: slot ${info.simSlotIndex} ${if (lteOnly) "LTE only (idle)" else "5G allowed"}")
         }.onFailure { Log.w(TAG, "box: network types failed: ${it.cause ?: it}") }
     }
