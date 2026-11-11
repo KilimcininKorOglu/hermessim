@@ -34,6 +34,7 @@ object RemoteCall {
     private class Session(val turn: Turn, val daemon: LocalSocket) {
         @Volatile var alive = true
         @Volatile var rx = 0; @Volatile var tx = 0; @Volatile var bad = 0
+        var writeFails = 0                                  // the reader thread's only
         var refresh: java.util.concurrent.ScheduledFuture<*>? = null
         fun close() {
             alive = false
@@ -110,6 +111,7 @@ object RemoteCall {
                 if (plain == null) { s.bad++; return@start }
                 s.rx++
                 runCatching { out.write(plain) }                  // SEQPACKET: one write = one datagram
+                    .onFailure { e -> if (s.writeFails++ % 500 == 0) Log.w(TAG, "remote audio: daemon write failed (${s.writeFails}x): $e") }
             }
             val din = s.daemon.inputStream
             while (s.alive) {

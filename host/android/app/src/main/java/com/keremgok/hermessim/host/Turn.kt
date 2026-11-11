@@ -81,7 +81,8 @@ class Turn(private val server: InetSocketAddress, private val user: String, priv
     }
 
     private val sendBuf = ByteArray(2048)
-    /** One ChannelData datagram to the bound peer. */
+    private var sendFailures = 0                                          // guarded by sendBuf
+    /** One ChannelData datagram to the bound peer; a failure is logged at the first and every 500th (5 s of audio). */
     fun send(data: ByteArray) {
         val n = data.size
         synchronized(sendBuf) {
@@ -89,6 +90,7 @@ class Turn(private val server: InetSocketAddress, private val user: String, priv
             System.arraycopy(data, 0, sendBuf, 4, n)
             val padded = (4 + n + 3) and 3.inv()                               // UDP: padding optional, harmless
             runCatching { sock.send(DatagramPacket(sendBuf, padded, server)) }
+                .onFailure { e -> if (sendFailures++ % 500 == 0) Log.w(TAG, "turn send failed (${sendFailures}x): $e") }
         }
     }
 
