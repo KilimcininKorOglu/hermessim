@@ -34,6 +34,7 @@ object CallRegistry {
     private val byId = ConcurrentHashMap<String, Call>()
     private val clientUuids = ConcurrentHashMap<String, String>()   // call id -> client's CallKit UUID
     private val lastSent = ConcurrentHashMap<String, CallEvent>()       // send changes only
+    private val clock = CallStateClock<CallEvent.State>(System::currentTimeMillis)
     @Volatile private var pendingDial: Pair<String, Long>? = null     // client uuid, when requested
     private val owned: MutableSet<String> = ConcurrentHashMap.newKeySet()   // call ids the iPhone dialled or answered
     private lateinit var app: Context
@@ -105,6 +106,7 @@ object CallRegistry {
         val id = ids.remove(call) ?: return
         if (lastSent.remove(id)?.state != CallEvent.State.ENDED) Relay.callEvent(event(call, forceEnded = true, id = id))
         byId.remove(id)
+        clock.forget(id)
         clientUuids.remove(id)
         alertingIds.remove(id)
         if (!dialingPhase()) RootCallState.stop()
@@ -241,7 +243,7 @@ object CallRegistry {
             .setNumberE164(if (withheld) "" else e164(raw, slot))
             .setNumberWithheld(withheld)
             .setSlot(slot)
-            .setStateSinceMs(System.currentTimeMillis())
+            .setStateSinceMs(clock.since(callId, state))
             .setCause(if (state == CallEvent.State.ENDED) cause(d.disconnectCause) else CallEvent.DisconnectCause.CAUSE_UNSPECIFIED)
             .setClientCallUuid(clientUuids[callId].orEmpty())
             .setAlerting(state == CallEvent.State.DIALING && callId in alertingIds)
