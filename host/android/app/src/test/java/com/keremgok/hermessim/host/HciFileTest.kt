@@ -119,6 +119,8 @@ class HciFileTest {
         val s = HciRing.sending(recs)!!
         assertEquals(100.0, s.handed / s.seconds, 1.0); assertEquals(67.0, s.sent / s.seconds, 1.5)
         assertTrue(s.late)
+        assertEquals("1604 records over 13.0 s: 0 commands, 404 events (400 of them sent reports, 0 the chip maker's own), 1200 data out, 0 data in",
+            HciRing.size(recs))
     }
 
     @Test fun aRecordThatStopsBeingReadableSaysWhere() {

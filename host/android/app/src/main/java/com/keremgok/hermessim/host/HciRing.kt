@@ -260,7 +260,17 @@ object HciRing {
         return w.result()
     }
 
-    /** What the record holds, for when it says nothing about a link: "174 records over 10.2 s". */
-    fun size(recs: List<Rec>): String =
-        if (recs.isEmpty()) "0 records" else "${recs.size} records over ${"%.1f".format(java.util.Locale.ROOT, (recs.last().t - recs.first().t) / 1e6)} s"
+    /**
+     * What the record holds, by kind: "174 records over 10.2 s: 3 commands, 171 events (160 of them sent reports, 2 the
+     * chip maker's own), 0 data out, 0 data in". A phone maker's record may keep less than Android's, and what it leaves
+     * out decides what it can tell.
+     */
+    fun size(recs: List<Rec>): String {
+        if (recs.isEmpty()) return "0 records"
+        val events = recs.filter { it.kind == 4 }
+        return "${recs.size} records over ${"%.1f".format(java.util.Locale.ROOT, (recs.last().t - recs.first().t) / 1e6)} s: " +
+            "${recs.count { it.kind == 1 }} commands, ${events.size} events (${events.count { it.u8(0) == 0x13 }} of them sent reports, " +
+            "${events.count { it.u8(0) == 0xff }} the chip maker's own), " +
+            "${recs.count { it.kind == 2 && !it.fromChip }} data out, ${recs.count { it.kind == 2 && it.fromChip }} data in"
+    }
 }

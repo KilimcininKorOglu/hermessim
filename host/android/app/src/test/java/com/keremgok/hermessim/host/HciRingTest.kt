@@ -152,6 +152,6 @@ class HciRingTest {
 
     @Test fun nothingSent() {
         assertNull(HciRing.sending(HciRing.records(File().event(0.0, 0x0e, 1, 0x03, 0x0c, 0).bytes())))
-        assertEquals("1 records over 0.0 s", HciRing.size(HciRing.records(File().event(0.0, 0x0e, 1, 0x03, 0x0c, 0).bytes())))
+        assertEquals("1 records over 0.0 s: 0 commands, 1 events (0 of them sent reports, 0 the chip maker's own), 0 data out, 0 data in", HciRing.size(HciRing.records(File().event(0.0, 0x0e, 1, 0x03, 0x0c, 0).bytes())))
     }
 }

@@ -62,8 +62,9 @@ object RadioLook {
         links = HciRing.links(recs, links)
         HciRing.buffers(recs).let { if (it.isNotEmpty()) buffers = it }
         val s = HciRing.sending(recs)
+        // With how many links share the chip: its room is divided between them
         val link = (s?.let { links[it.handle] } ?: links.values.singleOrNull())?.text().orEmpty() +
-            if (buffers.isEmpty()) "" else ", chip room $buffers"
+            (if (buffers.isEmpty()) "" else ", chip room $buffers") + (if (links.size > 1) ", ${links.size} links up" else "")
         val layout = if (how.isEmpty()) "" else ", $how"
         return Look(scans, s, (s?.text() ?: "no data sent") + " | ${HciRing.size(recs)}$layout$stale", link.removePrefix(", "))
     }
