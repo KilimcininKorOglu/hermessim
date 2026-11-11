@@ -26,6 +26,7 @@ object RemoteLink {
     private const val TAG = "HermesSimHost"
     private const val EVENT = "client-m"
     private const val MAX_AGE_MS = 120_000L
+    private const val SEEN_NONCES = 4096
 
     private lateinit var app: Context
     private lateinit var onEnvelope: (ByteArray) -> Unit
@@ -40,8 +41,10 @@ object RemoteLink {
     @Volatile var online = false; private set      // subscribed to our room
     @Volatile var peerPresent = false; private set  // the iPhone is in the room
     private var channel = ""
+    // The relay lets each client connection send 120 events per 10 s, so two clients send up to
+    // 2 880 in the 120 s window; the cache must hold them all or a nonce in the window is forgotten.
     private val seen = object : LinkedHashMap<String, Long>(256, 0.75f, false) {
-        override fun removeEldestEntry(e: MutableMap.MutableEntry<String, Long>) = size > 512
+        override fun removeEldestEntry(e: MutableMap.MutableEntry<String, Long>) = size > SEEN_NONCES
     }
 
     val enabled get() = crypto != null
