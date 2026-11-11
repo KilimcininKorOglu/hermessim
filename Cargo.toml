@@ -17,6 +17,11 @@ libc = "0.2"
 cc = "1"
 cmake = "0.1"
 
+[lints.clippy]
+cognitive_complexity = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+
 [profile.release]
 panic = "abort"
 lto = "thin"
