@@ -17,9 +17,11 @@ import java.util.Calendar
 import java.util.zip.ZipFile
 
 /**
- * The host app updates itself from hermessim.keremgok.tr (protocol/README.md "Updates"): check daily, download and verify
- * the newest APK (sha256 + same signing key as the installed app), tell the iPhone, then install on the user's word
- * or by itself between 02:00 and 05:00 once the iPhone has been told. Never during a call. "Later" = one day.
+ * The host app updates itself from hermessim.keremgok.tr (protocol/README.md "Updates"): check daily. Automatic
+ * updates are a setting, off by default ([UpdateCore]). Off: a newer version is only offered (AVAILABLE), and the
+ * user's "Update now" downloads, verifies (sha256 + same signing key as the installed app) and installs it. On: the
+ * host downloads and verifies the newest APK by itself, tells the client, then installs on the user's word or by itself
+ * between 02:00 and 05:00 once the client has been told. Never during a call. "Later" = one day.
  * After an install the new version swaps in its own hermessimd if it differs (no call up).
  */
 object Updater {
@@ -37,6 +39,7 @@ object Updater {
 
     private fun prefs() = app.getSharedPreferences("updater", Context.MODE_PRIVATE)
     private val apkFile get() = File(app.filesDir, "update.apk")
+    private fun auto() = prefs().getBoolean("auto_update", false)
 
     fun start(ctx: Context, changed: () -> Unit) {
         app = ctx.applicationContext
@@ -59,7 +62,7 @@ object Updater {
         val a = available
         val b = Update.newBuilder()
             .setCurrentVersion(BuildConfigInfo.version(app)).setCurrentCode(myCode())
-            .setState(state).addAllNotes(notes).setError(error)
+            .setState(state).addAllNotes(notes).setError(error).setAutoUpdate(auto())
             .setDeferredUntilMs(prefs().getLong("deferred_until", 0)).setCheckedMs(prefs().getLong("checked", 0))
         if (a != null) b.setAvailableVersion(a.optString("version")).setAvailableCode(a.optInt("code"))
         return b.build()
@@ -81,9 +84,29 @@ object Updater {
                 prefs().edit().putLong("deferred_until", System.currentTimeMillis() + DAY_MS).apply()
                 Log.i(TAG, "update postponed by a day"); changed(); done(null)
             }
-            com.keremgok.hermessim.protocol.v1.UpdateAction.Action.INSTALL_NOW -> done(install())
+            com.keremgok.hermessim.protocol.v1.UpdateAction.Action.INSTALL_NOW -> done(installNow())
+            com.keremgok.hermessim.protocol.v1.UpdateAction.Action.AUTO_ON -> { setAuto(true); done(null) }
+            com.keremgok.hermessim.protocol.v1.UpdateAction.Action.AUTO_OFF -> { setAuto(false); done(null) }
             else -> done(null)
         }
+    }
+
+    /** Turning automatic updates on downloads a version that was only offered; turning them off keeps a download. */
+    private fun setAuto(on: Boolean) {
+        prefs().edit().putBoolean("auto_update", on).apply()
+        Log.i(TAG, "automatic updates ${if (on) "on" else "off"}")
+        val offered = available
+        if (on && state == Update.State.AVAILABLE && offered != null) download(offered) else changed()
+    }
+
+    /** "Update now": an offered version is downloaded and verified first. null = started, else why not. */
+    private fun installNow(): String? {
+        val offered = available
+        if (UpdateCore.installNow(state) == UpdateCore.Install.DOWNLOAD_THEN_INSTALL && offered != null) {
+            download(offered)
+            if (state != Update.State.READY) return error.ifEmpty { "no update ready" }
+        }
+        return install()
     }
 
     private fun myCode(): Int = runCatching {
@@ -128,7 +151,16 @@ object Updater {
         val latest = list?.optJSONObject(0)
         if (latest == null || latest.optInt("code") <= myCode()) { available = null; set(Update.State.IDLE); return }
         available = latest
-        download(latest)
+        when (UpdateCore.afterCheck(auto(), downloaded(latest))) {
+            UpdateCore.Next.DOWNLOAD -> download(latest)
+            UpdateCore.Next.OFFER -> set(Update.State.AVAILABLE)
+        }
+    }
+
+    /** [r]'s APK is already here (the download is kept when automatic updates are turned off). */
+    private fun downloaded(r: JSONObject): Boolean {
+        val sha = r.optJSONObject("apk")?.optString("sha256").orEmpty()
+        return sha.isNotEmpty() && apkFile.exists() && sha256(apkFile) == sha
     }
 
     private fun download(r: JSONObject) {
@@ -191,18 +223,21 @@ object Updater {
         return why
     }
 
-    /** Night window: install a ready update the iPhone has been told about, unless postponed, never mid-call. */
+    /** Daily check; night window: with automatic updates on, install a ready update the client has been told about
+     *  (an hour ago at least: 18 Oct it installed 4 min after telling), unless postponed, never mid-call. */
     private val nightly = object : Runnable {
         override fun run() {
             h.postDelayed(this, 10 * 60_000)
             val now = System.currentTimeMillis()
             if (now - prefs().getLong("checked", 0) > DAY_MS) check()
-            val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
             val code = available?.optInt("code") ?: return
-            // Told at least an hour ago, so the user had time to say "Later" (18 Oct: it installed 4 min after telling).
-            val toldAt = prefs().getLong("informed_at_$code", 0)
-            if (state == Update.State.READY && hour in 2..4 && now >= prefs().getLong("deferred_until", 0) &&
-                prefs().getBoolean("informed_$code", false) && toldAt > 0 && now - toldAt >= 3600_000L) {
+            val night = UpdateCore.Night(
+                auto = auto(), ready = state == Update.State.READY,
+                hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY), nowMs = now,
+                deferredUntilMs = prefs().getLong("deferred_until", 0),
+                toldAtMs = if (prefs().getBoolean("informed_$code", false)) prefs().getLong("informed_at_$code", 0) else 0,
+            )
+            if (UpdateCore.nightInstall(night)) {
                 Log.i(TAG, "night window: installing the update")
                 install()
             }
