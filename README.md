@@ -52,7 +52,7 @@ This repository is the **host side** (the Android app, its root daemon and Magis
 
 ### Updates and support
 
-- **Updates.** The host downloads its updates and installs one when the client says so, or by itself between 02:00 and 05:00 when no call is up.
+- **Updates.** The host checks for a new version every day. By default it downloads and installs one only when the client says so. With *Install updates automatically* turned on in the client, it downloads new versions by itself and installs them between 02:00 and 05:00 when no call is up.
 - **Compatibility check.** Before root, the host app checks the phone against the support table.
 - **Diagnostics.** The client can ask for the host's recent log with personal data scrubbed.
 - **Giving the phone back.** *Stop using this phone as a host* restores its settings, sounds and default apps, removes HermesSIM and restarts the phone (Magisk stays).
