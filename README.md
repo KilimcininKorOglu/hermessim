@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.svg" width="128" alt="HermesSIM host logo: a yellow cat holding a phone"></p>
+
 # HermesSIM
 
 **Turn an old Android phone into a SIM box for your iPhone.** Put your SIM in a spare rooted Android phone, leave
