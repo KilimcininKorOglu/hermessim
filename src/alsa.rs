@@ -382,6 +382,42 @@ pub fn pcm_negotiate(
     want_rate: i32,
     want_ch: i32,
 ) -> Option<(i32, i32)> {
+    let p = pcm_refine(card, device, playback)?;
+    let dir = if playback { "out" } else { "in" };
+    let ri = &p.intervals[PCM_PARAM_RATE - PCM_PARAM_FIRST_INTERVAL];
+    let rate = match crate::protocol::accepted_rate(want_rate, ri.min, ri.max) {
+        Some(best) if best != want_rate => {
+            crate::logw!(
+                "pcm {} {}: profile rate {} not accepted now ({}..{} Hz): using {}",
+                device,
+                dir,
+                want_rate,
+                ri.min,
+                ri.max,
+                best
+            );
+            best
+        }
+        _ => want_rate,
+    };
+    let ci = &p.intervals[PCM_PARAM_CHANNELS - PCM_PARAM_FIRST_INTERVAL];
+    let ch = crate::protocol::accepted_channels(want_ch, ci.min, ci.max);
+    if ch != want_ch {
+        crate::logw!(
+            "pcm {} {}: {} channel(s) not accepted: using {}",
+            device,
+            dir,
+            want_ch,
+            ch
+        );
+    }
+    // The log names the PCM's own count; at most stereo is played.
+    Some((rate, ch.min(2)))
+}
+
+/// HW_REFINE on the PCM device node: the parameter space it accepts right now, or None when the
+/// node is busy or absent.
+fn pcm_refine(card: i32, device: i32, playback: bool) -> Option<PcmHwParams> {
     let path = format!(
         "/dev/snd/pcmC{}D{}{}",
         card,
@@ -401,56 +437,7 @@ pub fn pcm_negotiate(
     let mut p = PcmHwParams::full();
     let ok = ioctl_ptr(fd, PCM_HW_REFINE, &mut p) == 0;
     unsafe { libc::close(fd) };
-    if !ok {
-        return None;
-    }
-    let mut rate = want_rate;
-    let mut ch = want_ch;
-    let ri = &p.intervals[PCM_PARAM_RATE - PCM_PARAM_FIRST_INTERVAL];
-    if (want_rate as u32) < ri.min || (want_rate as u32) > ri.max {
-        let opus = [48000, 16000, 24000, 12000, 8000];
-        let mut best = 0;
-        for &r in &opus {
-            if (r as u32) < ri.min || (r as u32) > ri.max {
-                continue;
-            }
-            if best == 0 || (r - want_rate).abs() < (best - want_rate).abs() {
-                best = r;
-            }
-        }
-        if best != 0 {
-            rate = best;
-            crate::logw!(
-                "pcm {} {}: profile rate {} not accepted now ({}..{} Hz): using {}",
-                device,
-                if playback { "out" } else { "in" },
-                want_rate,
-                ri.min,
-                ri.max,
-                best
-            );
-        }
-    }
-    let ci = &p.intervals[PCM_PARAM_CHANNELS - PCM_PARAM_FIRST_INTERVAL];
-    if (want_ch as u32) < ci.min {
-        ch = ci.min as i32;
-    } else if (want_ch as u32) > ci.max {
-        ch = ci.max as i32;
-    }
-    if ch != want_ch {
-        crate::logw!(
-            "pcm {} {}: {} channel(s) not accepted: using {}",
-            device,
-            if playback { "out" } else { "in" },
-            want_ch,
-            ch
-        );
-    }
-    // The log names the PCM's own count; at most stereo is played.
-    if ch > 2 {
-        ch = 2;
-    }
-    Some((rate, ch))
+    ok.then_some(p)
 }
 
 const _: () = {

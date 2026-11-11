@@ -10,49 +10,56 @@ pub const ESCAPE_WINDOW_NS: i64 = 5_000_000_000;
 /// the start of `s` (0 when there were no digits). Out-of-range values saturate like strtoll+ERANGE.
 pub fn c_strtoll(s: &str) -> (i64, usize) {
     let b = s.as_bytes();
-    let mut i = 0;
-    while i < b.len() && matches!(b[i], b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r') {
-        i += 1;
-    }
-    let mut neg = false;
-    if i < b.len() && (b[i] == b'+' || b[i] == b'-') {
-        neg = b[i] == b'-';
-        i += 1;
-    }
-    let mut radix = 10u32;
-    if i + 2 < b.len()
-        && b[i] == b'0'
-        && (b[i + 1] == b'x' || b[i + 1] == b'X')
-        && b[i + 2].is_ascii_hexdigit()
-    {
-        radix = 16;
-        i += 2;
-    } else if i < b.len() && b[i] == b'0' {
-        radix = 8;
-    }
-    let digits = i;
-    let mut value: i128 = 0;
-    while i < b.len() {
-        let d = match b[i] {
-            b'0'..=b'9' => (b[i] - b'0') as i128,
-            b'a'..=b'f' => (b[i] - b'a' + 10) as i128,
-            b'A'..=b'F' => (b[i] - b'A' + 10) as i128,
-            _ => break,
-        };
-        if d >= radix as i128 {
-            break;
-        }
-        value = value.saturating_mul(radix as i128).saturating_add(d);
-        i += 1;
-    }
-    if i == digits {
+    let (neg, start) = sign_after_space(b);
+    let (radix, digits) = base0_radix(b, start);
+    let (mut value, end) = digit_run(b, digits, radix);
+    if end == digits {
         return (0, 0);
     }
     if neg {
         value = -value;
     }
     let clamped = value.clamp(i64::MIN as i128, i64::MAX as i128) as i64;
-    (clamped, i)
+    (clamped, end)
+}
+
+/// Skip C isspace() bytes and one sign: whether the sign is '-', and the index after it.
+fn sign_after_space(b: &[u8]) -> (bool, usize) {
+    let mut i = b
+        .iter()
+        .position(|c| !matches!(c, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r'))
+        .unwrap_or(b.len());
+    let neg = b.get(i) == Some(&b'-');
+    if matches!(b.get(i), Some(b'+' | b'-')) {
+        i += 1;
+    }
+    (neg, i)
+}
+
+/// Base 0: "0x" before a hex digit is 16 (skipped), a leading '0' is 8 (kept as a digit), else 10.
+fn base0_radix(b: &[u8], i: usize) -> (u32, usize) {
+    let hex = b.get(i) == Some(&b'0')
+        && matches!(b.get(i + 1), Some(b'x' | b'X'))
+        && b.get(i + 2).is_some_and(u8::is_ascii_hexdigit);
+    if hex {
+        (16, i + 2)
+    } else if b.get(i) == Some(&b'0') {
+        (8, i)
+    } else {
+        (10, i)
+    }
+}
+
+/// Saturating value of the digits of `radix` from `i`, and the index after the last one.
+fn digit_run(b: &[u8], mut i: usize, radix: u32) -> (i128, usize) {
+    let mut value: i128 = 0;
+    while let Some(d) = b.get(i).and_then(|c| (*c as char).to_digit(radix)) {
+        value = value
+            .saturating_mul(radix as i128)
+            .saturating_add(d as i128);
+        i += 1;
+    }
+    (value, i)
 }
 
 /// strtoll(s, NULL, 0): no digits gives 0, trailing text is ignored.
@@ -60,27 +67,42 @@ pub fn c_strtoll_prefix(s: &str) -> i64 {
     c_strtoll(s).0
 }
 
+/// The rate a PCM with the [min, max] rate interval takes: `want` when inside it, else the Opus
+/// rate (48000, 16000, 24000, 12000, 8000) inside it nearest to `want`, else None (the caller keeps `want` and the open fails as before).
+pub fn accepted_rate(want: i32, min: u32, max: u32) -> Option<i32> {
+    let inside = |r: i32| (r as u32) >= min && (r as u32) <= max;
+    if inside(want) {
+        return Some(want);
+    }
+    let mut best: Option<i32> = None;
+    for r in [48000, 16000, 24000, 12000, 8000]
+        .into_iter()
+        .filter(|&r| inside(r))
+    {
+        if best.is_none_or(|b| (r - want).abs() < (b - want).abs()) {
+            best = Some(r);
+        }
+    }
+    best
+}
+
+/// `want` channels clamped into the PCM's [min, max] channel interval.
+pub fn accepted_channels(want: i32, min: u32, max: u32) -> i32 {
+    if (want as u32) < min {
+        min as i32
+    } else if (want as u32) > max {
+        max as i32
+    } else {
+        want
+    }
+}
+
 /// atoi: base 10 only, prefix parse, trailing text ignored.
 pub fn c_atoi(s: &str) -> i32 {
     let b = s.as_bytes();
-    let mut i = 0;
-    while i < b.len() && matches!(b[i], b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r') {
-        i += 1;
-    }
-    let mut neg = false;
-    if i < b.len() && (b[i] == b'+' || b[i] == b'-') {
-        neg = b[i] == b'-';
-        i += 1;
-    }
-    let digits = i;
-    let mut value: i128 = 0;
-    while i < b.len() && b[i].is_ascii_digit() {
-        value = value
-            .saturating_mul(10)
-            .saturating_add((b[i] - b'0') as i128);
-        i += 1;
-    }
-    if i == digits {
+    let (neg, digits) = sign_after_space(b);
+    let (mut value, end) = digit_run(b, digits, 10);
+    if end == digits {
         return 0;
     }
     if neg {
@@ -529,6 +551,10 @@ mod tests {
         assert!(!valid_pkg("bad pkg"));
         assert!(valid_role("android.app.role.SMS"));
         assert!(!valid_role("android.app.role.HOME"));
+    }
+
+    #[test]
+    fn validates_uids_and_sessions() {
         assert_eq!(valid_uid("10123"), Some(10123));
         assert_eq!(valid_uid(""), None);
         assert_eq!(valid_uid("10x"), None);
@@ -581,6 +607,12 @@ mod tests {
         assert_eq!(c_strtoll("08"), (0, 1));
         assert_eq!(c_strtoll("  -7x"), (-7, 4));
         assert_eq!(c_strtoll("x"), (0, 0));
+        assert_eq!(c_strtoll("+0Xff"), (255, 5));
+        assert_eq!(c_strtoll("99999999999999999999"), (i64::MAX, 20));
+    }
+
+    #[test]
+    fn c_prefix_and_atoi_conversions_match() {
         assert_eq!(c_strtoll_prefix("12junk"), 12);
         assert_eq!(c_atoi("0x10"), 0);
         assert_eq!(c_atoi("  -42x"), -42);
@@ -743,7 +775,10 @@ mod tests {
         assert_eq!(t.next(), Some("SET"));
         assert_eq!(t.next(), Some("mute.tx"));
         assert_eq!(t.rest(), Some(" Voice Tx"));
+    }
 
+    #[test]
+    fn a_missing_control_name_is_none() {
         let mut t = Tokens::new("HAS");
         assert_eq!(t.next(), Some("HAS"));
         assert_eq!(t.rest(), None);
@@ -751,6 +786,22 @@ mod tests {
         let mut t = Tokens::new("HAS ");
         assert_eq!(t.next(), Some("HAS"));
         assert_eq!(t.rest(), None);
+    }
+
+    #[test]
+    fn a_pcm_rate_falls_back_to_the_nearest_opus_rate() {
+        assert_eq!(accepted_rate(16000, 8000, 48000), Some(16000));
+        assert_eq!(accepted_rate(44100, 8000, 16000), Some(16000));
+        assert_eq!(accepted_rate(4000, 12000, 48000), Some(12000));
+        assert_eq!(accepted_rate(44100, 44100, 44100), Some(44100));
+        assert_eq!(accepted_rate(32000, 44100, 44100), None);
+    }
+
+    #[test]
+    fn pcm_channels_are_clamped_into_the_interval() {
+        assert_eq!(accepted_channels(1, 2, 8), 2);
+        assert_eq!(accepted_channels(4, 1, 2), 2);
+        assert_eq!(accepted_channels(2, 1, 8), 2);
     }
 
     #[test]
