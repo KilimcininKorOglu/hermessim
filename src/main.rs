@@ -36,7 +36,7 @@ mod daemon {
 
     use crate::boxmode::{self, BoxState, BOX_MAX_KEYDEVS};
     use crate::mixer::Mixer;
-    use crate::protocol::{c_atoi, valid_iface, valid_uid};
+    use crate::protocol::{c_atoi, valid_iface, valid_uid, Tokens};
 
     const VERSION: &str = "0.1";
     const SOCK_NAME: &[u8] = b"hermessimd";
@@ -171,45 +171,6 @@ mod daemon {
         }
     }
 
-    struct Tokens<'a> {
-        s: &'a str,
-        pos: usize,
-    }
-
-    impl<'a> Tokens<'a> {
-        fn new(s: &'a str) -> Self {
-            Self { s, pos: 0 }
-        }
-
-        fn next(&mut self) -> Option<&'a str> {
-            let b = self.s.as_bytes();
-            let mut i = self.pos;
-            while i < b.len() && b[i] == b' ' {
-                i += 1;
-            }
-            if i == b.len() {
-                self.pos = b.len();
-                return None;
-            }
-            let start = i;
-            while i < b.len() && b[i] != b' ' {
-                i += 1;
-            }
-            self.pos = i;
-            Some(&self.s[start..i])
-        }
-
-        /// strtok(NULL, ""): the rest of the line from just after the token's delimiter.
-        fn rest(&mut self) -> Option<&'a str> {
-            if self.pos + 1 >= self.s.len() {
-                return None;
-            }
-            let rest = &self.s[self.pos + 1..];
-            self.pos = self.s.len();
-            Some(rest)
-        }
-    }
-
     fn handle_line(c: &mut Conn, line: &str, mixer: &mut Mixer, boxm: &mut BoxState) {
         let mut t = Tokens::new(line);
         let Some(cmd) = t.next() else { return };
@@ -284,7 +245,7 @@ mod daemon {
                 }
             }
             "HAS" => {
-                let Some(name) = t.next() else {
+                let Some(name) = t.rest() else {
                     c.reply("ERR no such control".into());
                     return;
                 };

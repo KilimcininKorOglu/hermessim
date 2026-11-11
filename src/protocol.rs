@@ -216,6 +216,47 @@ pub fn netblock_script(uid: i32, on: bool) -> String {
     )
 }
 
+/// The C daemon's strtok over one command line: `next` is strtok(.., " "), `rest` is strtok(NULL, "").
+pub struct Tokens<'a> {
+    s: &'a str,
+    pos: usize,
+}
+
+impl<'a> Tokens<'a> {
+    pub fn new(s: &'a str) -> Self {
+        Self { s, pos: 0 }
+    }
+
+    /// The next space-separated word; leading spaces are skipped.
+    pub fn next(&mut self) -> Option<&'a str> {
+        let b = self.s.as_bytes();
+        let mut i = self.pos;
+        while i < b.len() && b[i] == b' ' {
+            i += 1;
+        }
+        if i == b.len() {
+            self.pos = b.len();
+            return None;
+        }
+        let start = i;
+        while i < b.len() && b[i] != b' ' {
+            i += 1;
+        }
+        self.pos = i;
+        Some(&self.s[start..i])
+    }
+
+    /// The rest of the line from just after the last word's delimiter, spaces kept: control names contain spaces.
+    pub fn rest(&mut self) -> Option<&'a str> {
+        if self.pos + 1 >= self.s.len() {
+            return None;
+        }
+        let rest = &self.s[self.pos + 1..];
+        self.pos = self.s.len();
+        Some(rest)
+    }
+}
+
 /// The volume escape gesture: six presses, +1 up and -1 down, inside five seconds.
 #[derive(Default)]
 pub struct EscapeGesture {
@@ -354,6 +395,27 @@ mod tests {
             fired |= g.push(up, i as i64 * 1_000_000_001);
         }
         assert!(!fired);
+    }
+
+    #[test]
+    fn a_control_name_is_the_rest_of_the_line() {
+        let mut t = Tokens::new("HAS Voice Tx Device Mute");
+        assert_eq!(t.next(), Some("HAS"));
+        assert_eq!(t.rest(), Some("Voice Tx Device Mute"));
+        assert_eq!(t.next(), None);
+
+        let mut t = Tokens::new("  SET  mute.tx  Voice Tx");
+        assert_eq!(t.next(), Some("SET"));
+        assert_eq!(t.next(), Some("mute.tx"));
+        assert_eq!(t.rest(), Some(" Voice Tx"));
+
+        let mut t = Tokens::new("HAS");
+        assert_eq!(t.next(), Some("HAS"));
+        assert_eq!(t.rest(), None);
+
+        let mut t = Tokens::new("HAS ");
+        assert_eq!(t.next(), Some("HAS"));
+        assert_eq!(t.rest(), None);
     }
 
     #[test]
