@@ -8,30 +8,21 @@ import android.util.Log
  * is scanning. Both go into every call's numbers (CallAudioCheck), so a report says them without anyone being asked.
  *
  * A Galaxy A13 host (MediaTek) handed the caller's audio to its Bluetooth on time and the phone still got it late and
- * in bursts, about two thirds of real time for two seconds, then the rest at once (10 Nov 2026). One frame a packet or
- * two made no difference, and the phone's audio reached the A13 smoothly in the same calls: the limit sits in what the
- * A13's radio sends, below anything the host could see. Two things an app can still look at are which radio mode the
- * link uses (the host asked every phone for the 2M one and never logged the answer; the one host that sounded clean
- * with the same phone can't do 2M) and whether something on the host scans for Bluetooth devices during the call.
+ * in bursts, or half of it (7 to 10 Nov 2026). One frame a packet or two made no difference, and the phone's audio
+ * reached the A13 smoothly in the same calls: the limit sits in what the A13's radio sends, below anything the host
+ * could see. Asking that host for the slower 1M mode did not help (the link really ran on it, nobody scanned, and the
+ * phone got 59%), so every host asks for 2M again.
  */
 object LinkRadio {
     private const val TAG = "HermesSimHost"
     // BluetoothDevice.PHY_LE_*: 1 = 1M, 2 = 2M, 3 = coded; the masks to ask with: 1 = 1M, 2 = 2M
     const val MASK_1M = 1
     const val MASK_2M = 2
-    private val MTK = Regex("""\bmt\d{4}""", RegexOption.IGNORE_CASE)
 
     fun phyName(phy: Int): String = when (phy) { 1 -> "1M"; 2 -> "2M"; 3 -> "coded"; else -> "?" }
 
-    /**
-     * The radio mode to ask a link for, from the chip's names: 1M on MediaTek chips, 2M elsewhere. A test (10 Nov 2026):
-     * if a MediaTek host's calls are clean on 1M, its 2M sending was the trouble; the call's numbers say which mode the
-     * call really ran on either way. Pure (LinkRadioTest).
-     */
-    fun wantedMask(names: List<String>): Int =
-        if (names.any { it.contains("mediatek", ignoreCase = true) || MTK.containsMatchIn(it) }) MASK_1M else MASK_2M
-
-    val mask: Int by lazy { wantedMask(listOf(Compat.soc(), Compat.prop("ro.board.platform"), android.os.Build.HARDWARE)) }
+    /** The radio mode every link is asked for: 2M, the faster one. */
+    const val mask = MASK_2M
 
     /** The mode the link last reported, sending/receiving ("2M/2M"); "?" until the stack says. */
     @Volatile var inUse = "?"; private set
