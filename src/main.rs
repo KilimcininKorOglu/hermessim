@@ -599,11 +599,13 @@ mod daemon {
         let waitmask = unsafe { install_signals() };
 
         let mut mixer = Mixer::new(card, ctl);
-        mixer.safe = safe;
         mixer.profile.loopback = loopback;
         let mut boxm = BoxState::new();
         boxm.charge_init();
+        // One safe flag, as in the C daemon: --safe and a crash during a mixer write both stop every write.
+        mixer.crumb.safe = safe;
         mixer.crumb.start();
+        mixer.safe = mixer.crumb.safe;
         mixer.clear_device_mutes();
         if !mixer.safe {
             mixer.call_orig_restore();
