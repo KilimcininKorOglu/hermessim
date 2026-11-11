@@ -8,19 +8,27 @@ pub const ESCAPE_WINDOW_NS: i64 = 5_000_000_000;
 
 /// strtoll(s, &end, 0) with a prefix parse: returns the value and how many bytes were consumed from
 /// the start of `s` (0 when there were no digits). Out-of-range values saturate like strtoll+ERANGE.
-pub fn c_strtoll(s: &str) -> (i64, usize) {
-    let b = s.as_bytes();
+pub fn c_strtoll<S: AsRef<[u8]> + ?Sized>(s: &S) -> (i64, usize) {
+    match signed_digits(s.as_ref(), true) {
+        Some((value, end)) => (value.clamp(i64::MIN as i128, i64::MAX as i128) as i64, end),
+        None => (0, 0),
+    }
+}
+
+/// strtol's scan: spaces, one sign, then the digits of base 0 (`base0`) or base 10. The signed
+/// value and the index after the last digit; None when there is no digit.
+fn signed_digits(b: &[u8], base0: bool) -> Option<(i128, usize)> {
     let (neg, start) = sign_after_space(b);
-    let (radix, digits) = base0_radix(b, start);
-    let (mut value, end) = digit_run(b, digits, radix);
+    let (radix, digits) = if base0 {
+        base0_radix(b, start)
+    } else {
+        (10, start)
+    };
+    let (value, end) = digit_run(b, digits, radix);
     if end == digits {
-        return (0, 0);
+        return None;
     }
-    if neg {
-        value = -value;
-    }
-    let clamped = value.clamp(i64::MIN as i128, i64::MAX as i128) as i64;
-    (clamped, end)
+    Some((if neg { -value } else { value }, end))
 }
 
 /// Skip C isspace() bytes and one sign: whether the sign is '-', and the index after it.
@@ -63,7 +71,7 @@ fn digit_run(b: &[u8], mut i: usize, radix: u32) -> (i128, usize) {
 }
 
 /// strtoll(s, NULL, 0): no digits gives 0, trailing text is ignored.
-pub fn c_strtoll_prefix(s: &str) -> i64 {
+pub fn c_strtoll_prefix<S: AsRef<[u8]> + ?Sized>(s: &S) -> i64 {
     c_strtoll(s).0
 }
 
@@ -98,23 +106,36 @@ pub fn accepted_channels(want: i32, min: u32, max: u32) -> i32 {
 }
 
 /// atoi: base 10 only, prefix parse, trailing text ignored.
-pub fn c_atoi(s: &str) -> i32 {
-    let b = s.as_bytes();
-    let (neg, digits) = sign_after_space(b);
-    let (mut value, end) = digit_run(b, digits, 10);
-    if end == digits {
-        return 0;
-    }
-    if neg {
-        value = -value;
-    }
-    value.clamp(i32::MIN as i128, i32::MAX as i128) as i32
+pub fn c_atoi<S: AsRef<[u8]> + ?Sized>(s: &S) -> i32 {
+    signed_digits(s.as_ref(), false).map_or(0, |(value, _)| {
+        value.clamp(i32::MIN as i128, i32::MAX as i128) as i32
+    })
 }
 
 /// A complete base-0 number: no trailing text, at least one digit.
-pub fn parse_c_int(s: &str) -> Option<i64> {
+pub fn parse_c_int<S: AsRef<[u8]> + ?Sized>(s: &S) -> Option<i64> {
     let (value, used) = c_strtoll(s);
-    (used != 0 && used == s.len()).then_some(value)
+    (used != 0 && used == s.as_ref().len()).then_some(value)
+}
+
+/// Bytes from the client or the kernel shown in a log line or a reply built as text: invalid
+/// UTF-8 becomes U+FFFD. Names themselves are kept and compared as bytes, as the C daemon does.
+pub fn shown(b: &[u8]) -> std::borrow::Cow<'_, str> {
+    String::from_utf8_lossy(b)
+}
+
+/// A token that must be ASCII text (an interface, a role, a package): invalid UTF-8 is "", which
+/// every validator rejects, as the C daemon rejects such bytes.
+pub fn ascii_arg(b: &[u8]) -> &str {
+    std::str::from_utf8(b).unwrap_or("")
+}
+
+/// The part of `s` before the first `sep` and the part after it ("" when there is none).
+fn split_once_byte(s: &[u8], sep: u8) -> (&[u8], &[u8], bool) {
+    match s.iter().position(|&c| c == sep) {
+        Some(c) => (&s[..c], &s[c + 1..], true),
+        None => (s, &[], false),
+    }
 }
 
 /// Why a `SET call` value list was refused.
@@ -126,16 +147,14 @@ pub enum CallValuesError {
 
 /// "v1[,v2...]": up to MAX_VALUES complete base-0 numbers; an empty list and one trailing comma
 /// are accepted, an empty value between commas is not.
-pub fn parse_call_values(mut rest: &str) -> Result<Vec<i64>, CallValuesError> {
+pub fn parse_call_values<S: AsRef<[u8]> + ?Sized>(s: &S) -> Result<Vec<i64>, CallValuesError> {
+    let mut rest = s.as_ref();
     let mut values = Vec::new();
     while !rest.is_empty() {
         if values.len() == MAX_VALUES {
             return Err(CallValuesError::TooMany);
         }
-        let (token, next) = match rest.find(',') {
-            Some(c) => (&rest[..c], &rest[c + 1..]),
-            None => (rest, ""),
-        };
+        let (token, next, _) = split_once_byte(rest, b',');
         values.push(parse_c_int(token).ok_or(CallValuesError::NotANumber)?);
         rest = next;
     }
@@ -156,24 +175,24 @@ pub fn last_log_time(tail: &[u8]) -> Option<String> {
 
 /// "name=v1[,v2...]" from `SET call`; returns the name and up to MAX_VALUES values, or None on
 /// exactly the cases the C rejects (no '=', empty name, too long, non-number, more than four).
-pub fn parse_call_spec(spec: &str) -> Option<(&str, Vec<i64>)> {
-    parse_spec(spec, |raw| parse_call_values(raw).ok())
+pub fn parse_call_spec(spec: &[u8]) -> Option<(&[u8], Vec<i64>)> {
+    parse_named(spec, b'=', |raw| parse_call_values(raw).ok())
 }
 
 /// "name=value" from `SET silence`; exactly one complete number, as the C requires.
-pub fn parse_silence_spec(spec: &str) -> Option<(&str, i64)> {
-    parse_spec(spec, parse_c_int)
+pub fn parse_silence_spec(spec: &[u8]) -> Option<(&[u8], i64)> {
+    parse_named(spec, b'=', parse_c_int)
 }
 
-/// "name=rest" split at the last '=': a non-empty name shorter than NAME_LEN, and `value` of
-/// the rest.
-fn parse_spec<T>(spec: &str, value: impl Fn(&str) -> Option<T>) -> Option<(&str, T)> {
-    let eq = spec.rfind('=')?;
-    let name = &spec[..eq];
-    if eq == 0 || name.len() >= NAME_LEN {
+/// "name<sep>rest" split at the last `sep`: a non-empty name shorter than NAME_LEN, and `value`
+/// of the rest.
+fn parse_named<T>(s: &[u8], sep: u8, value: impl Fn(&[u8]) -> Option<T>) -> Option<(&[u8], T)> {
+    let at = s.iter().rposition(|&c| c == sep)?;
+    let name = &s[..at];
+    if at == 0 || name.len() >= NAME_LEN {
         return None;
     }
-    Some((name, value(&spec[eq + 1..])?))
+    Some((name, value(&s[at + 1..])?))
 }
 
 pub fn valid_iface(iface: &str) -> bool {
@@ -353,73 +372,48 @@ impl CapClock {
 
 /// Enum item names "a|b|c", cut at a whole item before `max_len`. The separator goes before every item but the
 /// first index, as the C daemon writes it, so a first item the kernel would not describe still leaves its "|".
-pub fn enum_join(items: &[(u32, String)], max_len: usize) -> String {
-    let mut out = String::new();
+pub fn enum_join(items: &[(u32, Vec<u8>)], max_len: usize) -> Vec<u8> {
+    let mut out = Vec::new();
     for (index, name) in items {
-        let piece = if *index > 0 {
-            format!("|{}", name)
-        } else {
-            name.clone()
-        };
-        if out.len() + piece.len() >= max_len {
+        let sep = usize::from(*index > 0);
+        if out.len() + sep + name.len() >= max_len {
             break;
         }
-        out.push_str(&piece);
+        if sep == 1 {
+            out.push(b'|');
+        }
+        out.extend_from_slice(name);
     }
     out
 }
 
 /// A whole base-10 number, strtoll-style: leading whitespace and a sign are allowed, trailing text is not.
-pub fn parse_dec_full(s: &str) -> Option<i64> {
-    let (value, used) = c_strtoll_base10(s);
-    (used != 0 && used == s.len()).then_some(value)
-}
-
-fn c_strtoll_base10(s: &str) -> (i64, usize) {
-    let b = s.as_bytes();
-    let mut i = 0;
-    while i < b.len() && matches!(b[i], b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r') {
-        i += 1;
-    }
-    let mut neg = false;
-    if i < b.len() && (b[i] == b'+' || b[i] == b'-') {
-        neg = b[i] == b'-';
-        i += 1;
-    }
-    let digits = i;
-    let mut value: i128 = 0;
-    while i < b.len() && b[i].is_ascii_digit() {
-        value = value
-            .saturating_mul(10)
-            .saturating_add((b[i] - b'0') as i128);
-        i += 1;
-    }
-    if i == digits {
-        return (0, 0);
-    }
-    if neg {
-        value = -value;
-    }
-    (value.clamp(i64::MIN as i128, i64::MAX as i128) as i64, i)
+pub fn parse_dec_full<S: AsRef<[u8]> + ?Sized>(s: &S) -> Option<i64> {
+    let b = s.as_ref();
+    let (value, end) = signed_digits(b, false)?;
+    (end == b.len()).then(|| value.clamp(i64::MIN as i128, i64::MAX as i128) as i64)
 }
 
 /// The values of one call-originals line, "v1,v2...": at most MAX_VALUES, a trailing comma ends the list, any
 /// other non-number rejects the line (None), as does an empty list.
-pub fn parse_call_orig_values(s: &str) -> Option<Vec<i64>> {
+pub fn parse_call_orig_values<S: AsRef<[u8]> + ?Sized>(s: &S) -> Option<Vec<i64>> {
     let mut vals = Vec::new();
-    let mut rest = s;
+    let mut rest = s.as_ref();
     while !rest.is_empty() && vals.len() < MAX_VALUES {
-        let (piece, next) = match rest.find(',') {
-            Some(c) => (&rest[..c], Some(&rest[c + 1..])),
-            None => (rest, None),
-        };
+        let (piece, next, more) = split_once_byte(rest, b',');
         vals.push(parse_dec_full(piece)?);
-        match next {
-            Some(n) => rest = n,
-            None => break,
+        if !more {
+            break;
         }
+        rest = next;
     }
     (!vals.is_empty()).then_some(vals)
+}
+
+/// One call-originals line, "<name>\t<v1>,<v2>...": the name (non-empty, shorter than NAME_LEN,
+/// split at the last tab) and its values; None for a line the C restore skips.
+pub fn parse_call_orig_line(line: &[u8]) -> Option<(&[u8], Vec<i64>)> {
+    parse_named(line, b'\t', parse_call_orig_values)
 }
 
 /// One /proc/net/arp entry as the C daemon's sscanf("%63s 0x%x 0x%x %63s %*s %31s") reads it: the type and
@@ -439,19 +433,23 @@ pub fn parse_arp_line(line: &str) -> Option<(&str, &str, &str, u32)> {
 }
 
 /// The C daemon's strtok over one command line: `next` is strtok(.., " "), `rest` is strtok(NULL, "").
+/// It works on bytes: a control name is any byte string the kernel accepts, UTF-8 or not.
 pub struct Tokens<'a> {
-    s: &'a str,
+    s: &'a [u8],
     pos: usize,
 }
 
 impl<'a> Tokens<'a> {
-    pub fn new(s: &'a str) -> Self {
-        Self { s, pos: 0 }
+    pub fn new<S: AsRef<[u8]> + ?Sized>(s: &'a S) -> Self {
+        Self {
+            s: s.as_ref(),
+            pos: 0,
+        }
     }
 
     /// The next space-separated word; leading spaces are skipped.
-    pub fn next(&mut self) -> Option<&'a str> {
-        let b = self.s.as_bytes();
+    pub fn next(&mut self) -> Option<&'a [u8]> {
+        let b = self.s;
         let mut i = self.pos;
         while i < b.len() && b[i] == b' ' {
             i += 1;
@@ -469,7 +467,7 @@ impl<'a> Tokens<'a> {
     }
 
     /// The rest of the line from just after the last word's delimiter, spaces kept: control names contain spaces.
-    pub fn rest(&mut self) -> Option<&'a str> {
+    pub fn rest(&mut self) -> Option<&'a [u8]> {
         if self.pos + 1 >= self.s.len() {
             return None;
         }
@@ -534,17 +532,34 @@ mod tests {
 
     #[test]
     fn parses_call_and_silence_specs() {
+        let voice: &[u8] = b"Voice";
         assert_eq!(
-            parse_call_spec("Voice=1,0x2,-3"),
-            Some(("Voice", vec![1, 2, -3]))
+            parse_call_spec(b"Voice=1,0x2,-3"),
+            Some((voice, vec![1, 2, -3]))
         );
-        assert_eq!(parse_call_spec("Voice="), Some(("Voice", vec![])));
-        assert_eq!(parse_call_spec("=1"), None);
-        assert_eq!(parse_call_spec("Voice=1,2,3,4,5"), None);
-        assert_eq!(parse_call_spec("Voice=On"), None);
-        assert_eq!(parse_silence_spec("Speaker=1"), Some(("Speaker", 1)));
-        assert_eq!(parse_silence_spec("Speaker=1x"), None);
-        assert_eq!(parse_silence_spec("Speaker="), None);
+        assert_eq!(parse_call_spec(b"Voice="), Some((voice, vec![])));
+        assert_eq!(parse_call_spec(b"=1"), None);
+        assert_eq!(parse_call_spec(b"Voice=1,2,3,4,5"), None);
+        assert_eq!(parse_call_spec(b"Voice=On"), None);
+        let speaker: &[u8] = b"Speaker";
+        assert_eq!(parse_silence_spec(b"Speaker=1"), Some((speaker, 1)));
+        assert_eq!(parse_silence_spec(b"Speaker=1x"), None);
+        assert_eq!(parse_silence_spec(b"Speaker="), None);
+    }
+
+    #[test]
+    fn non_utf8_control_names_stay_bytes() {
+        let name: &[u8] = b"Amp\xff Mute";
+        let mut t = Tokens::new(b"HAS Amp\xff Mute");
+        assert_eq!(t.next(), Some(&b"HAS"[..]));
+        assert_eq!(t.rest(), Some(name));
+        assert_eq!(parse_silence_spec(b"Amp\xff Mute=1"), Some((name, 1)));
+        assert_eq!(
+            parse_call_orig_line(b"Amp\xff Mute\t0,1"),
+            Some((name, vec![0, 1]))
+        );
+        assert_eq!(parse_call_orig_line(b"\t1"), None);
+        assert_eq!(parse_call_orig_line(b"no tab"), None);
     }
 
     #[test]
@@ -736,15 +751,15 @@ mod tests {
     #[test]
     fn enum_items_keep_the_c_separators_and_cut() {
         let items = vec![
-            (0, "Off".to_string()),
-            (1, "On".to_string()),
-            (2, "Auto".to_string()),
+            (0, b"Off".to_vec()),
+            (1, b"On".to_vec()),
+            (2, b"Auto".to_vec()),
         ];
-        assert_eq!(enum_join(&items, 1500), "Off|On|Auto");
+        assert_eq!(enum_join(&items, 1500), b"Off|On|Auto");
         // The kernel would not describe item 0: the C output still starts with the separator.
-        assert_eq!(enum_join(&items[1..], 1500), "|On|Auto");
+        assert_eq!(enum_join(&items[1..], 1500), b"|On|Auto");
         // Cut before a whole item, never inside one.
-        assert_eq!(enum_join(&items, 8), "Off|On");
+        assert_eq!(enum_join(&items, 8), b"Off|On");
     }
 
     #[test]
@@ -773,24 +788,24 @@ mod tests {
     #[test]
     fn a_control_name_is_the_rest_of_the_line() {
         let mut t = Tokens::new("HAS Voice Tx Device Mute");
-        assert_eq!(t.next(), Some("HAS"));
-        assert_eq!(t.rest(), Some("Voice Tx Device Mute"));
+        assert_eq!(t.next(), Some(&b"HAS"[..]));
+        assert_eq!(t.rest(), Some(&b"Voice Tx Device Mute"[..]));
         assert_eq!(t.next(), None);
 
         let mut t = Tokens::new("  SET  mute.tx  Voice Tx");
-        assert_eq!(t.next(), Some("SET"));
-        assert_eq!(t.next(), Some("mute.tx"));
-        assert_eq!(t.rest(), Some(" Voice Tx"));
+        assert_eq!(t.next(), Some(&b"SET"[..]));
+        assert_eq!(t.next(), Some(&b"mute.tx"[..]));
+        assert_eq!(t.rest(), Some(&b" Voice Tx"[..]));
     }
 
     #[test]
     fn a_missing_control_name_is_none() {
         let mut t = Tokens::new("HAS");
-        assert_eq!(t.next(), Some("HAS"));
+        assert_eq!(t.next(), Some(&b"HAS"[..]));
         assert_eq!(t.rest(), None);
 
         let mut t = Tokens::new("HAS ");
-        assert_eq!(t.next(), Some("HAS"));
+        assert_eq!(t.next(), Some(&b"HAS"[..]));
         assert_eq!(t.rest(), None);
     }
 

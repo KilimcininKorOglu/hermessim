@@ -259,7 +259,7 @@ pub fn open_ctl(path: &str) -> Option<RawFd> {
 }
 
 /// SNDRV_CTL_IOCTL_ELEM_INFO by control name.
-pub fn ctl_info(fd: RawFd, name: &str) -> Option<ElemInfo> {
+pub fn ctl_info(fd: RawFd, name: &[u8]) -> Option<ElemInfo> {
     if fd < 0 || name.is_empty() {
         return None;
     }
@@ -317,7 +317,8 @@ pub fn info_enum_items(info: &ElemInfo) -> u32 {
 
 /// The C daemon's value_ok: only boolean, integer and enum controls are written; n <= count;
 /// integers inside [min,max] unless max <= min; enum items < items.
-pub fn value_ok(name: &str, info: &ElemInfo, values: &[i64], n: usize) -> bool {
+pub fn value_ok(name: &[u8], info: &ElemInfo, values: &[i64], n: usize) -> bool {
+    let name = crate::protocol::shown(name);
     if n < 1 || n as u32 > info.count {
         crate::loge!(
             "'{}': {} value(s) for a {}-value control: not written",
@@ -360,9 +361,9 @@ fn value_fits(info: &ElemInfo, v: i64) -> Option<bool> {
 
 /// Enum item names joined with '|', cut at a whole item. The C daemon reads one ELEM_INFO per
 /// index (the names are not all present in the first reply on old kernels).
-pub fn enum_items(fd: RawFd, info: &ElemInfo, max_len: usize) -> String {
+pub fn enum_items(fd: RawFd, info: &ElemInfo, max_len: usize) -> Vec<u8> {
     if max_len == 0 {
-        return String::new();
+        return Vec::new();
     }
     let mut named = Vec::new();
     for k in 0..info_enum_items(info).min(64) {

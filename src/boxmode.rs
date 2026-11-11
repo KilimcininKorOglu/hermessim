@@ -142,7 +142,7 @@ fn device_name(fd: RawFd) -> String {
     if rc < 0 {
         "?".to_string()
     } else {
-        crate::platform::kernel_name(&namebuf)
+        crate::protocol::shown(&crate::platform::kernel_name(&namebuf)).into_owned()
     }
 }
 
@@ -207,7 +207,7 @@ fn first_writable(nodes: &[&'static str]) -> Option<&'static str> {
 
 fn read_int(path: &str) -> i32 {
     match std::fs::read(path) {
-        Ok(bytes) if !bytes.is_empty() => c_atoi(&String::from_utf8_lossy(&bytes)),
+        Ok(bytes) if !bytes.is_empty() => c_atoi(&bytes),
         _ => -1,
     }
 }

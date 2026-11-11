@@ -55,7 +55,7 @@ mod daemon {
 
     use crate::boxmode::{self, BoxState, BOX_MAX_KEYDEVS};
     use crate::mixer::Mixer;
-    use crate::protocol::{c_atoi, valid_iface, valid_uid, Tokens};
+    use crate::protocol::{ascii_arg, c_atoi, valid_iface, valid_uid, Tokens};
 
     const VERSION: &str = "0.1";
     const SOCK_NAME: &[u8] = b"hermessimd";
@@ -131,11 +131,12 @@ mod daemon {
             }
         }
 
-        fn reply(&mut self, msg: String) {
+        /// Queue one reply line; a reply carries control names as their bytes.
+        fn reply(&mut self, msg: Vec<u8>) {
             if self.fd < 0 {
                 return;
             }
-            let mut buf = msg.into_bytes();
+            let mut buf = msg;
             if buf.len() > 2046 {
                 buf.truncate(2046);
             }
@@ -180,6 +181,11 @@ mod daemon {
             };
             if n > 0 {
                 self.used += n as usize;
+                // The C daemon reads the buffer as a C string: a NUL ends it, and what came
+                // after the NUL is dropped.
+                if let Some(nul) = self.buf[..self.used].iter().position(|&b| b == 0) {
+                    self.used = nul;
+                }
                 return None;
             }
             if n == 0 {
@@ -189,15 +195,16 @@ mod daemon {
             Some(errno == libc::EAGAIN || errno == libc::EWOULDBLOCK || errno == libc::EINTR)
         }
 
-        /// The next whole line without its "\n" or "\r\n", removed from the buffer.
-        fn take_line(&mut self) -> Option<String> {
+        /// The next whole line without its "\n" or "\r\n", removed from the buffer. The bytes
+        /// are kept as sent: a control name need not be UTF-8.
+        fn take_line(&mut self) -> Option<Vec<u8>> {
             let pos = self.buf[..self.used].iter().position(|&b| b == b'\n')?;
             let end = if pos > 0 && self.buf[pos - 1] == b'\r' {
                 pos - 1
             } else {
                 pos
             };
-            let line = String::from_utf8_lossy(&self.buf[..end]).into_owned();
+            let line = self.buf[..end].to_vec();
             self.buf.copy_within(pos + 1..self.used, 0);
             self.used -= pos + 1;
             Some(line)
@@ -205,7 +212,7 @@ mod daemon {
     }
 
     /// One protocol line: every command gets exactly one reply line.
-    fn handle_line(c: &mut Conn, line: &str, mixer: &mut Mixer, boxm: &mut BoxState) {
+    fn handle_line(c: &mut Conn, line: &[u8], mixer: &mut Mixer, boxm: &mut BoxState) {
         let mut t = Tokens::new(line);
         let Some(cmd) = t.next() else { return };
         let reply = mixer_command(cmd, &mut t, mixer)
@@ -216,78 +223,82 @@ mod daemon {
     }
 
     /// The mixer and call commands; None for any other command.
-    fn mixer_command(cmd: &str, t: &mut Tokens, mixer: &mut Mixer) -> Option<String> {
+    fn mixer_command(cmd: &[u8], t: &mut Tokens, mixer: &mut Mixer) -> Option<Vec<u8>> {
         Some(match cmd {
-            "HELLO" => format!(
+            b"HELLO" => format!(
                 "OK hermessimd {} card={} call={} session={}",
                 VERSION, mixer.card, mixer.call as i32, mixer.session
-            ),
-            "STATUS" => cmd_status(mixer),
-            "SET" => cmd_set(t, mixer),
-            "CALL_START" => cmd_call_start(t, mixer),
-            "CALL_END" => {
+            )
+            .into(),
+            b"STATUS" => cmd_status(mixer),
+            b"SET" => cmd_set(t, mixer),
+            b"CALL_START" => cmd_call_start(t, mixer),
+            b"CALL_END" => {
                 mixer.restore_all("CALL_END");
                 "OK".into()
             }
-            "INVENTORY" => cmd_inventory(mixer),
-            "HAS" => cmd_has(t, mixer),
-            "AUDIO?" => format!(
+            b"INVENTORY" => cmd_inventory(mixer),
+            b"HAS" => cmd_has(t, mixer),
+            b"AUDIO?" => format!(
                 "OK call={} session={} silence={} {}",
                 mixer.call as i32,
                 mixer.session,
                 mixer.perm.len(),
                 crate::audio::totals()
-            ),
+            )
+            .into(),
             _ => return None,
         })
     }
 
     /// The box mode commands; None for any other command.
-    fn box_command(cmd: &str, t: &mut Tokens, boxm: &mut BoxState) -> Option<String> {
+    fn box_command(cmd: &[u8], t: &mut Tokens, boxm: &mut BoxState) -> Option<Vec<u8>> {
         Some(match cmd {
-            "POWERKEY" => cmd_powerkey(t, boxm),
-            "SCREEN_OFF" => ok_or(boxmode::screen(false) == 0, "ERR spawn failed"),
-            "WAKE" => ok_or(boxmode::screen(true) == 0, "ERR spawn failed"),
-            "ROLE" => cmd_role(t),
-            "NETBLOCK" => cmd_netblock(t, boxm),
-            "NETCYCLE" => cmd_netcycle(t, boxm),
-            "CHARGE?" => cmd_charge_query(boxm),
-            "CHARGE" => cmd_charge(t, boxm),
+            b"POWERKEY" => cmd_powerkey(t, boxm),
+            b"SCREEN_OFF" => ok_or(boxmode::screen(false) == 0, "ERR spawn failed"),
+            b"WAKE" => ok_or(boxmode::screen(true) == 0, "ERR spawn failed"),
+            b"ROLE" => cmd_role(t),
+            b"NETBLOCK" => cmd_netblock(t, boxm),
+            b"NETCYCLE" => cmd_netcycle(t, boxm),
+            b"CHARGE?" => cmd_charge_query(boxm),
+            b"CHARGE" => cmd_charge(t, boxm),
             _ => return None,
         })
     }
 
     /// The hotspot and audio tuning commands; None for any other command.
-    fn other_command(cmd: &str, t: &mut Tokens) -> Option<String> {
+    fn other_command(cmd: &[u8], t: &mut Tokens) -> Option<Vec<u8>> {
         Some(match cmd {
-            "IFSTATS" => cmd_ifstats(t),
-            "NEIGH" => cmd_neigh(t),
-            "STALL" => {
+            b"IFSTATS" => cmd_ifstats(t),
+            b"NEIGH" => cmd_neigh(t),
+            b"STALL" => {
                 crate::audio::stall(t.next().map(c_atoi).unwrap_or(0));
                 "OK".into()
             }
-            "TUNE" => cmd_tune(t),
+            b"TUNE" => cmd_tune(t),
             _ => return None,
         })
     }
 
-    fn ok_or(ok: bool, err: &str) -> String {
+    fn ok_or(ok: bool, err: &str) -> Vec<u8> {
         if ok { "OK" } else { err }.into()
     }
 
-    fn cmd_status(mixer: &Mixer) -> String {
-        format!(
-            "OK call={} session={} managed={} silence={} safe={} {}",
+    fn cmd_status(mixer: &Mixer) -> Vec<u8> {
+        let mut r: Vec<u8> = format!(
+            "OK call={} session={} managed={} silence={} safe={} ",
             mixer.call as i32,
             mixer.session,
             mixer.managed.len(),
             mixer.perm.len(),
-            mixer.safe as i32,
-            mixer.status_names()
+            mixer.safe as i32
         )
+        .into();
+        r.extend_from_slice(&mixer.status_names());
+        r
     }
 
-    fn cmd_set(t: &mut Tokens, mixer: &mut Mixer) -> String {
+    fn cmd_set(t: &mut Tokens, mixer: &mut Mixer) -> Vec<u8> {
         let key = t.next();
         let val = t.rest();
         let ok = match (key, val) {
@@ -297,79 +308,83 @@ mod daemon {
         ok_or(ok, "ERR bad SET")
     }
 
-    fn cmd_call_start(t: &mut Tokens, mixer: &mut Mixer) -> String {
+    fn cmd_call_start(t: &mut Tokens, mixer: &mut Mixer) -> Vec<u8> {
         let session = t.next().map(c_atoi).unwrap_or(1);
         if session != 1 && session != 2 {
             return "ERR session must be 1 or 2".into();
         }
-        format!("OK applied={}", mixer.call_start(session))
+        format!("OK applied={}", mixer.call_start(session)).into()
     }
 
-    fn cmd_ifstats(t: &mut Tokens) -> String {
-        match ifstats(t.next()) {
-            Some((rx, tx)) => format!("OK rx={} tx={}", rx, tx),
+    fn cmd_ifstats(t: &mut Tokens) -> Vec<u8> {
+        match ifstats(t.next().map(ascii_arg)) {
+            Some((rx, tx)) => format!("OK rx={} tx={}", rx, tx).into(),
             None => "ERR no such interface".into(),
         }
     }
 
-    fn cmd_neigh(t: &mut Tokens) -> String {
+    fn cmd_neigh(t: &mut Tokens) -> Vec<u8> {
         let mut list = String::new();
         let mut n = 0;
-        if neigh(t.next(), &mut list, &mut n) {
-            format!("OK {} {}", n, list)
+        if neigh(t.next().map(ascii_arg), &mut list, &mut n) {
+            format!("OK {} {}", n, list).into()
         } else {
             "ERR bad interface".into()
         }
     }
 
-    fn cmd_inventory(mixer: &mut Mixer) -> String {
+    fn cmd_inventory(mixer: &mut Mixer) -> Vec<u8> {
         if mixer.call {
             return "ERR in call".into();
         }
         match mixer.inventory(INVENTORY_FILE) {
-            Ok(n) => format!("OK {} controls in {}", n, INVENTORY_FILE),
+            Ok(n) => format!("OK {} controls in {}", n, INVENTORY_FILE).into(),
             Err(-1) => "ERR no mixer".into(),
             Err(_) => "ERR write failed".into(),
         }
     }
 
-    fn cmd_has(t: &mut Tokens, mixer: &mut Mixer) -> String {
-        match t.rest().and_then(|name| mixer.has(name)) {
-            Some((count, items)) if items.is_empty() => format!("OK count={}", count),
-            Some((count, items)) => format!("OK count={} items={}", count, items),
-            None => "ERR no such control".into(),
+    fn cmd_has(t: &mut Tokens, mixer: &mut Mixer) -> Vec<u8> {
+        let Some((count, items)) = t.rest().and_then(|name| mixer.has(name)) else {
+            return "ERR no such control".into();
+        };
+        let mut r: Vec<u8> = format!("OK count={}", count).into();
+        if !items.is_empty() {
+            r.extend_from_slice(b" items=");
+            r.extend_from_slice(&items);
         }
+        r
     }
 
-    fn cmd_tune(t: &mut Tokens) -> String {
+    fn cmd_tune(t: &mut Tokens) -> Vec<u8> {
         let (prime, keep, period) = (t.next(), t.next(), t.next());
         if let (Some(p), Some(k), Some(per)) = (prime, keep, period) {
             if !crate::audio::tune(c_atoi(p), c_atoi(k), c_atoi(per)) {
                 return "ERR bad values".into();
             }
         }
-        format!("OK {}", crate::audio::tune_get())
+        format!("OK {}", crate::audio::tune_get()).into()
     }
 
-    fn cmd_powerkey(t: &mut Tokens, boxm: &mut BoxState) -> String {
+    fn cmd_powerkey(t: &mut Tokens, boxm: &mut BoxState) -> Vec<u8> {
         let on = t.next().map(|v| c_atoi(v) == 1).unwrap_or(false);
         let n = boxm.power_block(on);
         if n < 0 {
             "ERR no escape gesture on this phone".into()
         } else {
-            format!("OK {}", n)
+            format!("OK {}", n).into()
         }
     }
 
-    fn cmd_role(t: &mut Tokens) -> String {
+    fn cmd_role(t: &mut Tokens) -> Vec<u8> {
         let rc = match (t.next(), t.next()) {
-            (Some(role), Some(pkg)) => boxmode::role(role, pkg),
+            (Some(role), Some(pkg)) => boxmode::role(ascii_arg(role), ascii_arg(pkg)),
             _ => -1,
         };
         ok_or(rc == 0, "ERR bad role or package")
     }
 
-    fn cmd_netblock(t: &mut Tokens, boxm: &mut BoxState) -> String {
+    fn cmd_netblock(t: &mut Tokens, boxm: &mut BoxState) -> Vec<u8> {
         let ok = match (t.next(), t.next()) {
             (Some(uid), Some(on)) => boxm.netblock(c_atoi(uid), c_atoi(on) != 0) == 0,
             _ => false,
@@ -377,7 +392,7 @@ mod daemon {
         ok_or(ok, "ERR bad uid")
     }
 
-    fn cmd_netcycle(t: &mut Tokens, boxm: &mut BoxState) -> String {
+    fn cmd_netcycle(t: &mut Tokens, boxm: &mut BoxState) -> Vec<u8> {
         match boxm.net_cycle(t.next().map(c_atoi).unwrap_or(0)) {
             0 => "OK",
             -2 => "ERR busy",
@@ -386,14 +401,14 @@ mod daemon {
         .into()
     }
 
-    fn cmd_charge_query(boxm: &mut BoxState) -> String {
+    fn cmd_charge_query(boxm: &mut BoxState) -> Vec<u8> {
         match boxm.charge_node() {
-            Some(node) => format!("OK {} {}", node, boxm.charge_status()),
+            Some(node) => format!("OK {} {}", node, boxm.charge_status()).into(),
             None => "ERR unsupported".into(),
         }
     }
 
-    fn cmd_charge(t: &mut Tokens, boxm: &mut BoxState) -> String {
+    fn cmd_charge(t: &mut Tokens, boxm: &mut BoxState) -> Vec<u8> {
         match boxm.charge(t.next().map(c_atoi).unwrap_or(-1)) {
             0 => "OK",
             -2 => "ERR unsupported",

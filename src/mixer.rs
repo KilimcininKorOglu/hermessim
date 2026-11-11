@@ -10,8 +10,8 @@ use libc::{c_char, c_int, c_long};
 use crate::alsa::*;
 use crate::platform::{self, kernel_name};
 use crate::protocol::{
-    c_atoi, c_strtoll, c_strtoll_prefix, parse_call_orig_values, CallValuesError, MAX_VALUES,
-    NAME_LEN,
+    c_atoi, c_strtoll_prefix, parse_c_int, parse_call_orig_line, shown, CallValuesError,
+    MAX_VALUES, NAME_LEN,
 };
 
 pub const MAX_MANAGED: usize = 64;
@@ -22,14 +22,15 @@ const CRUMB_LINGER_NS: i64 = 5_000_000_000;
 const SAFE_FILE: &str = "/data/adb/hermessim/safe";
 const CALL_ORIG: &str = "/data/adb/hermessim/call-originals";
 
+/// Control names are byte strings, as the kernel and the C daemon hold them.
 #[derive(Clone)]
 pub struct Profile {
-    pub capture: String,
-    pub rec_config: String,
-    pub inject1: String,
-    pub inject2: String,
-    pub mute_tx: String,
-    pub mute_rx: String,
+    pub capture: Vec<u8>,
+    pub rec_config: Vec<u8>,
+    pub inject1: Vec<u8>,
+    pub inject2: Vec<u8>,
+    pub mute_tx: Vec<u8>,
+    pub mute_rx: Vec<u8>,
     pub vsid: i64,
     pub ramp: i64,
     pub capture_pcm: i32,
@@ -44,12 +45,12 @@ pub struct Profile {
 impl Default for Profile {
     fn default() -> Self {
         Self {
-            capture: String::new(),
-            rec_config: String::new(),
-            inject1: String::new(),
-            inject2: String::new(),
-            mute_tx: "Voice Tx Device Mute".into(),
-            mute_rx: "Voice Rx Device Mute".into(),
+            capture: Vec::new(),
+            rec_config: Vec::new(),
+            inject1: Vec::new(),
+            inject2: Vec::new(),
+            mute_tx: b"Voice Tx Device Mute".to_vec(),
+            mute_rx: b"Voice Rx Device Mute".to_vec(),
             vsid: 4294967295,
             ramp: 20,
             capture_pcm: 0,
@@ -65,7 +66,7 @@ impl Default for Profile {
 
 #[derive(Clone)]
 pub struct Managed {
-    pub name: String,
+    pub name: Vec<u8>,
     pub numid: u32,
     pub count: u32,
     pub want: [i64; MAX_VALUES],
@@ -82,9 +83,9 @@ pub struct Managed {
 }
 
 impl Managed {
-    fn empty(name: &str, numid: u32, info: ElemInfo) -> Self {
+    fn empty(name: &[u8], numid: u32, info: ElemInfo) -> Self {
         Self {
-            name: name.to_string(),
+            name: name.to_vec(),
             numid,
             count: info.count,
             want: [0; MAX_VALUES],
@@ -104,7 +105,7 @@ impl Managed {
 
 #[derive(Clone)]
 pub struct CallControl {
-    pub name: String,
+    pub name: Vec<u8>,
     pub values: Vec<i64>,
 }
 
@@ -294,7 +295,13 @@ impl Mixer {
         }
     }
 
-    pub fn manage_managed(&mut self, name: &str, want: &[i64], n: usize, write_only: bool) -> bool {
+    pub fn manage_managed(
+        &mut self,
+        name: &[u8],
+        want: &[i64],
+        n: usize,
+        write_only: bool,
+    ) -> bool {
         let ctl = self.ctl;
         let safe = self.safe;
         let crumb = &mut self.crumb;
@@ -308,7 +315,7 @@ impl Mixer {
         manage_in(ctl, safe, crumb, list, other, &w)
     }
 
-    pub fn manage_perm(&mut self, name: &str, want: &[i64], n: usize, write_only: bool) -> bool {
+    pub fn manage_perm(&mut self, name: &[u8], want: &[i64], n: usize, write_only: bool) -> bool {
         let ctl = self.ctl;
         let safe = self.safe;
         let crumb = &mut self.crumb;
@@ -322,7 +329,7 @@ impl Mixer {
         manage_in(ctl, safe, crumb, list, other, &w)
     }
 
-    pub fn set_by_name(&mut self, name: &str, values: &[i64], n: usize) {
+    pub fn set_by_name(&mut self, name: &[u8], values: &[i64], n: usize) {
         if name.is_empty() {
             return;
         }
@@ -337,7 +344,7 @@ impl Mixer {
         if ctl_write(ctl, safe, crumb, &mut tmp, values, n) {
             crate::logi!(
                 "set '{}' ({} ...)",
-                name,
+                shown(name),
                 values.first().copied().unwrap_or(0)
             );
         }
@@ -370,7 +377,7 @@ impl Mixer {
                 let m = &mut self.managed[i];
                 ctl_restore(ctl, safe, crumb, m);
             }
-            crate::logi!("restored '{}' ({})", name, why);
+            crate::logi!("restored '{}' ({})", shown(&name), why);
         }
         self.managed.clear();
         self.call = false;
@@ -389,7 +396,7 @@ impl Mixer {
             let crumb = &mut self.crumb;
             let m = &mut self.perm[i];
             ctl_restore(ctl, safe, crumb, m);
-            crate::logi!("restored silence control '{}'", name);
+            crate::logi!("restored silence control '{}'", shown(&name));
         }
     }
 
@@ -419,7 +426,7 @@ impl Mixer {
         let rx = self.profile.mute_rx.clone();
         applied += self.manage_managed(&tx, &mute, 3, true) as i32;
         applied += self.manage_managed(&rx, &mute, 3, true) as i32;
-        let controls: Vec<(String, Vec<i64>)> = self
+        let controls: Vec<(Vec<u8>, Vec<i64>)> = self
             .call_controls
             .iter()
             .map(|c| (c.name.clone(), c.values.clone()))
@@ -440,15 +447,15 @@ impl Mixer {
         applied
     }
 
-    pub fn call_control_add(&mut self, spec: &str) -> bool {
-        let Some(eq) = spec.rfind('=') else {
+    pub fn call_control_add(&mut self, spec: &[u8]) -> bool {
+        let Some(eq) = spec.iter().rposition(|&c| c == b'=') else {
             return false;
         };
         if eq == 0 {
             return false;
         }
         if self.call_controls.len() >= MAX_CALL_CONTROLS {
-            crate::loge!("too many call controls: '{}' dropped", spec);
+            crate::loge!("too many call controls: '{}' dropped", shown(spec));
             return false;
         }
         if eq >= NAME_LEN {
@@ -457,35 +464,37 @@ impl Mixer {
         let values = match crate::protocol::parse_call_values(&spec[eq + 1..]) {
             Ok(values) => values,
             Err(CallValuesError::TooMany) => {
-                crate::loge!("call control '{}': more than {} values", spec, MAX_VALUES);
+                crate::loge!(
+                    "call control '{}': more than {} values",
+                    shown(spec),
+                    MAX_VALUES
+                );
                 return false;
             }
             Err(CallValuesError::NotANumber) => {
-                crate::loge!("call control '{}': not a number", spec);
+                crate::loge!("call control '{}': not a number", shown(spec));
                 return false;
             }
         };
         self.call_controls.push(CallControl {
-            name: spec[..eq].to_string(),
+            name: spec[..eq].to_vec(),
             values,
         });
         true
     }
 
-    pub fn silence_add(&mut self, spec: &str) -> bool {
-        let Some(eq) = spec.rfind('=') else {
+    pub fn silence_add(&mut self, spec: &[u8]) -> bool {
+        let Some(eq) = spec.iter().rposition(|&c| c == b'=') else {
             return false;
         };
         if eq == 0 || eq >= NAME_LEN {
             return false;
         }
         let name = &spec[..eq];
-        let raw = &spec[eq + 1..];
-        let (value, used) = c_strtoll(raw);
-        if used == 0 || used != raw.len() {
-            crate::loge!("silence '{}': not a number", spec);
+        let Some(value) = parse_c_int(&spec[eq + 1..]) else {
+            crate::loge!("silence '{}': not a number", shown(spec));
             return false;
-        }
+        };
         if let Some(i) = self.perm.iter().position(|m| m.name == name) {
             let ctl = self.ctl;
             let safe = self.safe;
@@ -499,43 +508,43 @@ impl Mixer {
         self.manage_perm(name, &[value], 1, false)
     }
 
-    pub fn set_key(&mut self, key: &str, val: &str) -> bool {
+    pub fn set_key(&mut self, key: &[u8], val: &[u8]) -> bool {
         if let Some(dst) = self.name_key(key) {
             set_name(dst, val);
             return true;
         }
         match key {
-            "call" => self.call_control_add(val),
-            "call.clear" => {
+            b"call" => self.call_control_add(val),
+            b"call.clear" => {
                 self.call_controls.clear();
                 true
             }
-            "silence" => self.silence_add(val),
+            b"silence" => self.silence_add(val),
             _ => self.number_key(key, val),
         }
     }
 
     /// The profile field a control-name key sets.
-    fn name_key(&mut self, key: &str) -> Option<&mut String> {
+    fn name_key(&mut self, key: &[u8]) -> Option<&mut Vec<u8>> {
         let p = &mut self.profile;
         Some(match key {
-            "capture" => &mut p.capture,
-            "rec_config" => &mut p.rec_config,
-            "inject.1" => &mut p.inject1,
-            "inject.2" => &mut p.inject2,
-            "mute.tx" => &mut p.mute_tx,
-            "mute.rx" => &mut p.mute_rx,
+            b"capture" => &mut p.capture,
+            b"rec_config" => &mut p.rec_config,
+            b"inject.1" => &mut p.inject1,
+            b"inject.2" => &mut p.inject2,
+            b"mute.tx" => &mut p.mute_tx,
+            b"mute.rx" => &mut p.mute_rx,
             _ => return None,
         })
     }
 
     /// A number key; false for an unknown key.
-    fn number_key(&mut self, key: &str, val: &str) -> bool {
+    fn number_key(&mut self, key: &[u8], val: &[u8]) -> bool {
         let p = &mut self.profile;
         match key {
-            "mute.vsid" => p.vsid = c_strtoll_prefix(val),
-            "mute.ramp" => p.ramp = c_strtoll_prefix(val),
-            "loopback" => p.loopback = c_atoi(val) != 0,
+            b"mute.vsid" => p.vsid = c_strtoll_prefix(val),
+            b"mute.ramp" => p.ramp = c_strtoll_prefix(val),
+            b"loopback" => p.loopback = c_atoi(val) != 0,
             _ => {
                 let Some(dst) = int_key(p, key) else {
                     return false;
@@ -546,14 +555,15 @@ impl Mixer {
         true
     }
 
-    pub fn status_names(&self) -> String {
-        let mut out = String::new();
+    /// "name;name;..." of the managed controls, cut at a whole name before 1800 bytes.
+    pub fn status_names(&self) -> Vec<u8> {
+        let mut out = Vec::new();
         for m in &self.managed {
-            let piece = format!("{};", m.name);
-            if out.len() + piece.len() >= 1800 {
+            if out.len() + m.name.len() + 1 >= 1800 {
                 break;
             }
-            out.push_str(&piece);
+            out.extend_from_slice(&m.name);
+            out.push(b';');
         }
         out
     }
@@ -564,14 +574,14 @@ impl Mixer {
             crate::logw!("save {}: {}", CALL_ORIG, platform::errstr());
             return;
         };
-        let mut out = format!("{}\n", self.crumb.boot_line());
+        let mut out = format!("{}\n", self.crumb.boot_line()).into_bytes();
         let mut n = 0usize;
         for m in self.managed.iter().filter(|m| !m.write_only && m.have_orig) {
-            out.push_str(&call_orig_line(m));
+            out.extend_from_slice(&call_orig_line(m));
             n += 1;
         }
         // A full disk must not rename a truncated file into place.
-        let ok = f.write_all(out.as_bytes()).is_ok() && f.sync_all().is_ok();
+        let ok = f.write_all(&out).is_ok() && f.sync_all().is_ok();
         drop(f);
         if !ok || n == 0 || std::fs::rename(&tmp, CALL_ORIG).is_err() {
             if !ok {
@@ -582,48 +592,28 @@ impl Mixer {
     }
 
     pub fn call_orig_restore(&mut self) {
-        let Ok(text) = std::fs::read_to_string(CALL_ORIG) else {
+        let Ok(text) = std::fs::read(CALL_ORIG) else {
             return;
         };
         let boot = format!("{}\n", self.crumb.boot_line());
-        let mut chunks = text.split_inclusive('\n');
-        if chunks.next() != Some(boot.as_str()) {
+        let mut chunks = text.split_inclusive(|&b| b == b'\n');
+        if chunks.next() != Some(boot.as_bytes()) {
             crate::logi!("call originals from another boot: dropped");
             let _ = std::fs::remove_file(CALL_ORIG);
             return;
         }
-        let mut saved: Vec<(String, Vec<i64>)> = Vec::new();
-        for chunk in chunks {
-            if saved.len() >= MAX_MANAGED {
-                break;
-            }
-            let Some(line) = chunk.strip_suffix('\n') else {
-                break;
-            };
-            if line.is_empty() {
-                continue;
-            }
-            let Some(tab) = line.rfind('\t') else {
-                continue;
-            };
-            if tab == 0 {
-                continue;
-            }
-            let name = &line[..tab];
-            if name.len() >= NAME_LEN {
-                continue;
-            }
-            let Some(vals) = parse_call_orig_values(&line[tab + 1..]) else {
-                continue;
-            };
-            saved.push((name.to_string(), vals));
-        }
+        // Whole lines only: a last line without its newline was cut by a crash mid-write.
+        let saved: Vec<(&[u8], Vec<i64>)> = chunks
+            .map_while(|chunk| chunk.strip_suffix(b"\n"))
+            .filter_map(parse_call_orig_line)
+            .take(MAX_MANAGED)
+            .collect();
         crate::logw!(
             "a previous run died mid-call: restoring {} call control(s)",
             saved.len()
         );
         for (name, vals) in saved.into_iter().rev() {
-            self.set_by_name(&name, &vals, vals.len());
+            self.set_by_name(name, &vals, vals.len());
         }
         let _ = std::fs::remove_file(CALL_ORIG);
     }
@@ -720,17 +710,17 @@ impl Mixer {
             Ok(f) => f,
             Err(_) => return Err(-2),
         };
-        let mut out = String::new();
+        let mut out = Vec::new();
         let mut n = 0i32;
         for id in ids.iter().take(used as usize) {
             let Some(info) = ctl_info_numid(self.ctl, id.numid) else {
                 continue;
             };
-            out.push_str(&inventory_line(self.ctl, &info));
+            out.extend_from_slice(&inventory_line(self.ctl, &info));
             n += 1;
         }
         // A full disk must not rename a truncated list into place.
-        let ok = f.write_all(out.as_bytes()).is_ok() && f.flush().is_ok();
+        let ok = f.write_all(&out).is_ok() && f.flush().is_ok();
         drop(f);
         if !ok || std::fs::rename(&tmp, path).is_err() {
             crate::loge!("inventory: writing {} failed", tmp);
@@ -741,19 +731,19 @@ impl Mixer {
         Ok(n)
     }
 
-    pub fn has(&self, name: &str) -> Option<(u32, String)> {
+    pub fn has(&self, name: &[u8]) -> Option<(u32, Vec<u8>)> {
         let info = ctl_info(self.ctl, name)?;
         let items = if info.type_ == ELEM_TYPE_ENUMERATED {
             enum_items(self.ctl, &info, 1500)
         } else {
-            String::new()
+            Vec::new()
         };
         Some((info.count, items))
     }
 }
 
 /// One call-originals line: "<name>\t<v1>,<v2>...\n" with the control's saved values.
-fn call_orig_line(m: &Managed) -> String {
+fn call_orig_line(m: &Managed) -> Vec<u8> {
     let count = (m.count as usize).min(MAX_VALUES);
     let values: Vec<String> = (0..count)
         .map(|k| {
@@ -764,34 +754,37 @@ fn call_orig_line(m: &Managed) -> String {
             }
         })
         .collect();
-    format!("{}\t{}\n", m.name, values.join(","))
+    let mut line = m.name.clone();
+    line.extend_from_slice(format!("\t{}\n", values.join(",")).as_bytes());
+    line
 }
 
 /// One inventory line: numid, name, type, count and the range or the enum items, tab-separated.
-fn inventory_line(ctl: RawFd, info: &ElemInfo) -> String {
+fn inventory_line(ctl: RawFd, info: &ElemInfo) -> Vec<u8> {
     const TYPES: [&str; 7] = ["none", "bool", "int", "enum", "bytes", "iec958", "int64"];
-    let name = kernel_name(&info.id.name);
     let ty = TYPES.get(info.type_ as usize).copied().unwrap_or("?");
-    let mut line = format!("{}\t{}\t{}\t{}\t", info.id.numid, name, ty, info.count);
+    let mut line = format!("{}\t", info.id.numid).into_bytes();
+    line.extend_from_slice(&kernel_name(&info.id.name));
+    line.extend_from_slice(format!("\t{}\t{}\t", ty, info.count).as_bytes());
     match info.type_ {
         ELEM_TYPE_INTEGER => {
             let (min, max) = info_integer(info);
-            line.push_str(&format!("{}..{}", min, max));
+            line.extend_from_slice(format!("{}..{}", min, max).as_bytes());
         }
         ELEM_TYPE_INTEGER64 => {
             let (min, max) = unsafe { (info.value.integer64.min, info.value.integer64.max) };
-            line.push_str(&format!("{}..{}", min, max));
+            line.extend_from_slice(format!("{}..{}", min, max).as_bytes());
         }
         ELEM_TYPE_ENUMERATED => {
-            line.push_str(&enum_items(ctl, info, 64 * NAME_LEN));
+            line.extend_from_slice(&enum_items(ctl, info, 64 * NAME_LEN));
             let count = info_enum_items(info);
             if count > 64 {
-                line.push_str(&format!("|...({})", count));
+                line.extend_from_slice(format!("|...({})", count).as_bytes());
             }
         }
         _ => {}
     }
-    line.push('\n');
+    line.push(b'\n');
     line
 }
 
@@ -806,34 +799,30 @@ fn create_0600(path: &str) -> std::io::Result<std::fs::File> {
 
 /// A control to take over: its name, the values to hold and whether it is written without being read back.
 struct Want<'a> {
-    name: &'a str,
+    name: &'a [u8],
     values: &'a [i64],
     n: usize,
     write_only: bool,
 }
 
-/// "-" clears a control name; any other value is cut to NAME_LEN - 1 bytes at a char boundary.
-fn set_name(dst: &mut String, val: &str) {
-    if val == "-" {
+/// "-" clears a control name; any other value is cut to NAME_LEN - 1 bytes, as the C copies it.
+fn set_name(dst: &mut Vec<u8>, val: &[u8]) {
+    if val == b"-" {
         dst.clear();
         return;
     }
-    let mut n = (NAME_LEN - 1).min(val.len());
-    while !val.is_char_boundary(n) {
-        n -= 1;
-    }
-    *dst = val[..n].to_string();
+    *dst = val[..val.len().min(NAME_LEN - 1)].to_vec();
 }
 
 /// The profile field an atoi key sets.
-fn int_key<'a>(p: &'a mut Profile, key: &str) -> Option<&'a mut i32> {
+fn int_key<'a>(p: &'a mut Profile, key: &[u8]) -> Option<&'a mut i32> {
     Some(match key {
-        "capture.pcm" => &mut p.capture_pcm,
-        "inject.pcm" => &mut p.inject_pcm,
-        "capture.rate" => &mut p.capture_rate,
-        "capture.channels" => &mut p.capture_channels,
-        "inject.rate" => &mut p.inject_rate,
-        "inject.channels" => &mut p.inject_channels,
+        b"capture.pcm" => &mut p.capture_pcm,
+        b"inject.pcm" => &mut p.inject_pcm,
+        b"capture.rate" => &mut p.capture_rate,
+        b"capture.channels" => &mut p.capture_channels,
+        b"inject.rate" => &mut p.inject_rate,
+        b"inject.channels" => &mut p.inject_channels,
         _ => return None,
     })
 }
@@ -863,7 +852,7 @@ fn manage_in(
     ctl_write(ctl, safe, crumb, &mut m, want, n);
     crate::logi!(
         "managed '{}' numid={} -> {} (orig {})",
-        name,
+        shown(name),
         m.numid,
         want.first().copied().unwrap_or(0),
         orig_first(&m)
@@ -882,14 +871,14 @@ fn admit(ctl: RawFd, held: usize, other: &[Managed], w: &Want) -> Option<ElemInf
     if !(1..=MAX_VALUES).contains(&n) {
         crate::loge!(
             "'{}': {} value(s) (max {}): not managed",
-            name,
+            shown(name),
             n,
             MAX_VALUES
         );
         return None;
     }
     let Some(info) = ctl_info(ctl, name) else {
-        crate::logw!("no control '{}'", name);
+        crate::logw!("no control '{}'", shown(name));
         return None;
     };
     if held == MAX_MANAGED {
@@ -905,7 +894,7 @@ fn admit(ctl: RawFd, held: usize, other: &[Managed], w: &Want) -> Option<ElemInf
     if clash {
         crate::loge!(
             "'{}' is already held at another value: not managed twice",
-            name
+            shown(name)
         );
         return None;
     }
@@ -936,12 +925,12 @@ fn ctl_write_value(
     v.id.numid = m.numid;
     m.last_write_ns = platform::now_ns(libc::CLOCK_MONOTONIC);
     if ctl < 0 {
-        crate::loge!("write '{}': no mixer", m.name);
+        crate::loge!("write '{}': no mixer", shown(&m.name));
         return false;
     }
     crumb.arm();
     if !crate::alsa::ctl_write(ctl, v) {
-        crate::loge!("write '{}' failed: {}", m.name, platform::errstr());
+        crate::loge!("write '{}' failed: {}", shown(&m.name), platform::errstr());
         return false;
     }
     true
@@ -988,7 +977,10 @@ fn reapply_in(ctl: RawFd, safe: bool, crumb: &mut Crumb, list: &mut [Managed], n
         if !lost_value(ctl, m) || !reapply_allowed(m) {
             continue;
         }
-        crate::logw!("'{}' rewritten by someone else, re-applying", m.name);
+        crate::logw!(
+            "'{}' rewritten by someone else, re-applying",
+            shown(&m.name)
+        );
         let want = m.want;
         let n = m.nwant;
         ctl_write(ctl, safe, crumb, m, &want, n);
@@ -1027,7 +1019,10 @@ fn reapply_allowed(m: &mut Managed) -> bool {
     m.reapplies += 1;
     if m.reapplies > 5 {
         m.paused_until_sec = now + 10;
-        crate::loge!("'{}' won't keep our value: left alone for 10 s", m.name);
+        crate::loge!(
+            "'{}' won't keep our value: left alone for 10 s",
+            shown(&m.name)
+        );
         return false;
     }
     true

@@ -67,15 +67,15 @@ pub fn errstr() -> String {
     err_text(&io::Error::last_os_error())
 }
 
-/// A NUL-terminated kernel name (snd_ctl_elem_id.name) as a String.
-pub fn kernel_name(bytes: &[u8]) -> String {
+/// A NUL-terminated kernel name (snd_ctl_elem_id.name), its bytes as the kernel holds them.
+pub fn kernel_name(bytes: &[u8]) -> Vec<u8> {
     let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
-    String::from_utf8_lossy(&bytes[..end]).into_owned()
+    bytes[..end].to_vec()
 }
 
-pub fn name_bytes(name: &str) -> [u8; 44] {
+pub fn name_bytes(name: &[u8]) -> [u8; 44] {
     let mut out = [0u8; 44];
-    let b = name.as_bytes();
+    let b = name;
     let n = b.len().min(out.len() - 1);
     out[..n].copy_from_slice(&b[..n]);
     out
