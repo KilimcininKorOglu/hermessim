@@ -7,10 +7,11 @@ import com.keremgok.hermessim.host.HciRing.Rec
  * The record file of the chip's traffic, read into [HciRing]'s records.
  *
  * Android writes a btsnoop file: big-endian record headers, each packet led by its kind byte. A Galaxy A13 writes a file
- * with the right name and header to Samsung's folder, and what follows the header is not Android's layout (11 Nov 2026,
- * seen only as "not readable"). So the reader also tries what a phone maker could have done: the same records starting
- * later or with their numbers little-endian, or the whole record compressed (as Android 12 kept its record in memory),
- * in either layout. When nothing fits, [probe] says what the bytes look like.
+ * with the right name and header to Samsung's folder, and what follows the header is not Android's layout (11 Nov 2026).
+ * What its first bytes showed that evening: the entries of Android 12's memory record ([old]), not compressed, straight
+ * after the header. The reader also tries what else a phone maker could have done: Android's records starting later or
+ * with their numbers little-endian, or the whole record compressed, in either layout. When nothing fits, [probe] says
+ * what the bytes look like.
  *
  * Everything here is pure (HciFileTest).
  */
@@ -19,6 +20,7 @@ object HciFile {
     fun read(file: ByteArray): Pair<List<Rec>, String> {
         if (!isBtsnoop(file)) return emptyList<Rec>() to ""
         chain(file, 16, false).let { if (it.isNotEmpty()) return it to "" }
+        old(file, 16)?.let { return it }
         resync(file, 16)?.let { return it }
         for ((at, plain) in inflated(file)) unpacked(file, at, plain)?.let { return it }
         return emptyList<Rec>() to ""
@@ -32,10 +34,7 @@ object HciFile {
     private fun unpacked(file: ByteArray, at: Int, plain: ByteArray): Pair<List<Rec>, String>? {
         chain(plain, 0, false).let { if (it.size >= 8) return it to "compressed from $at" }
         resync(plain, 0)?.let { return it.first to "compressed from $at, ${it.second}" }
-        // Android 12's record: a version byte and the last packet's time before the compressed part
-        val lastMs = if (at >= 16 + 9) le64(file, at - 8) else 0L
-        for (v in intArrayOf(2, 1)) old(plain, v, lastMs).let { if (it.size >= 8) return it to "compressed from $at, old layout $v" }
-        return null
+        return old(plain, 0)?.let { it.first to "compressed from $at, ${it.second}" }
     }
 
     // ---- btsnoop records
@@ -119,35 +118,42 @@ object HciFile {
     }
     private const val MAX_PLAIN = 8 * 1024 * 1024
 
-    /** One packet of Android 12's record: kept length + 1, real length, ms since the one before, kind, where its bytes start. */
-    private class Old(val len: Int, val orig: Int, val delta: Long, val type: Int, val at: Int)
+    // ---- Android 12's memory record
 
     /**
-     * Android 12's record once unpacked: per packet its kept length + 1, (from version 2) its real length, the
-     * milliseconds since the packet before, and a kind (0x10 event, 0x11 data in, 0x20 command, 0x21 data out), all
-     * little-endian, then the bytes kept. Nothing unless the whole of [b] reads that way. [lastMs]: the last packet's time.
+     * Android 12's memory record: per packet its kept length + 1, (from version 2) its real length, the milliseconds
+     * since the packet before, and a kind (0x10 event, 0x11 data in, 0x20 command, 0x21 data out), all little-endian,
+     * then the bytes kept. Read from [from] as far as the entries hold, in the version that gets further; nothing under
+     * [least] entries (anything can look like a few). Says where it stopped when that isn't the end, with the two lengths
+     * and the kind found there (three numbers, no content).
      */
-    private fun old(b: ByteArray, version: Int, lastMs: Long): List<Rec> {
-        val es = oldPackets(b, version) ?: return emptyList()
-        var t = (lastMs - es.sumOf { it.delta }) * 1000
-        return es.map { e ->
-            t += e.delta * 1000
-            Rec(t, e.type < 0x20, OLD_KINDS.getValue(e.type), e.orig, b.copyOfRange(e.at, e.at + e.len - 1))
-        }
+    private fun old(b: ByteArray, from: Int, least: Int = 8): Pair<List<Rec>, String>? {
+        val (recs, end, version) = intArrayOf(2, 1).map { v -> oldEntries(b, from, v).let { Triple(it.first, it.second, v) } }
+            .filter { it.first.isNotEmpty() }.maxByOrNull { it.second } ?: return null
+        if (recs.size < least) return null
+        val stop = if (end + 9 > b.size) ""
+            else ", stops at $end of ${b.size} B (lengths ${le16(b, end)} and ${le16(b, end + 2)}, kind ${b[end + 8].toInt() and 0xff})"
+        return recs to "old layout $version$stop"
     }
 
-    private fun oldPackets(b: ByteArray, version: Int): List<Old>? {
+    /**
+     * The entries of one [version] from [from] as far as they hold, and where they stop. The entries carry no date:
+     * times count from one second.
+     */
+    private fun oldEntries(b: ByteArray, from: Int, version: Int): Pair<List<Rec>, Int> {
         val head = if (version == 2) 9 else 7
-        val es = ArrayList<Old>()
-        var o = 0
+        val out = ArrayList<Rec>()
+        var o = from; var t = 1_000_000L
         while (o + head <= b.size) {
             val len = le16(b, o)
             val type = b[o + head - 1].toInt() and 0xff
-            if (len < 1 || type !in OLD_KINDS || o + head + len - 1 > b.size) return null
-            es += Old(len, if (version == 2) le16(b, o + 2) else len - 1, le32(b, o + head - 5), type, o + head)
+            val kind = OLD_KINDS[type]
+            if (len < 1 || kind == null || o + head + len - 1 > b.size) break
+            t += le32(b, o + head - 5) * 1000
+            out += Rec(t, type < 0x20, kind, if (version == 2) le16(b, o + 2) else len - 1, b.copyOfRange(o + head, o + head + len - 1))
             o += head + len - 1
         }
-        return if (o == b.size) es else null
+        return out to o
     }
     private val OLD_KINDS = mapOf(0x10 to 4, 0x11 to 2, 0x12 to 3, 0x17 to 5, 0x20 to 1, 0x21 to 2, 0x22 to 3, 0x2d to 5)
 
@@ -160,7 +166,9 @@ object HciFile {
      */
     fun probe(file: ByteArray): String {
         val packed = inflated(file).firstOrNull()
-        return "${file.size} B, after the header ${hex(file, 16, 32)}, ${marks(file)}" +
+        // How far Android 12's entries hold from the header on, when they do at all (a Galaxy A13's file starts with them)
+        val entries = old(file, 16, least = 1)?.let { ", ${it.first.size} entries of ${it.second}" }.orEmpty()
+        return "${file.size} B, after the header ${hex(file, 16, 32)}$entries, ${marks(file)}" +
             (packed?.let { (at, plain) -> ", compressed from $at: ${plain.size} B starting ${hex(plain, 0, 24)}, ${marks(plain)}" }
                 ?: ", nothing compressed")
     }
