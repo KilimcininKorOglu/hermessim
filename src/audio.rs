@@ -577,6 +577,8 @@ struct Stats {
     tot_plc: u32,
     tot_starved: u32,
     tot_live: u32,
+    tot_capms: u32,
+    tot_caperr: u32,
 }
 
 const EMPTY_STATS: Stats = Stats {
@@ -605,6 +607,8 @@ const EMPTY_STATS: Stats = Stats {
     tot_plc: 0,
     tot_starved: 0,
     tot_live: 0,
+    tot_capms: 0,
+    tot_caperr: 0,
 };
 
 static STATS: Mutex<Stats> = Mutex::new(EMPTY_STATS);
@@ -862,6 +866,7 @@ fn capture_main() {
 
     let mut err_log: i64 = 0;
     let mut consecutive_err: u32 = 0;
+    let mut cap_clock = crate::protocol::CapClock::default();
     while CALL_RUNNING.load(Ordering::Relaxed) {
         if pcm.is_none() {
             pcm = pcm_hold(
@@ -899,6 +904,8 @@ fn capture_main() {
                 break;
             }
             st_inc(|s| &mut s.caperr);
+            st_inc(|s| &mut s.tot_caperr);
+            cap_clock.error();
             if consecutive_err >= CAP_SLOW_AFTER {
                 crate::platform::sleep_ns(100_000_000);
             }
@@ -915,6 +922,8 @@ fn capture_main() {
             continue;
         }
         consecutive_err = 0;
+        let capms = cap_clock.read(crate::platform::now_ns(libc::CLOCK_MONOTONIC));
+        st_umax(|s| &mut s.tot_capms, capms);
         if cch == 2 {
             for i in 0..cframe as usize {
                 pcmbuf[i] = ((pcmbuf[2 * i] as i32 + pcmbuf[2 * i + 1] as i32) / 2) as i16;
@@ -1258,6 +1267,8 @@ pub fn totals() -> String {
         plc: s.tot_plc,
         starved: s.tot_starved,
         live: s.tot_live,
+        capms: s.tot_capms,
+        caperr: s.tot_caperr,
     })
 }
 
@@ -1278,6 +1289,8 @@ pub fn call_begin(cfg: AudioCfg) {
         s.tot_plc = 0;
         s.tot_starved = 0;
         s.tot_live = 0;
+        s.tot_capms = 0;
+        s.tot_caperr = 0;
     }
     *CFG.lock().unwrap() = cfg;
     jb_reset();

@@ -269,13 +269,42 @@ pub struct CallTotals {
     pub starved: u32,
     /// Playback pulls while a client was connected, after its first packet.
     pub live: u32,
+    /// Milliseconds the capture's good reads took, read to read with no error between.
+    pub capms: u32,
+    /// Failed capture reads.
+    pub caperr: u32,
 }
 
 pub fn call_totals_line(t: &CallTotals) -> String {
     format!(
-        "cap={} voiced={} sent={} played={} peak={} txdrop={} noclient={} recv={} plc={} starved={} live={}",
-        t.cap, t.voiced, t.sent, t.played, t.peak, t.txdrop, t.noclient, t.recv, t.plc, t.starved, t.live
+        "cap={} voiced={} sent={} played={} peak={} txdrop={} noclient={} recv={} plc={} starved={} live={} capms={} caperr={}",
+        t.cap, t.voiced, t.sent, t.played, t.peak, t.txdrop, t.noclient, t.recv, t.plc, t.starved, t.live, t.capms,
+        t.caperr
     )
+}
+
+/// The capture against the clock. A voice path that hands over less than real time loses caller audio before
+/// anything here can drop it, so only the time the reads took shows it: capms against cap.
+#[derive(Default)]
+pub struct CapClock {
+    prev_ns: Option<i64>,
+    ns: u64,
+}
+
+impl CapClock {
+    /// A good read at `now_ns`; returns the milliseconds counted so far.
+    pub fn read(&mut self, now_ns: i64) -> u32 {
+        if let Some(prev) = self.prev_ns {
+            self.ns += now_ns.saturating_sub(prev).max(0) as u64;
+        }
+        self.prev_ns = Some(now_ns);
+        (self.ns / 1_000_000) as u32
+    }
+
+    /// A failed read: the stream isn't running, so the gap up to the next good read isn't a slow capture.
+    pub fn error(&mut self) {
+        self.prev_ns = None;
+    }
 }
 
 /// The C daemon's strtok over one command line: `next` is strtok(.., " "), `rest` is strtok(NULL, "").
@@ -497,11 +526,25 @@ mod tests {
             plc: 12,
             starved: 5,
             live: 1150,
+            capms: 14100,
+            caperr: 2,
         };
         assert_eq!(
             call_totals_line(&t),
-            "cap=1200 voiced=800 sent=1190 played=1195 peak=21000 txdrop=3 noclient=7 recv=1180 plc=12 starved=5 live=1150"
+            "cap=1200 voiced=800 sent=1190 played=1195 peak=21000 txdrop=3 noclient=7 recv=1180 plc=12 starved=5 live=1150 capms=14100 caperr=2"
         );
+    }
+
+    #[test]
+    fn the_capture_clock_skips_the_gap_after_an_error() {
+        let ms = 1_000_000i64;
+        let mut c = CapClock::default();
+        assert_eq!(c.read(1000 * ms), 0); // the first read only starts the clock
+        assert_eq!(c.read(1010 * ms), 10);
+        assert_eq!(c.read(1022 * ms), 22);
+        c.error();
+        assert_eq!(c.read(1522 * ms), 22); // 500 ms of failing stream is not slow capture
+        assert_eq!(c.read(1534 * ms), 34);
     }
 
     #[test]
