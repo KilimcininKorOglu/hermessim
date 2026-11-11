@@ -24,7 +24,7 @@ pub fn log(prio: c_int, msg: &str) {
             __android_log_print(
                 prio,
                 TAG.as_ptr() as *const c_char,
-                b"%s\0".as_ptr() as *const c_char,
+                c"%s".as_ptr(),
                 c.as_ptr(),
             );
         }
@@ -104,12 +104,11 @@ pub fn bind_abstract(name: &[u8], sock_type: i32, backlog: i32) -> io::Result<li
         unsafe { libc::close(fd) };
         return Err(err);
     }
-    if sock_type == libc::SOCK_STREAM || sock_type == libc::SOCK_SEQPACKET {
-        if unsafe { libc::listen(fd, backlog) } < 0 {
-            let err = io::Error::last_os_error();
-            unsafe { libc::close(fd) };
-            return Err(err);
-        }
+    let listens = sock_type == libc::SOCK_STREAM || sock_type == libc::SOCK_SEQPACKET;
+    if listens && unsafe { libc::listen(fd, backlog) } < 0 {
+        let err = io::Error::last_os_error();
+        unsafe { libc::close(fd) };
+        return Err(err);
     }
     Ok(fd)
 }

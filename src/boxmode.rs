@@ -615,14 +615,18 @@ impl Charge {
         let new_start = self.resume;
         if let Some(cap) = cap {
             let old_end = read_int(cap);
-            if start.is_some() && old_end >= 0 && new_start > old_end {
-                write_int(cap, new_end);
-                write_int(start.unwrap(), new_start);
-            } else {
-                if let Some(start) = start {
+            match start {
+                // Raising the band: the end goes up first, so the start is never above the end.
+                Some(start) if old_end >= 0 && new_start > old_end => {
+                    write_int(cap, new_end);
                     write_int(start, new_start);
                 }
-                write_int(cap, new_end);
+                _ => {
+                    if let Some(start) = start {
+                        write_int(start, new_start);
+                    }
+                    write_int(cap, new_end);
+                }
             }
         } else if let Some(start) = start {
             write_int(start, new_start);

@@ -295,7 +295,8 @@ impl Mixer {
         let safe = self.safe;
         let crumb = &mut self.crumb;
         let (list, other) = (&mut self.managed, &self.perm);
-        manage_in(ctl, safe, crumb, list, other, name, want, n, write_only)
+        let w = Want { name, values: want, n, write_only };
+        manage_in(ctl, safe, crumb, list, other, &w)
     }
 
     pub fn manage_perm(&mut self, name: &str, want: &[i64], n: usize, write_only: bool) -> bool {
@@ -303,7 +304,8 @@ impl Mixer {
         let safe = self.safe;
         let crumb = &mut self.crumb;
         let (list, other) = (&mut self.perm, &self.managed);
-        manage_in(ctl, safe, crumb, list, other, name, want, n, write_only)
+        let w = Want { name, values: want, n, write_only };
+        manage_in(ctl, safe, crumb, list, other, &w)
     }
 
     pub fn set_by_name(&mut self, name: &str, values: &[i64], n: usize) {
@@ -672,7 +674,7 @@ impl Mixer {
             ctl_write(ctl, safe, crumb, m, &want, n);
         }
         self.remutes += 1;
-        if self.remutes <= 20 || self.remutes % 100 == 0 {
+        if self.remutes <= 20 || self.remutes.is_multiple_of(100) {
             crate::logi!(
                 "device mutes re-asserted after a route change (#{})",
                 self.remutes
@@ -826,21 +828,27 @@ fn parse_dec_full(s: &str) -> Option<i64> {
     Some(value.clamp(i64::MIN as i128, i64::MAX as i128) as i64)
 }
 
+/// A control to take over: its name, the values to hold and whether it is written without being read back.
+struct Want<'a> {
+    name: &'a str,
+    values: &'a [i64],
+    n: usize,
+    write_only: bool,
+}
+
 fn manage_in(
     ctl: RawFd,
     safe: bool,
     crumb: &mut Crumb,
     list: &mut Vec<Managed>,
     other: &[Managed],
-    name: &str,
-    want: &[i64],
-    n: usize,
-    write_only: bool,
+    w: &Want,
 ) -> bool {
+    let (name, want, n, write_only) = (w.name, w.values, w.n, w.write_only);
     if name.is_empty() {
         return false;
     }
-    if n < 1 || n > MAX_VALUES {
+    if !(1..=MAX_VALUES).contains(&n) {
         crate::loge!(
             "'{}': {} value(s) (max {}): not managed",
             name,
@@ -862,7 +870,7 @@ fn manage_in(
     }
     if other
         .iter()
-        .any(|m| m.numid == info.id.numid && &m.want[..n] != &want[..n])
+        .any(|m| m.numid == info.id.numid && m.want[..n] != want[..n])
     {
         crate::loge!(
             "'{}' is already held at another value: not managed twice",
@@ -941,11 +949,11 @@ fn ctl_write(
             v = read;
         }
     }
-    for i in 0..n.min(MAX_VALUES) {
+    for (i, &val) in vals.iter().enumerate().take(n.min(MAX_VALUES)) {
         if m.enumerated {
-            set_elem_enum(&mut v, i, vals[i] as u32);
+            set_elem_enum(&mut v, i, val as u32);
         } else {
-            set_elem_integer(&mut v, i, vals[i] as c_long);
+            set_elem_integer(&mut v, i, val as c_long);
         }
     }
     ctl_write_value(ctl, safe, crumb, m, &mut v)

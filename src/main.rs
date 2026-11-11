@@ -151,10 +151,7 @@ mod daemon {
                 return false;
             }
             self.used += n as usize;
-            loop {
-                let Some(pos) = self.buf[..self.used].iter().position(|&b| b == b'\n') else {
-                    break;
-                };
+            while let Some(pos) = self.buf[..self.used].iter().position(|&b| b == b'\n') {
                 let mut end = pos;
                 if end > 0 && self.buf[end - 1] == b'\r' {
                     end -= 1;

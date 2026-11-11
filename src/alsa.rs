@@ -303,8 +303,13 @@ pub fn set_elem_enum(v: &mut ElemValue, i: usize, value: u32) {
     unsafe { v.value.enumerated[i] = value };
 }
 
+/// c_long is 64-bit on arm64 and 32-bit on armv7; one generic widening compiles on both without a cast.
+fn widen<T: Into<i64>>(v: T) -> i64 {
+    v.into()
+}
+
 pub fn info_integer(info: &ElemInfo) -> (i64, i64) {
-    unsafe { (info.value.integer.min as i64, info.value.integer.max as i64) }
+    unsafe { (widen(info.value.integer.min), widen(info.value.integer.max)) }
 }
 pub fn info_enum_items(info: &ElemInfo) -> u32 {
     unsafe { info.value.enumerated.items }
