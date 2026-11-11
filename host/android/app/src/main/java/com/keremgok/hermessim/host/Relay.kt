@@ -340,11 +340,7 @@ object Relay {
 
     private fun onPeerFrame(d: Peer, bytes: ByteArray) {
         val env = runCatching { Envelope.parseFrom(bytes) }.getOrElse { Log.w(TAG, "bad frame: $it"); return }
-        if (env.bodyCase == Envelope.BodyCase.HELLO) {
-            // A link that outlived an app restart never "comes up" for this process: what it agreed on is looked up here
-            main.postDelayed({ RadioLook.linkLook(onlyIfUnknown = true) }, 6_000)
-            return hello(d, env)
-        }
+        if (env.bodyCase == Envelope.BodyCase.HELLO) return hello(d, env)
         if (d.id !in trusted) {
             // A paired host whose app restarted while the link stayed up: ask for a fresh Hello instead of
             // rejecting (the client would otherwise sit on "not paired" until restarted, seen 16 Oct).
@@ -488,6 +484,8 @@ object Relay {
         }
         trusted.add(d.id)
         if (d is Peer.Ble) {
+            // What the link agreed on (RadioLook): well after the Hello, when the link serves and nothing is being set up
+            main.postDelayed({ if (d.id in trusted) RadioLook.linkLook() }, 20_000)
             HostWifi.evaluate("Bluetooth up")
             HotspotPause.transportChanged("Bluetooth back")
             // Remembered so the same iPhone can pair again on its own after iOS dropped its keys (see the receiver)

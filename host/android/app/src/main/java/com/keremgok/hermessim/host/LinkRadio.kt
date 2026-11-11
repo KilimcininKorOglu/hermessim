@@ -56,6 +56,11 @@ object LinkRadio {
     /** A new link starts on 1M whatever the last one ran on. */
     fun linkUp() { inUse = "?"; RadioLook.forget(); note("link up") }
 
+    private val MTK = Regex("""\bmt\d{4}""", RegexOption.IGNORE_CASE)
+
+    /** A MediaTek chip, by the names a phone gives it (its SoC, board platform, hardware). Pure (LinkRadioTest). */
+    fun isMediatek(names: List<String>): Boolean = names.any { it.contains("mediatek", ignoreCase = true) || MTK.containsMatchIn(it) }
+
     // ---- who scans
 
     /** App names worth naming: the system's and the phone maker's. Anything else a user installed stays unnamed. */

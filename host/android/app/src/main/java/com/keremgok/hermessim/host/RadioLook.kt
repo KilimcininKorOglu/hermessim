@@ -5,7 +5,7 @@ import android.util.Log
 
 /**
  * One look at the Bluetooth stack: who scans ([LinkRadio.scans]) and what the chip did with a link's last seconds
- * ([HciRing]). Taken at a call's end and a few seconds after a link comes up; a call's numbers carry it.
+ * ([HciRing]). Taken at a call's end and, on MediaTek hosts, once a link serves ([linkLook]); a call's numbers carry it.
  */
 object RadioLook {
     private const val TAG = "HermesSimHost"
@@ -18,15 +18,18 @@ object RadioLook {
 
     @Volatile private var links: Map<Int, HciRing.Link> = emptyMap()
     @Volatile private var buffers = ""
-    @Volatile private var lastLinkLook = 0L
+    @Volatile private var linkLooked = false
+    private val mediatek: Boolean by lazy {
+        LinkRadio.isMediatek(listOf(Compat.soc(), Compat.prop("ro.board.platform"), android.os.Build.HARDWARE))
+    }
 
-    /** A new link: what an earlier one agreed no longer holds. */
-    fun forget() { links = emptyMap() }
+    /** A new link: what an earlier one agreed no longer holds, and it gets its own look. */
+    fun forget() { links = emptyMap(); linkLooked = false }
 
     /**
      * One root command, two seconds or three: the Bluetooth dump's scanner list, then the record of the chip's traffic
-     * that the same dump has just written ([HciRing]). Only numbers leave here. Asked at a call's end and a few seconds
-     * after a link comes up, never during a call: the dump runs inside the Bluetooth stack. Never throws.
+     * that the same dump has just written ([HciRing]). Only numbers leave here. Asked at a call's end and by [linkLook],
+     * never during a call: the dump runs inside the Bluetooth stack. Never throws.
      */
     fun look(): Look = runCatching {
         val r = Root.sh("dumpsys bluetooth_manager | sed -n '/GATT Scanner Map/,/GATT Advertiser Map/p;/Le scan:/p' | head -c 16000; " +
@@ -66,15 +69,17 @@ object RadioLook {
     }
 
     /**
-     * A link came up a few seconds ago: what it agreed on (packet length, interval), while the record still holds it.
-     * A call's audio pushes that out of the record within seconds. Not in a call, at most once a minute.
-     * [onlyIfUnknown]: a client said hello, which it does every few minutes; one look is enough. Any thread.
+     * What a link agreed on (packet length, interval), while the record still holds it: a call's audio pushes that out
+     * within seconds. Once per link, 20 s after the phone's Hello ([Relay]), on MediaTek hosts only: theirs is the
+     * sending that needs explaining, and a look is a dump inside the Bluetooth stack. It used to run on every full-voice
+     * host 6 s after a link came up, which is when a restarted host may be dropping that link or switching Bluetooth off
+     * and on to get an iPhone's Hello; an iPhone did not get back to its Redmi Note 9 Pro host over Bluetooth for three
+     * minutes after the host updated itself (11 Nov 2026). Nothing shows the look caused it; it no longer runs there.
+     * Never in a call. Any thread.
      */
-    fun linkLook(onlyIfUnknown: Boolean = false) {
-        val now = android.os.SystemClock.elapsedRealtime()
-        val looked = lastLinkLook != 0L
-        if (!VoiceGate.fullVoice || CallRegistry.anyCall() || (looked && (onlyIfUnknown || now - lastLinkLook < 60_000))) return
-        lastLinkLook = now
+    fun linkLook() {
+        if (!mediatek || linkLooked || !VoiceGate.fullVoice || CallRegistry.anyCall()) return
+        linkLooked = true
         Thread {
             val l = look()
             Log.i(TAG, "BLE link: ${l.link.ifEmpty { l.hci }}")
