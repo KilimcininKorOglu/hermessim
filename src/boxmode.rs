@@ -68,7 +68,7 @@ fn spawn(argv: &[&str]) -> bool {
     match crate::platform::spawn(argv) {
         Ok(_) => true,
         Err(e) => {
-            crate::logw!("spawn {}: {}", argv[0], e);
+            crate::logw!("spawn {}: {}", argv[0], crate::platform::err_text(&e));
             false
         }
     }
@@ -291,7 +291,7 @@ impl Charge {
                     "battery care: writing {}={} failed: {}",
                     self.behaviour_path,
                     value,
-                    std::io::Error::last_os_error()
+                    crate::platform::errstr()
                 );
             }
             self.behaviour_failed = true;
@@ -371,7 +371,7 @@ impl Charge {
                 crate::logw!(
                     "battery care: writing {} failed: {}",
                     node,
-                    std::io::Error::last_os_error()
+                    crate::platform::errstr()
                 );
             }
             self.cut_failed = true;
@@ -638,7 +638,7 @@ impl Charge {
         }
         mkdir_mode(LIMIT_DIR, 0o700);
         if write_file(LIMIT_FILE, &format!("{}\n", percent)) < 0 {
-            crate::logw!("save {}: {}", LIMIT_FILE, std::io::Error::last_os_error());
+            crate::logw!("save {}: {}", LIMIT_FILE, crate::platform::errstr());
         }
         let node = self.node_name().unwrap_or("?");
         crate::logi!(
@@ -759,7 +759,7 @@ impl BoxState {
             )
         };
         if fd < 0 {
-            crate::logw!("uevent socket: {}", std::io::Error::last_os_error());
+            crate::logw!("uevent socket: {}", crate::platform::errstr());
             return -1;
         }
         let mut a: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
@@ -773,7 +773,7 @@ impl BoxState {
             )
         };
         if rc < 0 {
-            crate::logw!("uevent bind: {}", std::io::Error::last_os_error());
+            crate::logw!("uevent bind: {}", crate::platform::errstr());
             unsafe { libc::close(fd) };
             return -1;
         }
@@ -824,7 +824,7 @@ impl BoxState {
             let pid = match crate::platform::spawn(&argv) {
                 Ok(pid) => pid,
                 Err(e) => {
-                    crate::logw!("spawn {}: {}", argv[0], e);
+                    crate::logw!("spawn {}: {}", argv[0], crate::platform::err_text(&e));
                     crate::logw!("network block: spawn failed");
                     self.nb[k].done = on;
                     continue;
@@ -892,7 +892,7 @@ impl BoxState {
         match crate::platform::spawn(&argv) {
             Ok(pid) => self.cycle_pid = pid,
             Err(e) => {
-                crate::logw!("spawn {}: {}", argv[0], e);
+                crate::logw!("spawn {}: {}", argv[0], crate::platform::err_text(&e));
                 return -1;
             }
         }
@@ -977,14 +977,19 @@ impl BoxState {
             let has_down = has_bit(&keys, KEY_VOLUMEDOWN);
             if !has_bit(&types, EV_ABS) && keys_rc >= 0 && (has_up || has_down || has_power) {
                 let mut namebuf = [0u8; 64];
-                unsafe {
+                let name_rc = unsafe {
                     libc::ioctl(
                         fd,
                         crate::alsa::eviocgname(64) as c_int,
                         namebuf.as_mut_ptr(),
-                    );
-                }
-                let dev_name = crate::platform::kernel_name(&namebuf);
+                    )
+                };
+                // A device that won't give its name is logged as "?".
+                let dev_name = if name_rc < 0 {
+                    "?".to_string()
+                } else {
+                    crate::platform::kernel_name(&namebuf)
+                };
                 self.power[self.nkeys] = has_power;
                 self.volup[self.nkeys] = has_up;
                 self.voldown[self.nkeys] = has_down;
@@ -1062,7 +1067,7 @@ impl BoxState {
                 crate::logw!(
                     "power key {}: {}",
                     if on { "grab" } else { "release" },
-                    std::io::Error::last_os_error()
+                    crate::platform::errstr()
                 );
             }
         }
@@ -1179,7 +1184,7 @@ impl BoxState {
         let pid = match crate::platform::spawn(&argv) {
             Ok(pid) => pid,
             Err(e) => {
-                crate::logw!("spawn {}: {}", argv[0], e);
+                crate::logw!("spawn {}: {}", argv[0], crate::platform::err_text(&e));
                 crate::logw!("log capture: spawn failed");
                 return;
             }

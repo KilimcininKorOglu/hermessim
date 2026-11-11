@@ -364,7 +364,7 @@ fn client_send(buf: &[u8]) {
             st_inc(|s| &mut s.txdrop);
             st_inc(|s| &mut s.tot_txdrop);
         } else {
-            crate::logw!("audio send: {}", std::io::Error::from_raw_os_error(errno));
+            crate::logw!("audio send: {}", crate::platform::strerror(errno));
         }
     }
 }
@@ -695,7 +695,7 @@ fn io_main() {
             crate::loge!(
                 "audio socket @{}: {}",
                 String::from_utf8_lossy(SOCK_NAME),
-                e
+                crate::platform::err_text(&e)
             );
             return;
         }

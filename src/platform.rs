@@ -44,8 +44,29 @@ macro_rules! loge {
     ($($arg:tt)*) => { $crate::platform::log($crate::platform::LOG_ERROR, &format!($($arg)*)) };
 }
 
+/// The C library's own text for an errno, as the C daemon's strerror() logs it (no " (os error N)" suffix).
+pub fn strerror(errno: c_int) -> String {
+    let mut buf = [0 as c_char; 128];
+    let rc = unsafe { libc::strerror_r(errno, buf.as_mut_ptr(), buf.len()) };
+    if rc != 0 {
+        return format!("Unknown error {}", errno);
+    }
+    unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// An io::Error as the C daemon words it: strerror for an OS error, the error's own text otherwise.
+pub fn err_text(e: &io::Error) -> String {
+    match e.raw_os_error() {
+        Some(errno) => strerror(errno),
+        None => e.to_string(),
+    }
+}
+
+/// strerror(errno) for the last failed call.
 pub fn errstr() -> String {
-    io::Error::last_os_error().to_string()
+    err_text(&io::Error::last_os_error())
 }
 
 /// A NUL-terminated kernel name (snd_ctl_elem_id.name) as a String.

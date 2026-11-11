@@ -434,9 +434,6 @@ pub fn pcm_negotiate(
     } else if (want_ch as u32) > ci.max {
         ch = ci.max as i32;
     }
-    if ch > 2 {
-        ch = 2;
-    }
     if ch != want_ch {
         crate::logw!(
             "pcm {} {}: {} channel(s) not accepted: using {}",
@@ -445,6 +442,10 @@ pub fn pcm_negotiate(
             want_ch,
             ch
         );
+    }
+    // The log names the PCM's own count; at most stereo is played.
+    if ch > 2 {
+        ch = 2;
     }
     Some((rate, ch))
 }

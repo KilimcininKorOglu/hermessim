@@ -445,7 +445,7 @@ mod daemon {
         let fd = match crate::platform::connect_abstract(SOCK_NAME) {
             Ok(fd) => fd,
             Err(e) => {
-                eprintln!("connect @hermessimd: {}", e);
+                eprintln!("connect @hermessimd: {}", crate::platform::err_text(&e)); // perror's wording
                 return 1;
             }
         };
@@ -543,19 +543,20 @@ mod daemon {
         if ctl < 0 {
             crate::loge!(
                 "no sound card mixer ({}): running without call audio",
-                std::io::Error::last_os_error()
+                crate::platform::errstr()
             );
         } else if !crate::alsa::subscribe_events(ctl) {
-            crate::logw!(
-                "event subscribe failed: {}",
-                std::io::Error::last_os_error()
-            );
+            crate::logw!("event subscribe failed: {}", crate::platform::errstr());
         }
 
         let ls = match crate::platform::bind_abstract(SOCK_NAME, libc::SOCK_STREAM, 2) {
             Ok(fd) => fd,
             Err(e) => {
-                crate::loge!("socket @{}: {}", String::from_utf8_lossy(SOCK_NAME), e);
+                crate::loge!(
+                    "socket @{}: {}",
+                    String::from_utf8_lossy(SOCK_NAME),
+                    crate::platform::err_text(&e)
+                );
                 return 1;
             }
         };
@@ -678,7 +679,7 @@ mod daemon {
                 if std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
                     continue;
                 }
-                crate::loge!("poll: {}", std::io::Error::last_os_error());
+                crate::loge!("poll: {}", crate::platform::errstr());
                 break;
             }
             if pr == 0 {
