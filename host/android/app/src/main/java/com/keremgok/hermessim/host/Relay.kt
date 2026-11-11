@@ -484,6 +484,7 @@ object Relay {
         }
         trusted.add(d.id)
         if (d is Peer.Ble) {
+            noHelloSince = 0
             // What the link agreed on (RadioLook): well after the Hello, when the link serves and nothing is being set up
             main.postDelayed({ if (d.id in trusted) RadioLook.linkLook() }, 20_000)
             HostWifi.evaluate("Bluetooth up")
@@ -674,7 +675,28 @@ object Relay {
         // aren't ours to ask, and asking a rejected iPhone looped Hello / NOT_PAIRED every minute (29 Oct 2026, 23 times)
         val ours = app.getSharedPreferences("relay", Context.MODE_PRIVATE).getString("client_mac", null)
         if (pinned() == null || ours == null) return
-        ble.connectedDevices().filter { it.address == ours && it.address !in trusted && it.address !in rejected }.forEach { askForHello(it) }
+        val silent = ble.connectedDevices().filter { it.address == ours && it.address !in trusted && it.address !in rejected }
+        watchSilent(silent.firstOrNull())
+        silent.forEach { askForHello(it) }
+    }
+
+    @Volatile private var noHelloSince = 0L
+
+    /**
+     * The paired phone's Bluetooth link is up and the phone doesn't say Hello, keep-alive after keep-alive: the phone
+     * shows "connecting" meanwhile and nothing works over Bluetooth. An iPhone sat like that for three minutes after its
+     * host updated itself, until its owner paired again, and the host's log held nothing of those minutes (11 Nov 2026).
+     * So the host says so in its log, with what it knows of the link. [d]: the silent link, null when none.
+     */
+    private fun watchSilent(d: BluetoothDevice?) {
+        val now = SystemClock.elapsedRealtime()
+        val bond = d?.let { runCatching { it.bondState }.getOrDefault(-1) }
+        if (d == null || pairingOpen() || bond == BluetoothDevice.BOND_BONDING) { noHelloSince = 0; return }
+        if (noHelloSince == 0L) { noHelloSince = now; return }
+        val s = (now - noHelloSince) / 1000
+        if (s < 90) return
+        Log.w(TAG, "link ${d.address} has been up for $s s without a Hello (bond $bond, " +
+            "subscribed ${ble.subscribers().any { it.address == d.address }}, dropped once ${d.address in droppedOnce})")
     }
 
     private fun askForHello(d: BluetoothDevice) {
