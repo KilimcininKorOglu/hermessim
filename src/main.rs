@@ -2,6 +2,25 @@
 //
 // The control protocol, mixer ownership, call routing, box mode and audio pump mirror the C daemon
 // in host/daemon: same abstract sockets, same line protocol, same files, same log lines.
+//
+// Protocol: newline-terminated text lines over the abstract unix socket "@hermessimd"; the client
+// must be root or the uid given with --uid (checked with SO_PEERCRED).
+//   HELLO | STATUS | SET <key> <value> | CALL_START <session> | CALL_END   ->   OK ... / ERR ...
+//   IFSTATS <iface>  -> OK rx=<bytes> tx=<bytes>   (hotspot data counter; sysfs needs root)
+//   NEIGH <iface>    -> OK <n> <mac>,<ip>;...      (hotspot devices from the kernel ARP table)
+//   SET keys: capture, rec_config, inject.1, inject.2, mute.tx, mute.rx, mute.vsid, mute.ramp
+//   HAS <control>  -> OK count=n [items=a|b|c] | ERR   (auto profiles: a control on this card, an enum's options)
+//   INVENTORY      -> OK <n> controls in <file>
+//   TUNE [p k per] -> OK prime= keep= period=   (jitter-buffer frames, inject PCM period; live)
+//   AUDIO?         -> OK call= session= silence= cap= voiced= sent= played= peak= txdrop= noclient= recv= plc=
+//                     starved= live= capms= caperr=   (this call's totals: the call test, the app's end-of-call check)
+//   Box mode (boxmode.rs): SCREEN_OFF | WAKE | POWERKEY 1|0 | ROLE <role> <pkg> | CHARGE <target> |
+//                     CHARGE? -> OK <node> target= resume= drain= cutting= held=0|1 stuck=0|1 | ERR
+//                     NETBLOCK <uid> <0|1> (iptables chain hermessim_block)
+//   NETCYCLE <seconds> -> OK | ERR busy | ERR failed   (airplane mode on for 3-30 s, then off, from a detached script)
+//                     + the Volume Up x3 / Volume Down x3 escape gesture, reported to the app by broadcast
+//   STALL <ms>     -> OK   (debug: stall the playback thread once)
+// Debug client: hermessimd --client "CMD|SLEEP n|CMD..." (one connection)
 
 #[cfg(target_os = "android")]
 #[macro_use]

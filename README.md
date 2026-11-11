@@ -12,16 +12,49 @@ The wire behaviour is intentionally identical to the C daemon in `host/daemon/`:
 - same `hermessimd` logcat tag and `DAEMON_UP` / `BOX_ESCAPE` broadcasts;
 - same safe-mode/crash-breadcrumb behaviour and exit codes (3 sound card gone, 10 update).
 
+Status: experimental. The host still ships the C daemon; this one has not run on a device yet.
+It must stay at parity with the C daemon before the host switches to it.
+
+## Control commands
+
+One newline-terminated line per request on `@hermessimd`; the reply is one `OK ...` or `ERR ...`
+line. The client must be root or the uid given with `--uid` (checked with `SO_PEERCRED`).
+
+| Command | Reply |
+| --- | --- |
+| `HELLO` | `OK hermessimd <version> card= call= session=` |
+| `STATUS` | `OK call= session= managed= silence= safe= <names>` |
+| `SET <key> <value>` | `OK` / `ERR bad SET`; keys `capture`, `rec_config`, `inject.1`, `inject.2`, `mute.tx`, `mute.rx`, `mute.vsid`, `mute.ramp` |
+| `CALL_START <session>` | `OK applied=<n>`; applies the profile's routes for voice session 1 or 2 |
+| `CALL_END` | `OK`; restores every touched control and clears both device mutes |
+| `IFSTATS <iface>` | `OK rx=<bytes> tx=<bytes>` (hotspot data counter) |
+| `NEIGH <iface>` | `OK <n> <mac>,<ip>;...` (hotspot devices from the kernel ARP table) |
+| `HAS <control>` | `OK count=<n> [items=a\|b\|c]` / `ERR no such control` |
+| `INVENTORY` | `OK <n> controls in /data/adb/hermessim/inventory.txt` |
+| `TUNE [prime keep period]` | `OK prime= keep= period=` (jitter buffer frames, inject PCM period; live) |
+| `AUDIO?` | `OK call= session= silence= cap= voiced= sent= played= peak= txdrop= noclient= recv= plc= starved= live= capms= caperr=` (this call's totals) |
+| `SCREEN_OFF`, `WAKE` | `OK` / `ERR spawn failed` |
+| `POWERKEY 1\|0` | `OK <devices>` / `ERR no escape gesture on this phone` |
+| `ROLE <role> <pkg>` | `OK` / `ERR bad role or package` |
+| `NETBLOCK <uid> <0\|1>` | `OK` / `ERR bad uid` (iptables chain `hermessim_block`) |
+| `NETCYCLE <seconds>` | `OK` / `ERR busy` / `ERR failed` (airplane mode on for 3-30 s, then off, from a detached script) |
+| `CHARGE <target>` | `OK` / `ERR unsupported` / `ERR failed` |
+| `CHARGE?` | `OK <node> target= resume= drain= cutting= held=0\|1 stuck=0\|1` / `ERR unsupported` |
+| `STALL <ms>` | `OK` (debug: stalls the playback thread once) |
+
+Debug client: `hermessimd --client "CMD|SLEEP n|CMD..."` sends the commands over one connection
+and prints each reply.
+
 ## Layout
 
 | Path | Purpose |
 | --- | --- |
-| `src/main.rs` | CLI, signals, control socket and main loop |
+| `src/main.rs` | CLI, signals, control socket, command handlers and main loop |
 | `src/alsa.rs` | kernel ALSA control/PCM ABI for aarch64 and armv7 |
 | `src/mixer.rs` | managed controls, call routing, safe mode, call originals, inventory |
 | `src/audio.rs` | Opus pump, jitter buffer, capture/playback, audio client socket |
 | `src/boxmode.rs` | box mode, battery care, netblock, keys, uevent, log capture |
-| `src/protocol.rs` | line protocol, reply queue, command parsing |
+| `src/protocol.rs` | pure helpers with host-side tests: C number parsing, reply and log line formats, scripts, validation |
 | `src/opus.rs` | libopus FFI |
 | `src/platform.rs` | Android logging and small libc helpers |
 | `vendor/opus` | vendored libopus 1.5.2 (BSD), built by `build.rs` |
@@ -45,9 +78,21 @@ The binaries are `target/<target>/release/hermessimd`. The Cargo config links wi
 `./build.sh` builds both ABIs and copies them to `out/arm64-v8a/hermessimd` and
 `out/armeabi-v7a/hermessimd`, verifying that every loadable segment is 16 KB-aligned.
 
-Host-only unit tests (`cargo test`) cover the protocol helpers, jitter buffer, charge band,
-netblock command builder and escape gesture; the Android-only modules are compiled by
-`cargo check --target aarch64-linux-android`.
+Host-only unit tests (`cargo test`) cover the pure helpers in `src/protocol.rs`: strtoll/atoi
+parsing, command arguments, the `AUDIO?`, `CHARGE?` and 5 s audio line formats, the charge band,
+the netblock and network cycle scripts, enum, call-originals and ARP parsing, the capture clock,
+the PCM rate fallback and the escape gesture. Every other module is Android-only and is compiled
+by the clippy check below.
+
+Lint gate (both Android targets, no warnings allowed):
+
+```sh
+cargo clippy --release --target aarch64-linux-android --all-targets -- -D warnings
+cargo clippy --release --target armv7-linux-androideabi --all-targets -- -D warnings
+```
+
+`Cargo.toml` and `clippy.toml` make a cognitive complexity above 10 and any `unwrap` or `expect`
+outside tests a build error.
 
 ## Licence
 
