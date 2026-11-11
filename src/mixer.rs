@@ -556,31 +556,19 @@ impl Mixer {
             crate::logw!("save {}: {}", CALL_ORIG, platform::errstr());
             return;
         };
-        let _ = writeln!(f, "{}", self.crumb.boot_line());
+        let mut out = format!("{}\n", self.crumb.boot_line());
         let mut n = 0usize;
-        for m in &self.managed {
-            if m.write_only || !m.have_orig {
-                continue;
-            }
-            let _ = write!(f, "{}\t", m.name);
-            let count = (m.count as usize).min(MAX_VALUES);
-            for k in 0..count {
-                let v = if m.enumerated {
-                    elem_enum(&m.orig, k) as i64
-                } else {
-                    elem_integer(&m.orig, k) as i64
-                };
-                if k > 0 {
-                    let _ = write!(f, ",");
-                }
-                let _ = write!(f, "{}", v);
-            }
-            let _ = writeln!(f);
+        for m in self.managed.iter().filter(|m| !m.write_only && m.have_orig) {
+            out.push_str(&call_orig_line(m));
             n += 1;
         }
-        let ok = f.flush().is_ok() && f.sync_all().is_ok();
+        // A full disk must not rename a truncated file into place.
+        let ok = f.write_all(out.as_bytes()).is_ok() && f.sync_all().is_ok();
         drop(f);
         if !ok || n == 0 || std::fs::rename(&tmp, CALL_ORIG).is_err() {
+            if !ok {
+                crate::logw!("save {} failed", CALL_ORIG);
+            }
             let _ = std::fs::remove_file(&tmp);
         }
     }
@@ -735,41 +723,17 @@ impl Mixer {
             Ok(f) => f,
             Err(_) => return Err(-2),
         };
-        const TYPES: [&str; 7] = ["none", "bool", "int", "enum", "bytes", "iec958", "int64"];
+        let mut out = String::new();
         let mut n = 0i32;
         for id in ids.iter().take(used as usize) {
             let Some(info) = ctl_info_numid(self.ctl, id.numid) else {
                 continue;
             };
-            let name = kernel_name(&info.id.name);
-            let ty = TYPES.get(info.type_ as usize).copied().unwrap_or("?");
-            let _ = write!(f, "{}\t{}\t{}\t{}\t", info.id.numid, name, ty, info.count);
-            match info.type_ {
-                ELEM_TYPE_INTEGER => {
-                    let (min, max) = info_integer(&info);
-                    let _ = write!(f, "{}..{}", min, max);
-                }
-                ELEM_TYPE_INTEGER64 => unsafe {
-                    let _ = write!(
-                        f,
-                        "{}..{}",
-                        info.value.integer64.min, info.value.integer64.max
-                    );
-                },
-                ELEM_TYPE_ENUMERATED => {
-                    let items = enum_items(self.ctl, &info, 64 * NAME_LEN);
-                    let _ = f.write_all(items.as_bytes());
-                    let count = info_enum_items(&info);
-                    if count > 64 {
-                        let _ = write!(f, "|...({})", count);
-                    }
-                }
-                _ => {}
-            }
-            let _ = writeln!(f);
+            out.push_str(&inventory_line(self.ctl, &info));
             n += 1;
         }
-        let ok = f.flush().is_ok() && f.sync_all().is_ok();
+        // A full disk must not rename a truncated list into place.
+        let ok = f.write_all(out.as_bytes()).is_ok() && f.flush().is_ok();
         drop(f);
         if !ok || std::fs::rename(&tmp, path).is_err() {
             crate::loge!("inventory: writing {} failed", tmp);
@@ -789,6 +753,49 @@ impl Mixer {
         };
         Some((info.count, items))
     }
+}
+
+/// One call-originals line: "<name>\t<v1>,<v2>...\n" with the control's saved values.
+fn call_orig_line(m: &Managed) -> String {
+    let count = (m.count as usize).min(MAX_VALUES);
+    let values: Vec<String> = (0..count)
+        .map(|k| {
+            if m.enumerated {
+                (elem_enum(&m.orig, k) as i64).to_string()
+            } else {
+                (elem_integer(&m.orig, k) as i64).to_string()
+            }
+        })
+        .collect();
+    format!("{}\t{}\n", m.name, values.join(","))
+}
+
+/// One inventory line: numid, name, type, count and the range or the enum items, tab-separated.
+fn inventory_line(ctl: RawFd, info: &ElemInfo) -> String {
+    const TYPES: [&str; 7] = ["none", "bool", "int", "enum", "bytes", "iec958", "int64"];
+    let name = kernel_name(&info.id.name);
+    let ty = TYPES.get(info.type_ as usize).copied().unwrap_or("?");
+    let mut line = format!("{}\t{}\t{}\t{}\t", info.id.numid, name, ty, info.count);
+    match info.type_ {
+        ELEM_TYPE_INTEGER => {
+            let (min, max) = info_integer(info);
+            line.push_str(&format!("{}..{}", min, max));
+        }
+        ELEM_TYPE_INTEGER64 => {
+            let (min, max) = unsafe { (info.value.integer64.min, info.value.integer64.max) };
+            line.push_str(&format!("{}..{}", min, max));
+        }
+        ELEM_TYPE_ENUMERATED => {
+            line.push_str(&enum_items(ctl, info, 64 * NAME_LEN));
+            let count = info_enum_items(info);
+            if count > 64 {
+                line.push_str(&format!("|...({})", count));
+            }
+        }
+        _ => {}
+    }
+    line.push('\n');
+    line
 }
 
 fn create_0600(path: &str) -> std::io::Result<std::fs::File> {
