@@ -97,10 +97,10 @@ object CallAudioCheck {
         Regex("""\b(\w+)=(-?\d+)""").findAll(reply).associate { it.groupValues[1] to (it.groupValues[2].toLongOrNull() ?: 0) }
 
     /**
-     * A call's numbers: [what] went wrong ("ok": nothing), from [d] (AUDIO?) and the bridge's [b]; [scans] is who scanned
-     * for Bluetooth devices on this phone ([LinkRadio.scans]; "" when not asked).
+     * A call's numbers: [what] went wrong ("ok": nothing), from [d] (AUDIO?) and the bridge's [b]; [look] is what the
+     * Bluetooth stack said right after the call ([RadioLook.look]; null when not asked: no audio went over Bluetooth).
      */
-    fun detail(what: String, seconds: Long, d: Map<String, Long>, b: Bridge, reply: String, scans: String = ""): JSONObject {
+    fun detail(what: String, seconds: Long, d: Map<String, Long>, b: Bridge, reply: String, look: RadioLook.Look? = null): JSONObject {
         val toClient = ((d["sent"] ?: 0) - (d["noclient"] ?: 0)).coerceAtLeast(1)
         val live = (d["live"] ?: 0).coerceAtLeast(1)
         val capMs = d["capms"] ?: 0
@@ -114,12 +114,19 @@ object CallAudioCheck {
             .put("frames_per_write", if (b.writes > 0) "%.2f".format(java.util.Locale.ROOT, b.framesOut.toDouble() / b.writes) else "-")
             .put("bridges", b.sessions).put("held", held)
             .put("ble_interval_ms", BleLink.lastIntervalMs)
-            // The link's radio mode (sending/receiving), what was asked and heard about it, and the scans sharing the radio
-            .put("phy", LinkRadio.inUse).put("phy_log", LinkRadio.history()).put("bt_scans", scans)
+            .radio(look)
             .put("hotspot", hotspotAtStart).put("radio", runCatching { radio() }.getOrDefault(""))
             .put("daemon", reply.removePrefix("OK ").take(340))
             .put("bridge", "in=${b.framesIn} out=${b.framesOut} writes=${b.writes} dropped=${b.dropped}")
     }
+
+    /**
+     * The link's radio mode (sending/receiving), what was asked and heard about it, the scans sharing the radio, what the
+     * chip did with the call's last seconds and what the link agreed on ([HciRing]).
+     */
+    private fun JSONObject.radio(look: RadioLook.Look?): JSONObject =
+        put("phy", LinkRadio.inUse).put("phy_log", LinkRadio.history()).put("bt_scans", look?.scans.orEmpty())
+            .put("hci", look?.hci.orEmpty()).put("hci_link", look?.link.orEmpty())
 
     /**
      * [detail] as words, not JSON: the report's scrubber blanks quoted strings, and a JSON line then read
@@ -139,14 +146,14 @@ object CallAudioCheck {
         else -> "none"
     }
 
-    /** Daemon executor, at the call's end: [reply] is AUDIO?, [seconds] since the call connected, [scans] as in [detail]. */
-    fun check(reply: String, seconds: Long, scans: String = "") {
+    /** Daemon executor, at the call's end: [reply] is AUDIO?, [seconds] since the call connected, [look] as in [detail]. */
+    fun check(reply: String, seconds: Long, look: RadioLook.Look? = null) {
         if (!VoiceGate.fullVoice) return
         val d = totals(reply)
         if (d["live"] == null) return                                      // a daemon from before these totals
         val b = bridge()
         val what = judge(seconds, d, b, held)
-        val detail = detail(what ?: "ok", seconds, d, b, reply, scans)
+        val detail = detail(what ?: "ok", seconds, d, b, reply, look)
         last = detail; lastAt = android.os.SystemClock.elapsedRealtime()
         if (what == null) android.util.Log.i("HermesSimHost", line(detail)) else android.util.Log.w("HermesSimHost", line(detail))
     }

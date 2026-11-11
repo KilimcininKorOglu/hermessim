@@ -377,6 +377,8 @@ class BleLink(
                 resetStream(device.address)
                 LinkRadio.linkUp()
                 askPhy(device, "connected")
+                // What the link agreed on, once the two sides have settled it (packet length, interval): RadioLook
+                main.postDelayed({ RadioLook.linkLook() }, 6_000)
                 // A Mac that came in through the client's set switched it off: the iPhone must still find the host.
                 if (mac?.isMac(device.address) == true) restartAdvertising()
                 return

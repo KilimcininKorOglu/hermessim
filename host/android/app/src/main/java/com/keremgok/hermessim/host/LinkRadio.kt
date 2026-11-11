@@ -11,7 +11,8 @@ import android.util.Log
  * in bursts, or half of it (7 to 10 Nov 2026). One frame a packet or two made no difference, and the phone's audio
  * reached the A13 smoothly in the same calls: the limit sits in what the A13's radio sends, below anything the host
  * could see. Asking that host for the slower 1M mode did not help (the link really ran on it, nobody scanned, and the
- * phone got 59%), so every host asks for 2M again.
+ * phone got 59%), so every host asks for 2M again. What the chip itself did with the audio is read after the call
+ * from Android's own record of it ([RadioLook], [HciRing]).
  */
 object LinkRadio {
     private const val TAG = "HermesSimHost"
@@ -53,7 +54,7 @@ object LinkRadio {
     }
 
     /** A new link starts on 1M whatever the last one ran on. */
-    fun linkUp() { inUse = "?"; note("link up") }
+    fun linkUp() { inUse = "?"; RadioLook.forget(); note("link up") }
 
     // ---- who scans
 
@@ -126,13 +127,4 @@ object LinkRadio {
             else list.apps.entries.joinToString("; ") { (a, s) -> "$a: ${s.take(4).joinToString(" + ")}" }
         return apps.take(480) + if (stack.isEmpty()) "" else " | $stack"
     }
-
-    /**
-     * [scans] of this phone right now, as root; "" when the dump can't be had in two seconds. Asked at a call's end,
-     * never during it: the dump runs inside the Bluetooth stack.
-     */
-    fun scansNow(): String = runCatching {
-        val r = Root.sh("dumpsys bluetooth_manager | sed -n '/GATT Scanner Map/,/GATT Advertiser Map/p;/Le scan:/p' | head -c 16000", 2_000)
-        scans(r.out)
-    }.onFailure { Log.w(TAG, "BLE scans: no dump: $it") }.getOrDefault("")
 }
