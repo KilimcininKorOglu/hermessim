@@ -171,193 +171,179 @@ mod daemon {
         }
     }
 
+    /// One protocol line: every command gets exactly one reply line.
     fn handle_line(c: &mut Conn, line: &str, mixer: &mut Mixer, boxm: &mut BoxState) {
         let mut t = Tokens::new(line);
         let Some(cmd) = t.next() else { return };
-        match cmd {
-            "HELLO" => c.reply(format!(
+        let reply = match cmd {
+            "HELLO" => format!(
                 "OK hermessimd {} card={} call={} session={}",
                 VERSION, mixer.card, mixer.call as i32, mixer.session
-            )),
-            "STATUS" => {
-                let names = mixer.status_names();
-                c.reply(format!(
-                    "OK call={} session={} managed={} silence={} safe={} {}",
-                    mixer.call as i32,
-                    mixer.session,
-                    mixer.managed.len(),
-                    mixer.perm.len(),
-                    mixer.safe as i32,
-                    names
-                ));
-            }
-            "SET" => {
-                let key = t.next();
-                let val = t.rest();
-                let ok = match (key, val) {
-                    (Some(key), Some(val)) => mixer.set_key(key, val),
-                    _ => false,
-                };
-                if ok {
-                    c.reply("OK".into());
-                } else {
-                    c.reply("ERR bad SET".into());
-                }
-            }
-            "CALL_START" => {
-                let session = t.next().map(c_atoi).unwrap_or(1);
-                if session != 1 && session != 2 {
-                    c.reply("ERR session must be 1 or 2".into());
-                    return;
-                }
-                let n = mixer.call_start(session);
-                c.reply(format!("OK applied={}", n));
-            }
-            "IFSTATS" => {
-                if let Some((rx, tx)) = ifstats(t.next()) {
-                    c.reply(format!("OK rx={} tx={}", rx, tx));
-                } else {
-                    c.reply("ERR no such interface".into());
-                }
-            }
-            "NEIGH" => {
-                let mut list = String::new();
-                let mut n = 0;
-                if neigh(t.next(), &mut list, &mut n) {
-                    c.reply(format!("OK {} {}", n, list));
-                } else {
-                    c.reply("ERR bad interface".into());
-                }
-            }
+            ),
+            "STATUS" => cmd_status(mixer),
+            "SET" => cmd_set(&mut t, mixer),
+            "CALL_START" => cmd_call_start(&mut t, mixer),
+            "IFSTATS" => cmd_ifstats(&mut t),
+            "NEIGH" => cmd_neigh(&mut t),
             "CALL_END" => {
                 mixer.restore_all("CALL_END");
-                c.reply("OK".into());
+                "OK".into()
             }
-            "INVENTORY" => {
-                if mixer.call {
-                    c.reply("ERR in call".into());
-                } else {
-                    match mixer.inventory(INVENTORY_FILE) {
-                        Ok(n) => c.reply(format!("OK {} controls in {}", n, INVENTORY_FILE)),
-                        Err(-1) => c.reply("ERR no mixer".into()),
-                        Err(_) => c.reply("ERR write failed".into()),
-                    }
-                }
-            }
-            "HAS" => {
-                let Some(name) = t.rest() else {
-                    c.reply("ERR no such control".into());
-                    return;
-                };
-                match mixer.has(name) {
-                    Some((count, items)) => {
-                        let suffix = if items.is_empty() {
-                            String::new()
-                        } else {
-                            format!(" items={}", items)
-                        };
-                        c.reply(format!("OK count={}{}", count, suffix));
-                    }
-                    None => c.reply("ERR no such control".into()),
-                }
-            }
-            "AUDIO?" => {
-                c.reply(format!(
-                    "OK call={} session={} silence={} {}",
-                    mixer.call as i32,
-                    mixer.session,
-                    mixer.perm.len(),
-                    crate::audio::totals()
-                ));
-            }
+            "INVENTORY" => cmd_inventory(mixer),
+            "HAS" => cmd_has(&mut t, mixer),
+            "AUDIO?" => format!(
+                "OK call={} session={} silence={} {}",
+                mixer.call as i32,
+                mixer.session,
+                mixer.perm.len(),
+                crate::audio::totals()
+            ),
             "STALL" => {
                 crate::audio::stall(t.next().map(c_atoi).unwrap_or(0));
-                c.reply("OK".into());
+                "OK".into()
             }
-            "TUNE" => {
-                let prime = t.next();
-                let keep = t.next();
-                let period = t.next();
-                if let (Some(p), Some(k), Some(per)) = (prime, keep, period) {
-                    if !crate::audio::tune(c_atoi(p), c_atoi(k), c_atoi(per)) {
-                        c.reply("ERR bad values".into());
-                        return;
-                    }
-                }
-                c.reply(format!("OK {}", crate::audio::tune_get()));
-            }
-            "POWERKEY" => {
-                let on = t.next().map(|v| c_atoi(v) == 1).unwrap_or(false);
-                let n = boxm.power_block(on);
-                if n < 0 {
-                    c.reply("ERR no escape gesture on this phone".into());
-                } else {
-                    c.reply(format!("OK {}", n));
-                }
-            }
-            "SCREEN_OFF" | "WAKE" => {
-                if boxmode::screen(cmd == "WAKE") == 0 {
-                    c.reply("OK".into());
-                } else {
-                    c.reply("ERR spawn failed".into());
-                }
-            }
-            "ROLE" => {
-                let role = t.next();
-                let pkg = t.next();
-                let rc = match (role, pkg) {
-                    (Some(role), Some(pkg)) => boxmode::role(role, pkg),
-                    _ => -1,
-                };
-                if rc == 0 {
-                    c.reply("OK".into());
-                } else {
-                    c.reply("ERR bad role or package".into());
-                }
-            }
-            "NETBLOCK" => {
-                let uid = t.next();
-                let on = t.next();
-                let ok = match (uid, on) {
-                    (Some(uid), Some(on)) => boxm.netblock(c_atoi(uid), c_atoi(on) != 0) == 0,
-                    _ => false,
-                };
-                if ok {
-                    c.reply("OK".into());
-                } else {
-                    c.reply("ERR bad uid".into());
-                }
-            }
-            "NETCYCLE" => {
-                let rc = boxm.net_cycle(t.next().map(c_atoi).unwrap_or(0));
-                c.reply(
-                    match rc {
-                        0 => "OK",
-                        -2 => "ERR busy",
-                        _ => "ERR failed",
-                    }
-                    .into(),
-                );
-            }
-            "CHARGE?" => {
-                if let Some(node) = boxm.charge_node() {
-                    c.reply(format!("OK {} {}", node, boxm.charge_status()));
-                } else {
-                    c.reply("ERR unsupported".into());
-                }
-            }
-            "CHARGE" => {
-                let rc = boxm.charge(t.next().map(c_atoi).unwrap_or(-1));
-                if rc == 0 {
-                    c.reply("OK".into());
-                } else if rc == -2 {
-                    c.reply("ERR unsupported".into());
-                } else {
-                    c.reply("ERR failed".into());
-                }
-            }
-            _ => c.reply("ERR unknown command".into()),
+            "TUNE" => cmd_tune(&mut t),
+            "POWERKEY" => cmd_powerkey(&mut t, boxm),
+            "SCREEN_OFF" | "WAKE" => ok_or(boxmode::screen(cmd == "WAKE") == 0, "ERR spawn failed"),
+            "ROLE" => cmd_role(&mut t),
+            "NETBLOCK" => cmd_netblock(&mut t, boxm),
+            "NETCYCLE" => cmd_netcycle(&mut t, boxm),
+            "CHARGE?" => cmd_charge_query(boxm),
+            "CHARGE" => cmd_charge(&mut t, boxm),
+            _ => "ERR unknown command".into(),
+        };
+        c.reply(reply);
+    }
+
+    fn ok_or(ok: bool, err: &str) -> String {
+        if ok { "OK" } else { err }.into()
+    }
+
+    fn cmd_status(mixer: &Mixer) -> String {
+        format!(
+            "OK call={} session={} managed={} silence={} safe={} {}",
+            mixer.call as i32,
+            mixer.session,
+            mixer.managed.len(),
+            mixer.perm.len(),
+            mixer.safe as i32,
+            mixer.status_names()
+        )
+    }
+
+    fn cmd_set(t: &mut Tokens, mixer: &mut Mixer) -> String {
+        let key = t.next();
+        let val = t.rest();
+        let ok = match (key, val) {
+            (Some(key), Some(val)) => mixer.set_key(key, val),
+            _ => false,
+        };
+        ok_or(ok, "ERR bad SET")
+    }
+
+    fn cmd_call_start(t: &mut Tokens, mixer: &mut Mixer) -> String {
+        let session = t.next().map(c_atoi).unwrap_or(1);
+        if session != 1 && session != 2 {
+            return "ERR session must be 1 or 2".into();
         }
+        format!("OK applied={}", mixer.call_start(session))
+    }
+
+    fn cmd_ifstats(t: &mut Tokens) -> String {
+        match ifstats(t.next()) {
+            Some((rx, tx)) => format!("OK rx={} tx={}", rx, tx),
+            None => "ERR no such interface".into(),
+        }
+    }
+
+    fn cmd_neigh(t: &mut Tokens) -> String {
+        let mut list = String::new();
+        let mut n = 0;
+        if neigh(t.next(), &mut list, &mut n) {
+            format!("OK {} {}", n, list)
+        } else {
+            "ERR bad interface".into()
+        }
+    }
+
+    fn cmd_inventory(mixer: &mut Mixer) -> String {
+        if mixer.call {
+            return "ERR in call".into();
+        }
+        match mixer.inventory(INVENTORY_FILE) {
+            Ok(n) => format!("OK {} controls in {}", n, INVENTORY_FILE),
+            Err(-1) => "ERR no mixer".into(),
+            Err(_) => "ERR write failed".into(),
+        }
+    }
+
+    fn cmd_has(t: &mut Tokens, mixer: &mut Mixer) -> String {
+        match t.rest().and_then(|name| mixer.has(name)) {
+            Some((count, items)) if items.is_empty() => format!("OK count={}", count),
+            Some((count, items)) => format!("OK count={} items={}", count, items),
+            None => "ERR no such control".into(),
+        }
+    }
+
+    fn cmd_tune(t: &mut Tokens) -> String {
+        let (prime, keep, period) = (t.next(), t.next(), t.next());
+        if let (Some(p), Some(k), Some(per)) = (prime, keep, period) {
+            if !crate::audio::tune(c_atoi(p), c_atoi(k), c_atoi(per)) {
+                return "ERR bad values".into();
+            }
+        }
+        format!("OK {}", crate::audio::tune_get())
+    }
+
+    fn cmd_powerkey(t: &mut Tokens, boxm: &mut BoxState) -> String {
+        let on = t.next().map(|v| c_atoi(v) == 1).unwrap_or(false);
+        let n = boxm.power_block(on);
+        if n < 0 {
+            "ERR no escape gesture on this phone".into()
+        } else {
+            format!("OK {}", n)
+        }
+    }
+
+    fn cmd_role(t: &mut Tokens) -> String {
+        let rc = match (t.next(), t.next()) {
+            (Some(role), Some(pkg)) => boxmode::role(role, pkg),
+            _ => -1,
+        };
+        ok_or(rc == 0, "ERR bad role or package")
+    }
+
+    fn cmd_netblock(t: &mut Tokens, boxm: &mut BoxState) -> String {
+        let ok = match (t.next(), t.next()) {
+            (Some(uid), Some(on)) => boxm.netblock(c_atoi(uid), c_atoi(on) != 0) == 0,
+            _ => false,
+        };
+        ok_or(ok, "ERR bad uid")
+    }
+
+    fn cmd_netcycle(t: &mut Tokens, boxm: &mut BoxState) -> String {
+        match boxm.net_cycle(t.next().map(c_atoi).unwrap_or(0)) {
+            0 => "OK",
+            -2 => "ERR busy",
+            _ => "ERR failed",
+        }
+        .into()
+    }
+
+    fn cmd_charge_query(boxm: &mut BoxState) -> String {
+        match boxm.charge_node() {
+            Some(node) => format!("OK {} {}", node, boxm.charge_status()),
+            None => "ERR unsupported".into(),
+        }
+    }
+
+    fn cmd_charge(t: &mut Tokens, boxm: &mut BoxState) -> String {
+        match boxm.charge(t.next().map(c_atoi).unwrap_or(-1)) {
+            0 => "OK",
+            -2 => "ERR unsupported",
+            _ => "ERR failed",
+        }
+        .into()
     }
 
     fn ifstats(iface: Option<&str>) -> Option<(i64, i64)> {
@@ -488,67 +474,280 @@ mod daemon {
         valid_uid(s)
     }
 
-    pub fn run() -> i32 {
-        let mut allowed: u32 = u32::MAX;
-        let mut card: i32 = 0;
-        let mut card_given = false;
-        let mut loopback = false;
-        let mut safe = false;
+    struct Args {
+        allowed: u32,
+        card: Option<i32>,
+        loopback: bool,
+        safe: bool,
+    }
 
+    /// The command line; Err holds the exit code of a `--client` run.
+    fn parse_args() -> Result<Args, i32> {
+        let mut a = Args {
+            allowed: u32::MAX,
+            card: None,
+            loopback: false,
+            safe: false,
+        };
         let args: Vec<String> = std::env::args().collect();
         let mut i = 1;
         while i < args.len() {
-            match args[i].as_str() {
-                "--client" if i + 1 < args.len() => {
-                    return run_client(&args[i + 1]);
-                }
-                "--uid" if i + 1 < args.len() => {
+            let next = args.get(i + 1);
+            match (args[i].as_str(), next) {
+                ("--client", Some(script)) => return Err(run_client(script)),
+                ("--uid", Some(v)) => {
                     i += 1;
-                    match parse_uid(&args[i]) {
-                        Some(uid) => allowed = uid,
-                        None => {
-                            crate::loge!("--uid '{}' is not a uid: root only", args[i]);
-                            allowed = u32::MAX;
-                        }
-                    }
+                    a.allowed = parse_uid(v).unwrap_or_else(|| {
+                        crate::loge!("--uid '{}' is not a uid: root only", v);
+                        u32::MAX
+                    });
                 }
-                "--card" if i + 1 < args.len() => {
+                ("--card", Some(v)) => {
                     i += 1;
-                    card = c_atoi(&args[i]);
-                    card_given = true;
+                    a.card = Some(c_atoi(v));
                 }
-                "--loopback" => loopback = true,
-                "--safe" => {
-                    safe = true;
+                ("--loopback", _) => a.loopback = true,
+                ("--safe", _) => {
+                    a.safe = true;
                     crate::loge!("SAFE MODE: started after repeated failures; no mixer writes");
                 }
                 _ => {}
             }
             i += 1;
         }
+        Ok(a)
+    }
 
-        let mut ctl = -1;
-        let first = if card_given { card } else { 0 };
-        let last = if card_given { card + 1 } else { 8 };
-        let mut c = first;
-        while c < last {
-            let path = format!("/dev/snd/controlC{}", c);
-            if let Some(fd) = crate::alsa::open_ctl(&path) {
-                ctl = fd;
-                card = c;
+    /// The sound card's control node: the given card, else the first of cards 0-7 that opens.
+    /// Returns the fd (-1 when none opened) and the card number.
+    fn open_card(given: Option<i32>) -> (libc::c_int, i32) {
+        let cards = match given {
+            Some(c) => c..c + 1,
+            None => 0..8,
+        };
+        let mut found = (-1, given.unwrap_or(0));
+        for c in cards {
+            if let Some(fd) = crate::alsa::open_ctl(&format!("/dev/snd/controlC{}", c)) {
+                found = (fd, c);
                 break;
             }
-            c += 1;
         }
-        if ctl < 0 {
+        if found.0 < 0 {
             crate::loge!(
                 "no sound card mixer ({}): running without call audio",
                 crate::platform::errstr()
             );
-        } else if !crate::alsa::subscribe_events(ctl) {
+        } else if !crate::alsa::subscribe_events(found.0) {
             crate::logw!("event subscribe failed: {}", crate::platform::errstr());
         }
+        found
+    }
 
+    fn uid_text(allowed: u32) -> i32 {
+        if allowed == u32::MAX {
+            -1
+        } else {
+            allowed as i32
+        }
+    }
+
+    fn pollfd(fd: libc::c_int, events: libc::c_short) -> libc::pollfd {
+        libc::pollfd {
+            fd,
+            events,
+            revents: 0,
+        }
+    }
+
+    const GONE: libc::c_short = libc::POLLERR | libc::POLLHUP | libc::POLLNVAL;
+    type PollSet = [libc::pollfd; 5 + BOX_MAX_KEYDEVS];
+
+    /// The daemon's main-loop state.
+    struct Daemon {
+        ls: libc::c_int,
+        uev: libc::c_int,
+        allowed: u32,
+        mixer: Mixer,
+        boxm: BoxState,
+        conns: [Conn; 2],
+        heartbeat: i64,
+    }
+
+    impl Daemon {
+        /// Listener, mixer, conns and key devices, in the main loop's fixed slots.
+        fn poll_set(&self) -> (PollSet, usize) {
+            let mut fds = [pollfd(-1, 0); 5 + BOX_MAX_KEYDEVS];
+            let conn_events =
+                |c: &Conn| libc::POLLIN | if c.out_used > 0 { libc::POLLOUT } else { 0 };
+            fds[0] = pollfd(self.ls, libc::POLLIN);
+            fds[1] = pollfd(self.mixer.ctl, libc::POLLIN);
+            fds[2] = pollfd(self.conns[0].fd, conn_events(&self.conns[0]));
+            fds[3] = pollfd(self.uev, libc::POLLIN);
+            fds[4] = pollfd(self.conns[1].fd, conn_events(&self.conns[1]));
+            let nk = self.boxm.key_count() as usize;
+            for (k, slot) in fds[5..5 + nk].iter_mut().enumerate() {
+                *slot = pollfd(self.boxm.key_fd(k), libc::POLLIN);
+            }
+            (fds, nk)
+        }
+
+        /// Timed work before each poll; returns the poll timeout in ms (the next heartbeat, or
+        /// the crumb's deadline when that comes first).
+        fn housekeeping(&mut self) -> i64 {
+            self.boxm.reap();
+            self.boxm.log_watch();
+            self.boxm.power_check();
+            let now = crate::platform::now_sec();
+            if now >= self.heartbeat {
+                self.boxm.charge_check();
+                self.heartbeat = now + 60;
+            }
+            let wait_ms = (self.heartbeat - now) * 1000;
+            let crumb = self.mixer.crumb.tick();
+            if crumb >= 0 && crumb + 50 < wait_ms {
+                crumb + 50
+            } else {
+                wait_ms
+            }
+        }
+
+        /// Handle one poll's events; Some(exit code) ends the loop.
+        fn dispatch(&mut self, fds: &PollSet, nk: usize) -> Option<i32> {
+            if fds[1].revents & GONE != 0 {
+                crate::loge!("sound card gone: restarting");
+                unsafe { libc::close(self.mixer.ctl) };
+                self.mixer.ctl = -1;
+                return Some(3);
+            }
+            for k in 0..nk {
+                if fds[5 + k].revents & GONE != 0 {
+                    self.boxm.key_drop(k);
+                }
+            }
+            if fds[1].revents & libc::POLLIN != 0 {
+                self.mixer.drain_ctl_events();
+            }
+            if fds[3].revents & libc::POLLIN != 0 {
+                self.boxm.uevent(self.uev);
+            }
+            self.key_events(fds, nk);
+            if fds[0].revents & libc::POLLIN != 0 {
+                self.accept();
+            }
+            self.serve(0, &fds[2]);
+            self.serve(1, &fds[4]);
+            None
+        }
+
+        fn key_events(&mut self, fds: &PollSet, nk: usize) {
+            for k in 0..nk {
+                let kfd = self.boxm.key_fd(k);
+                if fds[5 + k].revents & libc::POLLIN != 0 && kfd >= 0 && kfd == fds[5 + k].fd {
+                    self.boxm.key_event(kfd);
+                }
+            }
+        }
+
+        /// A new client takes the owner slot (the app's uid, or anyone when no uid was given)
+        /// or the tool slot, replacing the one there.
+        fn accept(&mut self) {
+            let c = unsafe {
+                libc::accept4(
+                    self.ls,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
+                )
+            };
+            if c < 0 {
+                return;
+            }
+            let Some(uid) = peer_uid(c, self.allowed) else {
+                unsafe { libc::close(c) };
+                return;
+            };
+            let owner = self.allowed == u32::MAX || uid == self.allowed;
+            let conn = &mut self.conns[if owner { 0 } else { 1 }];
+            if conn.fd >= 0 {
+                conn.reply("ERR replaced by a new client".into());
+                conn.close();
+            }
+            conn.fd = c;
+        }
+
+        /// Flush and read connection `k`; a gone owner mid-call restores the call's controls.
+        fn serve(&mut self, k: usize, pf: &libc::pollfd) {
+            let c = &mut self.conns[k];
+            if c.fd < 0 || pf.fd != c.fd {
+                return;
+            }
+            if pf.revents & libc::POLLOUT != 0 {
+                c.flush();
+            }
+            if pf.revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) == 0 {
+                return;
+            }
+            if c.read(&mut self.mixer, &mut self.boxm) {
+                return;
+            }
+            crate::logi!("{} gone", if c.owner { "client" } else { "tool client" });
+            if c.owner && self.mixer.call {
+                self.mixer.restore_all("client disconnected mid-call");
+            }
+            c.close();
+        }
+
+        /// Restore every held control and stop; SIGUSR1 (an update restart) keeps the silence
+        /// controls and the charge limit held and exits with EXIT_UPDATE.
+        fn shutdown(mut self, exit_code: i32) -> i32 {
+            self.mixer.restore_all("exit");
+            let keep = KEEP_SILENCE.load(Ordering::Relaxed);
+            if keep {
+                crate::logi!(
+                    "restart for an update: silence controls ({}) and charge limit left held",
+                    self.mixer.perm.len()
+                );
+            } else {
+                self.boxm.charge_shutdown();
+                self.mixer.restore_perm();
+            }
+            crate::audio::shutdown();
+            self.mixer.crumb.clear();
+            crate::logi!("hermessimd stopped");
+            if keep && exit_code == 0 {
+                EXIT_UPDATE
+            } else {
+                exit_code
+            }
+        }
+    }
+
+    /// Mixer and box state from the parsed arguments, with the crash check and the call
+    /// originals restore done before any client connects.
+    fn start(a: &Args, ctl: libc::c_int, card: i32) -> (Mixer, BoxState) {
+        let mut mixer = Mixer::new(card, ctl);
+        mixer.profile.loopback = a.loopback;
+        let mut boxm = BoxState::new();
+        boxm.charge_init();
+        // One safe flag, as in the C daemon: --safe and a crash during a mixer write both stop every write.
+        mixer.crumb.safe = a.safe;
+        mixer.crumb.start();
+        mixer.safe = mixer.crumb.safe;
+        mixer.clear_device_mutes();
+        if !mixer.safe {
+            mixer.call_orig_restore();
+        }
+        crate::audio::init(uid_text(a.allowed));
+        boxm.keys_open();
+        (mixer, boxm)
+    }
+
+    pub fn run() -> i32 {
+        let a = match parse_args() {
+            Ok(a) => a,
+            Err(rc) => return rc,
+        };
+        let (ctl, card) = open_card(a.card);
         let ls = match crate::platform::bind_abstract(SOCK_NAME, libc::SOCK_STREAM, 2) {
             Ok(fd) => fd,
             Err(e) => {
@@ -560,27 +759,8 @@ mod daemon {
                 return 1;
             }
         };
-
         let waitmask = unsafe { install_signals() };
-
-        let mut mixer = Mixer::new(card, ctl);
-        mixer.profile.loopback = loopback;
-        let mut boxm = BoxState::new();
-        boxm.charge_init();
-        // One safe flag, as in the C daemon: --safe and a crash during a mixer write both stop every write.
-        mixer.crumb.safe = safe;
-        mixer.crumb.start();
-        mixer.safe = mixer.crumb.safe;
-        mixer.clear_device_mutes();
-        if !mixer.safe {
-            mixer.call_orig_restore();
-        }
-        crate::audio::init(if allowed == u32::MAX {
-            -1
-        } else {
-            allowed as i32
-        });
-        boxm.keys_open();
+        let (mixer, mut boxm) = start(&a, ctl, card);
         let uev = BoxState::uevent_open();
         boxm.announce();
         boxm.log_capture();
@@ -589,201 +769,44 @@ mod daemon {
             VERSION,
             card,
             String::from_utf8_lossy(SOCK_NAME),
-            if allowed == u32::MAX {
-                -1
-            } else {
-                allowed as i32
-            }
+            uid_text(a.allowed)
         );
+        let mut d = Daemon {
+            ls,
+            uev,
+            allowed: a.allowed,
+            mixer,
+            boxm,
+            conns: [Conn::new(true), Conn::new(false)],
+            heartbeat: crate::platform::now_sec() + 60,
+        };
+        let exit_code = main_loop(&mut d, &waitmask);
+        d.shutdown(exit_code)
+    }
 
-        let mut conns = [Conn::new(true), Conn::new(false)];
-        let mut heartbeat = crate::platform::now_sec() + 60;
-        let mut exit_code = 0i32;
-
+    /// Poll until a stop signal, a poll error or a lost sound card; returns the exit code.
+    fn main_loop(d: &mut Daemon, waitmask: &libc::sigset_t) -> i32 {
         while !STOP.load(Ordering::Relaxed) {
-            let mut fds = [libc::pollfd {
-                fd: -1,
-                events: 0,
-                revents: 0,
-            }; 5 + BOX_MAX_KEYDEVS];
-            fds[0] = libc::pollfd {
-                fd: ls,
-                events: libc::POLLIN,
-                revents: 0,
-            };
-            fds[1] = libc::pollfd {
-                fd: mixer.ctl,
-                events: libc::POLLIN,
-                revents: 0,
-            };
-            fds[2] = libc::pollfd {
-                fd: conns[0].fd,
-                events: libc::POLLIN
-                    | if conns[0].out_used > 0 {
-                        libc::POLLOUT
-                    } else {
-                        0
-                    },
-                revents: 0,
-            };
-            fds[3] = libc::pollfd {
-                fd: uev,
-                events: libc::POLLIN,
-                revents: 0,
-            };
-            fds[4] = libc::pollfd {
-                fd: conns[1].fd,
-                events: libc::POLLIN
-                    | if conns[1].out_used > 0 {
-                        libc::POLLOUT
-                    } else {
-                        0
-                    },
-                revents: 0,
-            };
-            let nk = boxm.key_count();
-            for k in 0..nk as usize {
-                fds[5 + k] = libc::pollfd {
-                    fd: boxm.key_fd(k),
-                    events: libc::POLLIN,
-                    revents: 0,
-                };
-            }
-
-            boxm.reap();
-            boxm.log_watch();
-            boxm.power_check();
-            let now = crate::platform::now_sec();
-            if now >= heartbeat {
-                boxm.charge_check();
-                heartbeat = now + 60;
-            }
-            let mut wait_ms = (heartbeat - now) * 1000;
-            let crumb = mixer.crumb.tick();
-            if crumb >= 0 && crumb + 50 < wait_ms {
-                wait_ms = crumb + 50;
-            }
+            let (mut fds, nk) = d.poll_set();
+            let wait_ms = d.housekeeping();
             let to = libc::timespec {
                 tv_sec: (wait_ms / 1000) as libc::time_t,
                 tv_nsec: ((wait_ms % 1000) * 1_000_000) as libc::c_long,
             };
-            let pr = unsafe {
-                libc::ppoll(
-                    fds.as_mut_ptr(),
-                    (5 + nk as usize) as libc::nfds_t,
-                    &to,
-                    &waitmask,
-                )
-            };
-            if pr < 0 {
-                if std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
-                    continue;
-                }
+            let pr =
+                unsafe { libc::ppoll(fds.as_mut_ptr(), (5 + nk) as libc::nfds_t, &to, waitmask) };
+            if pr < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
                 crate::loge!("poll: {}", crate::platform::errstr());
                 break;
             }
-            if pr == 0 {
+            if pr <= 0 {
                 continue;
             }
-
-            if fds[1].revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
-                crate::loge!("sound card gone: restarting");
-                unsafe { libc::close(mixer.ctl) };
-                mixer.ctl = -1;
-                exit_code = 3;
-                break;
-            }
-            for k in 0..nk as usize {
-                if fds[5 + k].revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
-                    boxm.key_drop(k);
-                }
-            }
-
-            if fds[1].revents & libc::POLLIN != 0 {
-                mixer.drain_ctl_events();
-            }
-            if fds[3].revents & libc::POLLIN != 0 {
-                boxm.uevent(uev);
-            }
-            for k in 0..nk as usize {
-                if fds[5 + k].revents & libc::POLLIN == 0 {
-                    continue;
-                }
-                let kfd = boxm.key_fd(k);
-                if kfd < 0 || kfd != fds[5 + k].fd {
-                    continue;
-                }
-                boxm.key_event(kfd);
-            }
-
-            if fds[0].revents & libc::POLLIN != 0 {
-                let c = unsafe {
-                    libc::accept4(
-                        ls,
-                        std::ptr::null_mut(),
-                        std::ptr::null_mut(),
-                        libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
-                    )
-                };
-                let uid = if c >= 0 { peer_uid(c, allowed) } else { None };
-                if c >= 0 {
-                    match uid {
-                        None => unsafe {
-                            libc::close(c);
-                        },
-                        Some(uid) => {
-                            let owner = allowed == u32::MAX || uid == allowed;
-                            let slot = if owner { 0 } else { 1 };
-                            if conns[slot].fd >= 0 {
-                                conns[slot].reply("ERR replaced by a new client".into());
-                                conns[slot].close();
-                            }
-                            conns[slot].fd = c;
-                        }
-                    }
-                }
-            }
-
-            for k in 0..2usize {
-                let pf = &fds[if k == 0 { 2 } else { 4 }];
-                let c = &mut conns[k];
-                if c.fd < 0 || pf.fd != c.fd {
-                    continue;
-                }
-                if pf.revents & libc::POLLOUT != 0 {
-                    c.flush();
-                }
-                if pf.revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) == 0 {
-                    continue;
-                }
-                if c.read(&mut mixer, &mut boxm) {
-                    continue;
-                }
-                crate::logi!("{} gone", if c.owner { "client" } else { "tool client" });
-                if c.owner && mixer.call {
-                    mixer.restore_all("client disconnected mid-call");
-                }
-                c.close();
+            if let Some(code) = d.dispatch(&fds, nk) {
+                return code;
             }
         }
-
-        mixer.restore_all("exit");
-        if KEEP_SILENCE.load(Ordering::Relaxed) {
-            crate::logi!(
-                "restart for an update: silence controls ({}) and charge limit left held",
-                mixer.perm.len()
-            );
-        } else {
-            boxm.charge_shutdown();
-            mixer.restore_perm();
-        }
-        crate::audio::shutdown();
-        mixer.crumb.clear();
-        if KEEP_SILENCE.load(Ordering::Relaxed) && exit_code == 0 {
-            exit_code = EXIT_UPDATE;
-        }
-        crate::logi!("hermessimd stopped");
-        exit_code
+        0
     }
 
     unsafe fn install_signals() -> libc::sigset_t {
