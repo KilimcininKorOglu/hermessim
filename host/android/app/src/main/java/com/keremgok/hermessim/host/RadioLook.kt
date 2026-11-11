@@ -53,16 +53,16 @@ object RadioLook {
         val age = rest.substringBefore('\n').removePrefix("age ").trim().toLongOrNull() ?: -1
         val b64 = rest.substringAfter('\n').filterNot { it.isWhitespace() }.removeSuffix("timeout")
         val file = java.util.Base64.getDecoder().decode(b64.take(b64.length - b64.length % 4))
-        val recs = HciRing.records(file)
-        if (recs.isEmpty()) return Look(scans, null,
-            "record not readable (${file.size} B, starts ${file.take(16).joinToString("") { "%02x".format(it) }})", "")
+        val (recs, how) = HciFile.read(file)
+        val stale = if (age in 0..5) "" else ", written $age s ago"
+        if (recs.isEmpty()) return Look(scans, null, "record not readable (${HciFile.probe(file)}$stale)", "")
         links = HciRing.links(recs, links)
         HciRing.buffers(recs).let { if (it.isNotEmpty()) buffers = it }
         val s = HciRing.sending(recs)
-        val stale = if (age in 0..5) "" else ", written $age s ago"
         val link = (s?.let { links[it.handle] } ?: links.values.singleOrNull())?.text().orEmpty() +
             if (buffers.isEmpty()) "" else ", chip room $buffers"
-        return Look(scans, s, (s?.text() ?: "no data sent") + " | ${HciRing.size(recs)}$stale", link.removePrefix(", "))
+        val layout = if (how.isEmpty()) "" else ", $how"
+        return Look(scans, s, (s?.text() ?: "no data sent") + " | ${HciRing.size(recs)}$layout$stale", link.removePrefix(", "))
     }
 
     /**

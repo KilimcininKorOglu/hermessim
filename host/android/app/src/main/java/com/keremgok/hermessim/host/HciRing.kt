@@ -29,24 +29,8 @@ object HciRing {
         val isOut get() = kind == 2 && !fromChip && d.size >= 4
     }
 
-    /** The file's records in order; empty when it isn't a btsnoop file of serial-line (H4) packets. */
-    fun records(file: ByteArray): List<Rec> {
-        if (file.size < 16 || String(file, 0, 7, Charsets.US_ASCII) != "btsnoop" || be32(file, 12) != 1002L) return emptyList()
-        val out = ArrayList<Rec>()
-        var o = 16
-        while (o + 24 <= file.size) {
-            val orig = be32(file, o); val incl = be32(file, o + 4).toInt(); val flags = be32(file, o + 8)
-            val t = (be32(file, o + 16) shl 32) or be32(file, o + 20)
-            o += 24
-            if (incl < 1 || incl > 70_000 || o + incl > file.size) break        // cut off mid-record: what came before stands
-            out += Rec(t, flags and 1L == 1L, file[o].toInt() and 0xff, (orig - 1).toInt(), file.copyOfRange(o + 1, o + incl))
-            o += incl
-        }
-        return out
-    }
-
-    private fun be32(b: ByteArray, o: Int): Long =
-        ((b[o].toLong() and 0xff) shl 24) or ((b[o + 1].toLong() and 0xff) shl 16) or ((b[o + 2].toLong() and 0xff) shl 8) or (b[o + 3].toLong() and 0xff)
+    /** The file's records in order, in whatever layout [HciFile] can read; empty when it isn't such a record. */
+    fun records(file: ByteArray): List<Rec> = HciFile.read(file).first
 
     // ---- what a link agreed
 
