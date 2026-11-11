@@ -177,20 +177,23 @@ object HciRing {
         recs.filter { it.isOut }.groupingBy { it.handle }.eachCount().maxByOrNull { it.value }?.key
             ?: reported.groupBy { it.handle }.maxByOrNull { e -> e.value.sumOf { it.n } }?.key
 
+    /** How many packets of link [h] the chip says it sent in [r]: 0 unless [r] is such a report. */
+    private fun reported(r: Rec, h: Int): Int {
+        if (r.kind != 4 || r.u8(0) != 0x13) return 0
+        return (0 until r.u8(2)).sumOf { i -> if (r.u16(3 + i * 4) and 0x0fff == h) r.u16(5 + i * 4) else 0 }
+    }
+
     /**
      * Packets already in the chip when the record starts are reported too: without them every later packet would look
      * sent a few places early. Their number is how far the reports ever run ahead of what the record saw handed.
      */
-    private fun ahead(recs: List<Rec>, done: List<Done>, h: Int): Int {
-        var ahead = 0; var handed = 0; var reported = 0; var i = 0
-        fun upTo(t: Long) {
-            while (i < done.size && done[i].t <= t) { reported += done[i].n; i++; ahead = maxOf(ahead, reported - handed) }
-        }
+    private fun ahead(recs: List<Rec>, h: Int): Int {
+        var ahead = 0; var handed = 0; var done = 0
         for (r in recs) {
-            upTo(r.t)
-            if (r.isOut && r.handle == h) handed++
+            if (r.isOut && r.handle == h) { handed++; continue }
+            done += reported(r, h)
+            ahead = maxOf(ahead, done - handed)
         }
-        upTo(Long.MAX_VALUE)
         return ahead
     }
 
@@ -260,19 +263,16 @@ object HciRing {
      * A record that keeps the chip's reports but no data packets still gives what the chip sent (handed 0).
      */
     fun sending(recs: List<Rec>): Sending? {
-        val reported = reports(recs)
-        val h = busiest(recs, reported) ?: return null
-        val done = reported.filter { it.handle == h }
-        val t1 = recs.lastOrNull { it.isOut && it.handle == h }?.t ?: done.last().t
+        val h = busiest(recs, reports(recs)) ?: return null
+        val t1 = recs.lastOrNull { it.isOut && it.handle == h }?.t ?: recs.last { reported(it, h) > 0 }.t
         val t0 = maxOf(recs.first().t, t1 - WINDOW_US)
         if (t1 <= t0) return null
-        val w = Window(h, t0, t1, ahead(recs, done, h))
-        var i = 0
+        val w = Window(h, t0, t1, ahead(recs, h))
         for (r in recs) {
-            while (i < done.size && done[i].t <= r.t) { w.report(done[i].t, done[i].n); i++ }
+            // In the record's own order: a packet and its report can carry the same time
+            reported(r, h).let { if (it > 0) w.report(r.t, it) }
             if (r.kind == 2 && r.d.size >= 4 && r.handle == h) w.data(r)
         }
-        while (i < done.size) { w.report(done[i].t, done[i].n); i++ }
         return w.result()
     }
 

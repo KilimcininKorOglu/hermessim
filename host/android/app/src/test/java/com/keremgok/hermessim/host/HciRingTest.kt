@@ -137,6 +137,16 @@ class HciRingTest {
         assertEquals(1, s.queueMax)
     }
 
+    @Test fun aReportWithThePacketsOwnTimeFollowsIt() {
+        // A record in milliseconds gives a packet and the chip's report of it the same time: the order says which came first
+        val f = File()
+        for (i in 0 until 300) { f.data(i * 10.0, false, H, 48); f.completed(i * 10.0, H, 1) }
+        val s = HciRing.sending(HciRing.records(f.bytes()))!!
+        assertEquals(Triple(0, 0, 0), s.waitMs)
+        assertEquals(1, s.queueMax)
+        assertEquals(299, s.sent)                                            // the window starts after the first record
+    }
+
     @Test fun aHostThatHandsOverInClumps() {
         // The chip is quick, but the host's Bluetooth gives it nothing for 400 ms every second, then the backlog
         val f = File()
