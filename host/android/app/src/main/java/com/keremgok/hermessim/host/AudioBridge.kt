@@ -160,7 +160,7 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
                 if (n == 0) continue
                 val t0 = SystemClock.elapsedRealtime()
                 out.write(buf, 0, n)
-                backlog.wrote(frames, (SystemClock.elapsedRealtime() - t0).toInt(), t0)
+                backlog.wrote(frames, n, (SystemClock.elapsedRealtime() - t0).toInt(), t0)
                     ?.let { Log.i(TAG, "audio to the phone 5s: $it (max $maxTx B)") }
             }
         } catch (_: Exception) {} finally { alive.set(false) }
@@ -186,7 +186,7 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
         private val q = ArrayDeque<ByteArray>()
         private val lock = ReentrantLock()
         private val ready = lock.newCondition()
-        private val st = IntArray(5)                 // frames in, frames out, writes, dropped, slowest write (ms)
+        private val st = IntArray(7)                 // frames in, frames out, writes, dropped, slowest write (ms), bytes out, ms blocked
         private var nextLog = SystemClock.elapsedRealtime() + 5000
 
         /** Queue one frame; true if the oldest had to go. */
@@ -212,16 +212,18 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
         fun wake() = lock.withLock { ready.signalAll() }
 
         /**
-         * Count one write that took [ms]. Every 5 s, the window's numbers if the link lagged (frames shared a write, a
-         * drop, a slow write), else null: healthy calls already log every 5 s in the daemon's line.
+         * Count one write of [bytes] that took [ms]. Every 5 s, the window's numbers if the link lagged (frames shared a
+         * write, a drop, a slow write), else null: healthy calls already log every 5 s in the daemon's line.
          */
-        fun wrote(frames: Int, ms: Int, now: Long): String? = lock.withLock {
+        fun wrote(frames: Int, bytes: Int, ms: Int, now: Long): String? = lock.withLock {
             st[1] += frames; st[2]++; if (ms > st[4]) st[4] = ms
-            CallAudioCheck.wrote(frames, ms.toLong())
+            st[5] += bytes; if (ms >= CallAudioCheck.BLOCKED_MS) st[6] += ms
+            CallAudioCheck.wrote(frames, bytes, ms.toLong())
             if (now <= nextLog) return@withLock null
             nextLog = now + 5000
             val lagged = st[3] > 0 || st[2] < st[1] || st[4] >= 40
-            val line = if (lagged) "frames=${st[1]}/${st[0]} writes=${st[2]} dropped=${st[3]} slowest write=${st[4]} ms" else null
+            val line = if (lagged) "frames=${st[1]}/${st[0]} writes=${st[2]} dropped=${st[3]} slowest write=${st[4]} ms " +
+                "bytes=${st[5]} blocked=${st[6]} ms" else null
             st.fill(0)
             line
         }

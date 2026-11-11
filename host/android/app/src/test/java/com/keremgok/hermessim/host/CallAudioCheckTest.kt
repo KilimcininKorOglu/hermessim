@@ -14,6 +14,17 @@ class CallAudioCheckTest {
     private fun c(cap: Long, capms: Long = cap * 10, caperr: Long = 0) = mapOf("cap" to cap, "capms" to capms, "caperr" to caperr)
     private fun b(dropped: Long = 0, stalls: Long = 0, out: Long = 2980) = Bridge(1, 2980, out, out, dropped, if (stalls > 0) 1500 else 40, stalls)
 
+    @Test fun writesCountTheirBytesAndTheTimeTheyWaitedForTheLink() {
+        CallAudioCheck.begin("off")
+        CallAudioCheck.wrote(2, 2 * 102, 3)                                  // a quick write: not blocked
+        CallAudioCheck.wrote(1, 102, CallAudioCheck.BLOCKED_MS)              // waited for the link
+        CallAudioCheck.wrote(3, 3 * 102, 250)
+        val br = CallAudioCheck.bridge()
+        assertEquals(6, br.framesOut); assertEquals(612, br.bytesOut); assertEquals(290, br.blockedMs); assertEquals(250, br.slowestMs)
+        CallAudioCheck.begin("off")                                          // the next call starts from nothing
+        assertEquals(0, CallAudioCheck.bridge().bytesOut); assertEquals(0, CallAudioCheck.bridge().blockedMs)
+    }
+
     @Test fun aCleanCallSaysNothing() = assertNull(CallAudioCheck.judge(30, d(), b(), held = false))
 
     @Test fun halfTheCallersFramesLostOnTheWayToThePhone() {
