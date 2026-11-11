@@ -3,8 +3,6 @@
 
 use std::ffi::CString;
 use std::io;
-use std::os::unix::process::CommandExt;
-use std::process::Command;
 
 use libc::{c_char, c_int};
 
@@ -172,28 +170,68 @@ pub fn sleep_ns(ns: i64) {
     }
 }
 
-/// Fire a child with the daemon's blocked signal mask cleared and SIGPIPE at its default, exactly
-/// like the C daemon's posix_spawn helper. The main loop reaps it with waitpid(-1, WNOHANG).
+// Bionic <spawn.h> (API 28+); the libc crate has no Android bindings for it.
+#[allow(non_camel_case_types)]
+type posix_spawnattr_t = *mut libc::c_void;
+const POSIX_SPAWN_SETSIGDEF: libc::c_short = 4;
+const POSIX_SPAWN_SETSIGMASK: libc::c_short = 8;
+
+extern "C" {
+    static environ: *const *mut c_char;
+    fn posix_spawn(
+        pid: *mut libc::pid_t,
+        path: *const c_char,
+        actions: *const libc::c_void,
+        attr: *const posix_spawnattr_t,
+        argv: *const *mut c_char,
+        envp: *const *mut c_char,
+    ) -> c_int;
+    fn posix_spawnattr_init(attr: *mut posix_spawnattr_t) -> c_int;
+    fn posix_spawnattr_destroy(attr: *mut posix_spawnattr_t) -> c_int;
+    fn posix_spawnattr_setflags(attr: *mut posix_spawnattr_t, flags: libc::c_short) -> c_int;
+    fn posix_spawnattr_setsigmask(attr: *mut posix_spawnattr_t, mask: *const libc::sigset_t) -> c_int;
+    fn posix_spawnattr_setsigdefault(attr: *mut posix_spawnattr_t, mask: *const libc::sigset_t) -> c_int;
+}
+
+/// Fire a child with no signal blocked and SIGPIPE at its default, with posix_spawn like the C
+/// daemon: the daemon blocks SIGTERM and co. outside its ppoll and ignores SIGPIPE, and a child
+/// would inherit both. argv[0] is an absolute path (no PATH search). The main loop reaps the
+/// child with waitpid(-1, WNOHANG). The error is posix_spawn's own errno.
 pub fn spawn(argv: &[&str]) -> io::Result<libc::pid_t> {
     if argv.is_empty() || argv[0].is_empty() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "empty argv"));
+        return Err(io::Error::from_raw_os_error(libc::EINVAL));
     }
-    unsafe fn child_setup() {
+    let owned = argv
+        .iter()
+        .map(|a| CString::new(*a).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL)))
+        .collect::<io::Result<Vec<CString>>>()?;
+    let mut ptrs: Vec<*mut c_char> = owned.iter().map(|c| c.as_ptr() as *mut c_char).collect();
+    ptrs.push(std::ptr::null_mut());
+    let mut pid: libc::pid_t = 0;
+    let rc = unsafe {
+        let mut at: posix_spawnattr_t = std::ptr::null_mut();
         let mut none: libc::sigset_t = std::mem::zeroed();
+        let mut def: libc::sigset_t = std::mem::zeroed();
         libc::sigemptyset(&mut none);
-        libc::sigprocmask(libc::SIG_SETMASK, &none, std::ptr::null_mut());
-        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+        libc::sigemptyset(&mut def);
+        libc::sigaddset(&mut def, libc::SIGPIPE);
+        posix_spawnattr_init(&mut at);
+        posix_spawnattr_setsigmask(&mut at, &none);
+        posix_spawnattr_setsigdefault(&mut at, &def);
+        posix_spawnattr_setflags(&mut at, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF);
+        let rc = posix_spawn(
+            &mut pid,
+            ptrs[0],
+            std::ptr::null(),
+            &at,
+            ptrs.as_ptr(),
+            environ,
+        );
+        posix_spawnattr_destroy(&mut at);
+        rc
+    };
+    if rc != 0 {
+        return Err(io::Error::from_raw_os_error(rc));
     }
-    let mut cmd = Command::new(argv[0]);
-    cmd.args(&argv[1..]);
-    unsafe {
-        cmd.pre_exec(|| {
-            child_setup();
-            Ok(())
-        });
-    }
-    let child = cmd.spawn()?;
-    let pid = child.id() as libc::pid_t;
-    std::mem::forget(child); // the main loop's waitpid reaps it; dropping must not wait
     Ok(pid)
 }
