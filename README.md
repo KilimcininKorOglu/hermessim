@@ -79,12 +79,10 @@ Requirements: Android 11 or newer, an unlockable bootloader, Magisk, Bluetooth L
 - Protocol shared with the client apps: [protocol/](protocol/) (MIT).
 - Device profiles and the support table: [profiles/](profiles/). Measuring a new phone: [tools/](tools/) (read-only dump and the four live-call experiments).
 
+## Acknowledgements
+
+The HermesSIM host is built on the original work of [Mert Eren Karabulut](https://github.com/Mert-Eren-Karabulut). Thank you for creating and publishing it: [github.com/Mert-Eren-Karabulut/tosbisim](https://github.com/Mert-Eren-Karabulut/tosbisim).
+
 ## Licence
 
 Host: GPL-3.0-or-later ([LICENSE](LICENSE)). Protocol: MIT ([protocol/LICENSE](protocol/LICENSE)).
-
----
-
-### Türkçe
-
-**Eski bir Android telefonu telefonunuz ve Mac'iniz için bir SIM kutusuna dönüştürün.** SIM'inizi root'lu yedek bir Android telefona takın ve çekmeceye koyun. Aramalar, mesajlar ve mobil veri Bluetooth ile, uzaktayken internet üzerinden Android telefonunuza veya iPhone'unuza gelir. Hangi telefonların çalıştığını [destek sayfasında](https://kilimcininkoroglu.github.io/hermessim/) görebilirsiniz. Arama sesi, her telefonda kısa bir arama testinden sonra açılır. Kurulum: önyükleyici kilidini açıp Magisk kurun, `HermesSIM-Host-<sürüm>-Magisk.zip` dosyasını [Releases sayfasından](https://github.com/KilimcininKorOglu/hermessim/releases) telefona indirin, Magisk → *Modüller* → *Depolamadan yükle* ile seçip *Yeniden başlat*'a dokunun. Ayrı bir uygulama kurmanız gerekmez. Ardından telefonunuzdaki HermesSIM uygulamasından eşleştirip arama testini yapın. Telefonu geri almak için ekranındaki *Bu telefonu ana cihaz olarak kullanmayı bırak*'a dokunun. HermesSIM telefonun IMEI'sini asla değiştirmez.
