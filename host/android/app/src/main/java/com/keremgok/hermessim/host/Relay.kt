@@ -65,7 +65,8 @@ object Relay {
     @Volatile private var hotspotFailed = false
     private var audio: AudioBridge? = null
     private val main = Handler(Looper.getMainLooper())
-    private val seq = AtomicInteger()
+    /** Our seq per peer and session (protocol: per-sender, per-connection, from 1); a Hello starts it again. */
+    private val seqs = ConcurrentHashMap<String, AtomicInteger>()
     private val trusted = ConcurrentHashMap.newKeySet<String>()   // peer ids that passed Hello
     private val rejected = ConcurrentHashMap.newKeySet<String>()  // links told NOT_PAIRED since they connected
     private val droppedOnce = ConcurrentHashMap.newKeySet<String>()   // links already dropped for a missing Hello
@@ -291,7 +292,8 @@ object Relay {
     }
 
     private fun send(p: Peer, b: Envelope.Builder, replyTo: Int = 0) {
-        var bytes = b.setSeq(seq.incrementAndGet()).setReplyTo(replyTo).build().toByteArray()
+        val next = seqs.getOrPut(p.id) { AtomicInteger() }.incrementAndGet()
+        var bytes = b.setSeq(next).setReplyTo(replyTo).build().toByteArray()
         // A status that outgrew one frame (release notes, many saved networks or hotspot clients) is never dropped:
         // the iPhone would hear nothing from this host again. Shed the optional parts until it fits (audit, 19 Oct).
         if (bytes.size > Framing.MAX_FRAME && b.bodyCase == Envelope.BodyCase.HOST_STATUS) {
@@ -483,6 +485,7 @@ object Relay {
             else -> return reject(d, env.seq)
         }
         trusted.add(d.id)
+        seqs.remove(d.id)
         if (d is Peer.Ble) {
             noHelloSince = 0
             // What the link agreed on (RadioLook): well after the Hello, when the link serves and nothing is being set up
