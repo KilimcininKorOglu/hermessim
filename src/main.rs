@@ -387,14 +387,9 @@ mod daemon {
         }
         *count = 0;
         for line in lines {
-            let fields: Vec<&str> = line.split_whitespace().collect();
-            if fields.len() < 6 {
+            let Some((ip, hw, dev, flags)) = crate::protocol::parse_arp_line(line) else {
                 continue;
-            }
-            let ip = fields[0];
-            let hw = fields[3];
-            let dev = fields[5];
-            let flags = u32::from_str_radix(fields[2].trim_start_matches("0x"), 16).unwrap_or(0);
+            };
             if dev != iface || flags & 0x2 == 0 {
                 continue;
             }

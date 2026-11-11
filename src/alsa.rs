@@ -358,25 +358,16 @@ pub fn enum_items(fd: RawFd, info: &ElemInfo, max_len: usize) -> String {
     if max_len == 0 {
         return String::new();
     }
-    let mut out = String::new();
-    let items = info_enum_items(info).min(64);
-    for k in 0..items {
+    let mut named = Vec::new();
+    for k in 0..info_enum_items(info).min(64) {
         let mut e = *info;
         e.value.enumerated.item = k;
         if ioctl_ptr(fd, CTL_ELEM_INFO, &mut e) != 0 {
             continue;
         }
-        let name = crate::platform::kernel_name(unsafe { &e.value.enumerated.name });
-        let sep = if out.is_empty() { 0 } else { 1 };
-        if out.len() + sep + name.len() >= max_len {
-            break;
-        }
-        if sep == 1 {
-            out.push('|');
-        }
-        out.push_str(&name);
+        named.push((k, crate::platform::kernel_name(unsafe { &e.value.enumerated.name })));
     }
-    out
+    crate::protocol::enum_join(&named, max_len)
 }
 
 /// The PCM accepts these parameters right now (HW_REFINE on the device node). Returns the refined

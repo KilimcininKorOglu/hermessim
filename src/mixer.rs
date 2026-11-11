@@ -10,7 +10,9 @@ use libc::{c_char, c_int, c_long};
 
 use crate::alsa::*;
 use crate::platform::{self, kernel_name};
-use crate::protocol::{c_atoi, c_strtoll, c_strtoll_prefix, MAX_VALUES, NAME_LEN};
+use crate::protocol::{
+    c_atoi, c_strtoll, c_strtoll_prefix, parse_call_orig_values, MAX_VALUES, NAME_LEN,
+};
 
 pub const MAX_MANAGED: usize = 64;
 pub const MAX_CALL_CONTROLS: usize = 64;
@@ -605,20 +607,9 @@ impl Mixer {
             if name.len() >= NAME_LEN {
                 continue;
             }
-            let mut vals = Vec::new();
-            for part in line[tab + 1..].split(',') {
-                if vals.len() == MAX_VALUES {
-                    break;
-                }
-                let Some(v) = parse_dec_full(part) else {
-                    vals.clear();
-                    break;
-                };
-                vals.push(v);
-            }
-            if vals.is_empty() {
+            let Some(vals) = parse_call_orig_values(&line[tab + 1..]) else {
                 continue;
-            }
+            };
             saved.push((name.to_string(), vals));
         }
         crate::logw!(
@@ -805,34 +796,6 @@ fn create_0600(path: &str) -> std::io::Result<std::fs::File> {
         .truncate(true)
         .mode(0o600)
         .open(path)
-}
-
-fn parse_dec_full(s: &str) -> Option<i64> {
-    let b = s.as_bytes();
-    let mut i = 0;
-    while i < b.len() && matches!(b[i], b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r') {
-        i += 1;
-    }
-    let mut neg = false;
-    if i < b.len() && (b[i] == b'+' || b[i] == b'-') {
-        neg = b[i] == b'-';
-        i += 1;
-    }
-    let digits = i;
-    let mut value: i128 = 0;
-    while i < b.len() && b[i].is_ascii_digit() {
-        value = value
-            .saturating_mul(10)
-            .saturating_add((b[i] - b'0') as i128);
-        i += 1;
-    }
-    if i == digits || i != b.len() {
-        return None;
-    }
-    if neg {
-        value = -value;
-    }
-    Some(value.clamp(i64::MIN as i128, i64::MAX as i128) as i64)
 }
 
 /// A control to take over: its name, the values to hold and whether it is written without being read back.

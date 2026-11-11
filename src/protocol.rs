@@ -316,6 +316,84 @@ impl CapClock {
     }
 }
 
+/// Enum item names "a|b|c", cut at a whole item before `max_len`. The separator goes before every item but the
+/// first index, as the C daemon writes it, so a first item the kernel would not describe still leaves its "|".
+pub fn enum_join(items: &[(u32, String)], max_len: usize) -> String {
+    let mut out = String::new();
+    for (index, name) in items {
+        let piece = if *index > 0 { format!("|{}", name) } else { name.clone() };
+        if out.len() + piece.len() >= max_len {
+            break;
+        }
+        out.push_str(&piece);
+    }
+    out
+}
+
+/// A whole base-10 number, strtoll-style: leading whitespace and a sign are allowed, trailing text is not.
+pub fn parse_dec_full(s: &str) -> Option<i64> {
+    let (value, used) = c_strtoll_base10(s);
+    (used != 0 && used == s.len()).then_some(value)
+}
+
+fn c_strtoll_base10(s: &str) -> (i64, usize) {
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() && matches!(b[i], b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r') {
+        i += 1;
+    }
+    let mut neg = false;
+    if i < b.len() && (b[i] == b'+' || b[i] == b'-') {
+        neg = b[i] == b'-';
+        i += 1;
+    }
+    let digits = i;
+    let mut value: i128 = 0;
+    while i < b.len() && b[i].is_ascii_digit() {
+        value = value.saturating_mul(10).saturating_add((b[i] - b'0') as i128);
+        i += 1;
+    }
+    if i == digits {
+        return (0, 0);
+    }
+    if neg {
+        value = -value;
+    }
+    (value.clamp(i64::MIN as i128, i64::MAX as i128) as i64, i)
+}
+
+/// The values of one call-originals line, "v1,v2...": at most MAX_VALUES, a trailing comma ends the list, any
+/// other non-number rejects the line (None), as does an empty list.
+pub fn parse_call_orig_values(s: &str) -> Option<Vec<i64>> {
+    let mut vals = Vec::new();
+    let mut rest = s;
+    while !rest.is_empty() && vals.len() < MAX_VALUES {
+        let (piece, next) = match rest.find(',') {
+            Some(c) => (&rest[..c], Some(&rest[c + 1..])),
+            None => (rest, None),
+        };
+        vals.push(parse_dec_full(piece)?);
+        match next {
+            Some(n) => rest = n,
+            None => break,
+        }
+    }
+    (!vals.is_empty()).then_some(vals)
+}
+
+/// One /proc/net/arp entry as the C daemon's sscanf("%63s 0x%x 0x%x %63s %*s %31s") reads it: the type and
+/// flags need their "0x", the address and hardware fields fit 63 characters. Returns (ip, hw, dev, flags).
+pub fn parse_arp_line(line: &str) -> Option<(&str, &str, &str, u32)> {
+    let f: Vec<&str> = line.split_whitespace().collect();
+    if f.len() < 6 || f[0].len() > 63 || f[3].len() > 63 {
+        return None;
+    }
+    let hex = |s: &str| s.strip_prefix("0x").and_then(|h| u32::from_str_radix(h, 16).ok());
+    hex(f[1])?;
+    let flags = hex(f[2])?;
+    Some((f[0], f[3], f[5], flags))
+}
+
 /// The C daemon's strtok over one command line: `next` is strtok(.., " "), `rest` is strtok(NULL, "").
 pub struct Tokens<'a> {
     s: &'a str,
@@ -596,6 +674,39 @@ mod tests {
         );
         assert!(net_cycle_script(3).is_some());
         assert!(net_cycle_script(30).is_some());
+    }
+
+    #[test]
+    fn enum_items_keep_the_c_separators_and_cut() {
+        let items = vec![(0, "Off".to_string()), (1, "On".to_string()), (2, "Auto".to_string())];
+        assert_eq!(enum_join(&items, 1500), "Off|On|Auto");
+        // The kernel would not describe item 0: the C output still starts with the separator.
+        assert_eq!(enum_join(&items[1..], 1500), "|On|Auto");
+        // Cut before a whole item, never inside one.
+        assert_eq!(enum_join(&items, 8), "Off|On");
+    }
+
+    #[test]
+    fn call_originals_values_follow_strtoll() {
+        assert_eq!(parse_call_orig_values("1,0,-3"), Some(vec![1, 0, -3]));
+        assert_eq!(parse_call_orig_values("1,"), Some(vec![1]));
+        assert_eq!(parse_call_orig_values("1,2,3,4,5"), Some(vec![1, 2, 3, 4]));
+        assert_eq!(parse_call_orig_values(""), None);
+        assert_eq!(parse_call_orig_values("1,,2"), None);
+        assert_eq!(parse_call_orig_values("1x"), None);
+        assert_eq!(parse_call_orig_values(" 7"), Some(vec![7]));
+    }
+
+    #[test]
+    fn arp_lines_need_the_hex_prefixes() {
+        let line = "192.168.43.12    0x1         0x2         aa:bb:cc:dd:ee:ff     *        ap0";
+        assert_eq!(
+            parse_arp_line(line),
+            Some(("192.168.43.12", "aa:bb:cc:dd:ee:ff", "ap0", 2))
+        );
+        assert_eq!(parse_arp_line("192.168.43.12 1 2 aa:bb *  ap0"), None);
+        assert_eq!(parse_arp_line("192.168.43.12 0x1 0xzz aa:bb * ap0"), None);
+        assert_eq!(parse_arp_line("192.168.43.12 0x1 0x2 aa:bb *"), None);
     }
 
     #[test]
