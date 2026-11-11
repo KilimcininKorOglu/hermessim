@@ -155,12 +155,6 @@ class HostService : Service() {
             "INJECT_SMS" -> injectSms(intent.getStringExtra("from") ?: "+905550000000",
                                       intent.getStringExtra("body") ?: "Test")
             "SEND_SMS", "SHORT_CODES" -> textTest(intent)
-            // adb debug (root only): caller audio as --ei frames N (1 to 4) a Bluetooth packet from the next call on,
-            // whatever the chip; 0 = by the chip again. Until the app restarts.
-            "AUDIO_PACK" -> {
-                AudioPack.forced = intent.getIntExtra("frames", 0)
-                Log.i(TAG, "AUDIO_PACK: forced=${AudioPack.forced} now=${AudioPack.now()}")
-            }
         }
         return START_STICKY
     }
