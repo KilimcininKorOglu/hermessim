@@ -28,7 +28,7 @@ body { margin:0; background:var(--bg); color:var(--text); font:16px/1.5 -apple-s
 main { max-width: 860px; margin: 0 auto; padding: 28px 16px 48px; }
 header { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
 header h1 { margin:0; font-size:28px; }
-.logo { font-size:34px; }
+.logo { width:44px; height:44px; flex:none; }
 .lang { margin-left:auto; display:flex; gap:4px; }
 .lang button { border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:8px; padding:4px 10px; cursor:pointer; }
 .lang button[aria-pressed="true"] { border-color:var(--accent); color:var(--accent); font-weight:600; }
@@ -53,7 +53,19 @@ a { color:var(--accent); }
 <body>
 <main>
   <header>
-    <span class="logo" aria-hidden="true">🐢</span>
+    <svg class="logo" aria-hidden="true" viewBox="0 0 512 512">
+      <rect width="512" height="512" rx="112" fill="#22304A"/>
+      <g stroke="#3B2A14" stroke-width="12" stroke-linejoin="round" stroke-linecap="round" fill="#FFC93C">
+        <path d="M128 266 L150 130 L236 206 Z"/><path d="M384 266 L362 130 L276 206 Z"/>
+        <ellipse cx="256" cy="281" rx="150" ry="118"/>
+      </g>
+      <path d="M154 232 L163 170 L206 208 Z M358 232 L349 170 L306 208 Z" fill="#F49CA6"/>
+      <ellipse cx="200" cy="271" rx="17" ry="24" fill="#3B2A14"/><ellipse cx="312" cy="271" rx="17" ry="24" fill="#3B2A14"/>
+      <circle cx="206" cy="262" r="6" fill="#fff"/><circle cx="318" cy="262" r="6" fill="#fff"/>
+      <path d="M244 306 h24 l-12 13 z" fill="#F49CA6" stroke="#3B2A14" stroke-width="6" stroke-linejoin="round"/>
+      <path d="M256 319 q-10 16 -28 8 M256 319 q10 16 28 8 M150 302 L92 292 M152 320 L94 328 M362 302 L420 292 M360 320 L418 328"
+        fill="none" stroke="#3B2A14" stroke-width="7" stroke-linecap="round"/>
+    </svg>
     <h1 data-t="title"></h1>
     <div class="lang" role="group" aria-label="Language">
       <button data-lang="en">English</button><button data-lang="tr">Türkçe</button>
