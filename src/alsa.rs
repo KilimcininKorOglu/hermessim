@@ -365,7 +365,10 @@ pub fn enum_items(fd: RawFd, info: &ElemInfo, max_len: usize) -> String {
         if ioctl_ptr(fd, CTL_ELEM_INFO, &mut e) != 0 {
             continue;
         }
-        named.push((k, crate::platform::kernel_name(unsafe { &e.value.enumerated.name })));
+        named.push((
+            k,
+            crate::platform::kernel_name(unsafe { &e.value.enumerated.name }),
+        ));
     }
     crate::protocol::enum_join(&named, max_len)
 }

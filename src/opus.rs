@@ -108,7 +108,13 @@ impl Decoder {
 
     /// Decodes at most `frame_size` samples into `pcm`. Concealment (no data) and FEC produce exactly
     /// `frame_size` samples, so it must be one 10 ms frame at the decoder's rate, not the buffer's length.
-    pub fn decode(&mut self, data: Option<&[u8]>, pcm: &mut [i16], frame_size: i32, fec: bool) -> i32 {
+    pub fn decode(
+        &mut self,
+        data: Option<&[u8]>,
+        pcm: &mut [i16],
+        frame_size: i32,
+        fec: bool,
+    ) -> i32 {
         let (ptr, len) = match data {
             Some(d) => (d.as_ptr(), d.len() as c_int),
             None => (std::ptr::null(), 0),

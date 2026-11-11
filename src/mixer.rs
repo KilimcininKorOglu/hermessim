@@ -297,7 +297,12 @@ impl Mixer {
         let safe = self.safe;
         let crumb = &mut self.crumb;
         let (list, other) = (&mut self.managed, &self.perm);
-        let w = Want { name, values: want, n, write_only };
+        let w = Want {
+            name,
+            values: want,
+            n,
+            write_only,
+        };
         manage_in(ctl, safe, crumb, list, other, &w)
     }
 
@@ -306,7 +311,12 @@ impl Mixer {
         let safe = self.safe;
         let crumb = &mut self.crumb;
         let (list, other) = (&mut self.perm, &self.managed);
-        let w = Want { name, values: want, n, write_only };
+        let w = Want {
+            name,
+            values: want,
+            n,
+            write_only,
+        };
         manage_in(ctl, safe, crumb, list, other, &w)
     }
 

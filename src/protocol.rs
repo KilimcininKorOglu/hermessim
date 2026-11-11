@@ -199,7 +199,14 @@ pub fn charge_band(limit: i32) -> (i32, i32) {
 
 /// The CHARGE? state after the node name. held: charging is stopped by us right now (the input cut, or
 /// charge_behaviour off "auto"); stuck: the kernel kept undoing the cut and the limit is left alone for the hour.
-pub fn charge_status_line(limit: i32, resume: i32, drain: i32, cutting: bool, held: bool, stuck: bool) -> String {
+pub fn charge_status_line(
+    limit: i32,
+    resume: i32,
+    drain: i32,
+    cutting: bool,
+    held: bool,
+    stuck: bool,
+) -> String {
     format!(
         "target={} resume={} drain={} cutting={} held={} stuck={}",
         limit, resume, drain, cutting as i32, held as i32, stuck as i32
@@ -321,7 +328,11 @@ impl CapClock {
 pub fn enum_join(items: &[(u32, String)], max_len: usize) -> String {
     let mut out = String::new();
     for (index, name) in items {
-        let piece = if *index > 0 { format!("|{}", name) } else { name.clone() };
+        let piece = if *index > 0 {
+            format!("|{}", name)
+        } else {
+            name.clone()
+        };
         if out.len() + piece.len() >= max_len {
             break;
         }
@@ -350,7 +361,9 @@ fn c_strtoll_base10(s: &str) -> (i64, usize) {
     let digits = i;
     let mut value: i128 = 0;
     while i < b.len() && b[i].is_ascii_digit() {
-        value = value.saturating_mul(10).saturating_add((b[i] - b'0') as i128);
+        value = value
+            .saturating_mul(10)
+            .saturating_add((b[i] - b'0') as i128);
         i += 1;
     }
     if i == digits {
@@ -388,7 +401,10 @@ pub fn parse_arp_line(line: &str) -> Option<(&str, &str, &str, u32)> {
     if f.len() < 6 || f[0].len() > 63 || f[3].len() > 63 {
         return None;
     }
-    let hex = |s: &str| s.strip_prefix("0x").and_then(|h| u32::from_str_radix(h, 16).ok());
+    let hex = |s: &str| {
+        s.strip_prefix("0x")
+            .and_then(|h| u32::from_str_radix(h, 16).ok())
+    };
     hex(f[1])?;
     let flags = hex(f[2])?;
     Some((f[0], f[3], f[5], flags))
@@ -624,7 +640,10 @@ mod tests {
             audio_5s_line(&w),
             "audio 5s: sent=500 txdrop=0 recv=499 fec=0 plc=0 late=0 catchup=0 caperr=0 peak=20458 played=500 depthmax=4 (99.9 fps) | held: jb=22.0ms reopen=0 (tune prime=2 keep=1 period=480)"
         );
-        let idle = AudioWindow { jb_ms: -1.0, ..Default::default() };
+        let idle = AudioWindow {
+            jb_ms: -1.0,
+            ..Default::default()
+        };
         assert!(audio_5s_line(&idle).contains("| held: jb=-1.0ms reopen=0"));
     }
 
@@ -678,7 +697,11 @@ mod tests {
 
     #[test]
     fn enum_items_keep_the_c_separators_and_cut() {
-        let items = vec![(0, "Off".to_string()), (1, "On".to_string()), (2, "Auto".to_string())];
+        let items = vec![
+            (0, "Off".to_string()),
+            (1, "On".to_string()),
+            (2, "Auto".to_string()),
+        ];
         assert_eq!(enum_join(&items, 1500), "Off|On|Auto");
         // The kernel would not describe item 0: the C output still starts with the separator.
         assert_eq!(enum_join(&items[1..], 1500), "|On|Auto");

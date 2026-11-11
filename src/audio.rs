@@ -657,7 +657,11 @@ fn take_window(fps: f64) -> crate::protocol::AudioWindow {
         played: s.played,
         depth_max: s.depth_max,
         fps,
-        jb_ms: if s.jb_n != 0 { s.jb_sum / s.jb_n as f64 * 10.0 } else { -1.0 },
+        jb_ms: if s.jb_n != 0 {
+            s.jb_sum / s.jb_n as f64 * 10.0
+        } else {
+            -1.0
+        },
         reopen: s.reopen,
         prime: JB_PRIME.load(Ordering::Relaxed),
         keep: JB_KEEP.load(Ordering::Relaxed),

@@ -189,8 +189,14 @@ extern "C" {
     fn posix_spawnattr_init(attr: *mut posix_spawnattr_t) -> c_int;
     fn posix_spawnattr_destroy(attr: *mut posix_spawnattr_t) -> c_int;
     fn posix_spawnattr_setflags(attr: *mut posix_spawnattr_t, flags: libc::c_short) -> c_int;
-    fn posix_spawnattr_setsigmask(attr: *mut posix_spawnattr_t, mask: *const libc::sigset_t) -> c_int;
-    fn posix_spawnattr_setsigdefault(attr: *mut posix_spawnattr_t, mask: *const libc::sigset_t) -> c_int;
+    fn posix_spawnattr_setsigmask(
+        attr: *mut posix_spawnattr_t,
+        mask: *const libc::sigset_t,
+    ) -> c_int;
+    fn posix_spawnattr_setsigdefault(
+        attr: *mut posix_spawnattr_t,
+        mask: *const libc::sigset_t,
+    ) -> c_int;
 }
 
 /// Fire a child with no signal blocked and SIGPIPE at its default, with posix_spawn like the C
