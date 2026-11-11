@@ -6,7 +6,7 @@ use libc::{c_char, c_int, c_void};
 use std::ffi::{CStr, CString};
 use std::os::unix::io::RawFd;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use crate::alsa;
 use crate::opus;
@@ -75,8 +75,14 @@ static CFG: Mutex<AudioCfg> = Mutex::new(AudioCfg {
     loopback: false,
 });
 
+/// Take a lock even when a thread panicked while holding it: the guarded values are plain counters
+/// and handles that stay valid, and one failed call must not stop the audio of every later call.
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 fn cfg() -> AudioCfg {
-    *CFG.lock().unwrap()
+    *lock(&CFG)
 }
 
 // ------------------------------------------------------------------ libtinyalsa via dlopen
@@ -124,7 +130,7 @@ struct Ta {
 static TA: Mutex<Option<Ta>> = Mutex::new(None);
 
 fn ta() -> Option<Ta> {
-    let mut slot = TA.lock().unwrap();
+    let mut slot = lock(&TA);
     if let Some(t) = *slot {
         return Some(t);
     }
@@ -215,14 +221,14 @@ unsafe impl Send for PcmPtr {}
 static LIVE: Mutex<[Option<PcmPtr>; 2]> = Mutex::new([None, None]);
 
 fn pcm_hold(slot: usize, pcm: Option<PcmPtr>) -> Option<PcmPtr> {
-    LIVE.lock().unwrap()[slot] = pcm;
+    lock(&LIVE)[slot] = pcm;
     pcm
 }
 
 fn pcm_release(slot: usize, pcm: Option<PcmPtr>) {
     let Some(p) = pcm else { return };
     {
-        let mut live = LIVE.lock().unwrap();
+        let mut live = lock(&LIVE);
         if matches!(live[slot], Some(q) if q.0 == p.0) {
             live[slot] = None;
         }
@@ -233,7 +239,7 @@ fn pcm_release(slot: usize, pcm: Option<PcmPtr>) {
 }
 
 fn pcm_wake_all() {
-    let live = LIVE.lock().unwrap();
+    let live = lock(&LIVE);
     if let Some(ta) = ta() {
         if let Some(stop) = ta.stop {
             for slot in live.iter().flatten() {
@@ -331,7 +337,7 @@ static ALLOWED_UID: AtomicI32 = AtomicI32::new(-1);
 
 fn client_set(fd: RawFd) {
     let old = {
-        let mut client = CLIENT.lock().unwrap();
+        let mut client = lock(&CLIENT);
         let old = *client;
         *client = fd;
         CLIENT_UP.store(fd >= 0, Ordering::Relaxed);
@@ -343,7 +349,7 @@ fn client_set(fd: RawFd) {
 }
 
 fn client_send(buf: &[u8]) {
-    let client = CLIENT.lock().unwrap();
+    let client = lock(&CLIENT);
     let fd = *client;
     if fd < 0 {
         st_inc(|s| &mut s.tot_noclient);
@@ -417,7 +423,7 @@ static STALL_MS: AtomicI32 = AtomicI32::new(0);
 static CALL_RUNNING: AtomicBool = AtomicBool::new(false);
 
 fn jb_reset() {
-    let mut jb = JB.lock().unwrap();
+    let mut jb = lock(&JB);
     jb.valid = [false; JB_SLOTS];
     jb.started = false;
     jb.playing = false;
@@ -442,7 +448,7 @@ fn jb_put(seq: u16, data: &[u8]) {
     if len == 0 || len > MAX_PACKET {
         return;
     }
-    let mut jb = JB.lock().unwrap();
+    let mut jb = lock(&JB);
     if !jb.started {
         jb.started = true;
         jb.next = seq;
@@ -485,11 +491,11 @@ fn jb_put(seq: u16, data: &[u8]) {
 
 /// The jitter buffer saw this client's first packet: the per-call loss totals start there.
 fn jb_started() -> bool {
-    JB.lock().unwrap().started
+    lock(&JB).started
 }
 
 fn jb_take(out: &mut [u8; MAX_PACKET], outlen: &mut usize, mode: &mut i32) -> bool {
-    let mut jb = JB.lock().unwrap();
+    let mut jb = lock(&JB);
     if !jb.playing {
         return false;
     }
@@ -614,19 +620,19 @@ const EMPTY_STATS: Stats = Stats {
 static STATS: Mutex<Stats> = Mutex::new(EMPTY_STATS);
 
 fn st_inc(f: impl FnOnce(&mut Stats) -> &mut u32) {
-    let mut stats = STATS.lock().unwrap();
+    let mut stats = lock(&STATS);
     let v = f(&mut stats);
     *v += 1;
 }
 
 fn st_add(f: impl FnOnce(&mut Stats) -> &mut u32, n: u32) {
-    let mut stats = STATS.lock().unwrap();
+    let mut stats = lock(&STATS);
     let v = f(&mut stats);
     *v += n;
 }
 
 fn st_peak(f: impl FnOnce(&mut Stats) -> &mut i32, peak: i32) {
-    let mut stats = STATS.lock().unwrap();
+    let mut stats = lock(&STATS);
     let v = f(&mut stats);
     if peak > *v {
         *v = peak;
@@ -634,7 +640,7 @@ fn st_peak(f: impl FnOnce(&mut Stats) -> &mut i32, peak: i32) {
 }
 
 fn st_umax(f: impl FnOnce(&mut Stats) -> &mut u32, value: u32) {
-    let mut stats = STATS.lock().unwrap();
+    let mut stats = lock(&STATS);
     let v = f(&mut stats);
     if value > *v {
         *v = value;
@@ -643,7 +649,7 @@ fn st_umax(f: impl FnOnce(&mut Stats) -> &mut u32, value: u32) {
 
 /// The 5 s counters as one window, cleared under the same lock so no count is lost between read and reset.
 fn take_window(fps: f64) -> crate::protocol::AudioWindow {
-    let mut s = STATS.lock().unwrap();
+    let mut s = lock(&STATS);
     let w = crate::protocol::AudioWindow {
         sent: s.sent,
         txdrop: s.txdrop,
@@ -685,7 +691,7 @@ fn take_window(fps: f64) -> crate::protocol::AudioWindow {
 }
 
 fn st_jb_depth(d: i32) {
-    let mut stats = STATS.lock().unwrap();
+    let mut stats = lock(&STATS);
     stats.jb_sum += if d < 0 { 0.0 } else { d as f64 };
     stats.jb_n += 1;
 }
@@ -781,7 +787,7 @@ fn io_main() {
             if got <= 0 {
                 crate::logi!("audio client gone");
                 let mine = {
-                    let mut client = CLIENT.lock().unwrap();
+                    let mut client = lock(&CLIENT);
                     let mine = *client == fd;
                     if mine {
                         *client = -1;
@@ -887,7 +893,9 @@ fn capture_main() {
                 continue;
             }
         }
-        let p = pcm.unwrap();
+        let Some(p) = pcm else {
+            continue; // reopened above
+        };
         let rc = unsafe {
             (ta.read)(
                 p.0,
@@ -1132,13 +1140,15 @@ fn playback_main() {
         st_inc(|s| &mut s.played);
         st_inc(|s| &mut s.tot_played);
         {
-            let jb = JB.lock().unwrap();
+            let jb = lock(&JB);
             let d = jb_depth(&jb);
             if jb.playing {
                 st_umax(|s| &mut s.depth_max, if d < 0 { 0 } else { d as u32 });
             }
         }
-        let p = pcm.unwrap();
+        let Some(p) = pcm else {
+            break; // the reopen above already breaks on failure
+        };
         let wrote_ok = if ich == 2 {
             for i in 0..samples as usize {
                 out[2 * i] = mono[i];
@@ -1258,7 +1268,7 @@ pub fn tune_get() -> String {
 }
 
 pub fn totals() -> String {
-    let s = STATS.lock().unwrap();
+    let s = lock(&STATS);
     crate::protocol::call_totals_line(&crate::protocol::CallTotals {
         cap: s.tot_cap,
         voiced: s.tot_voiced,
@@ -1281,7 +1291,7 @@ pub fn call_begin(cfg: AudioCfg) {
         call_end();
     }
     {
-        let mut s = STATS.lock().unwrap();
+        let mut s = lock(&STATS);
         s.tot_cap = 0;
         s.tot_voiced = 0;
         s.tot_sent = 0;
@@ -1296,21 +1306,21 @@ pub fn call_begin(cfg: AudioCfg) {
         s.tot_capms = 0;
         s.tot_caperr = 0;
     }
-    *CFG.lock().unwrap() = cfg;
+    *lock(&CFG) = cfg;
     jb_reset();
     CALL_RUNNING.store(true, Ordering::Relaxed);
     let cap = std::thread::Builder::new()
         .name("audio-cap".into())
         .spawn(capture_main);
     match cap {
-        Ok(h) => *CAP_HANDLE.lock().unwrap() = Some(h),
+        Ok(h) => *lock(&CAP_HANDLE) = Some(h),
         Err(e) => crate::loge!("capture thread: {}", e),
     }
     let play = std::thread::Builder::new()
         .name("audio-play".into())
         .spawn(playback_main);
     match play {
-        Ok(h) => *PLAY_HANDLE.lock().unwrap() = Some(h),
+        Ok(h) => *lock(&PLAY_HANDLE) = Some(h),
         Err(e) => crate::loge!("playback thread: {}", e),
     }
     crate::logi!("audio call begin (loopback={})", cfg.loopback as i32);
@@ -1322,11 +1332,11 @@ pub fn call_end() {
     }
     CALL_RUNNING.store(false, Ordering::Relaxed);
     pcm_wake_all();
-    let cap = CAP_HANDLE.lock().unwrap().take();
+    let cap = lock(&CAP_HANDLE).take();
     if let Some(h) = cap {
         let _ = h.join();
     }
-    let play = PLAY_HANDLE.lock().unwrap().take();
+    let play = lock(&PLAY_HANDLE).take();
     if let Some(h) = play {
         let _ = h.join();
     }

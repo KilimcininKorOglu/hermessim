@@ -1,7 +1,6 @@
 // ALSA mixer ownership, call routing, safe mode and call originals. GPL-3.0-or-later.
 #![cfg(target_os = "android")]
 
-use std::ffi::CString;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::RawFd;
@@ -126,11 +125,13 @@ impl Crumb {
     fn boot_reason() -> String {
         unsafe {
             let mut buf = [0u8; 96];
-            let key = CString::new("sys.boot.reason").unwrap();
-            let mut n = __system_property_get(key.as_ptr(), buf.as_mut_ptr() as *mut c_char);
+            let mut n =
+                __system_property_get(c"sys.boot.reason".as_ptr(), buf.as_mut_ptr() as *mut c_char);
             if n <= 0 {
-                let key = CString::new("ro.boot.bootreason").unwrap();
-                n = __system_property_get(key.as_ptr(), buf.as_mut_ptr() as *mut c_char);
+                n = __system_property_get(
+                    c"ro.boot.bootreason".as_ptr(),
+                    buf.as_mut_ptr() as *mut c_char,
+                );
             }
             if n > 0 {
                 let n = (n as usize).min(buf.len());
