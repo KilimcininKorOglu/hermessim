@@ -105,6 +105,8 @@ object SmsSender {
     private val delivered = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
     /** When each message went out (elapsedRealtime), to tell a timeout from a real refusal. */
     private val sentAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    /** Texts already reported sent: the sent result and the delivery report both say ok, the clients hear it once. */
+    private val reportedOk = FirstSeen(50)
 
     /** A text the host sends by itself (the busy reply, a Mac's reply): the clients get it as HostSmsSent, then its SmsSendResult. */
     fun sendFromHost(ctx: Context, to: String, body: String, slot: Int, origin: HostSmsSent.Origin) {
@@ -165,7 +167,7 @@ object SmsSender {
             Log.i(TAG, "SMS $id delivery report: status 0x${Integer.toHexString(status)}")
             if (status in 0 until 0x20 && delivered.add(id)) {          // TP-Status 0x00-0x1F: delivered
                 while (delivered.size > 50) delivered.remove(delivered.first())
-                Relay.smsSendResult(SmsSendResult.newBuilder().setClientMsgId(id).setOk(true).build())
+                if (reportedOk.first(id)) Relay.smsSendResult(SmsSendResult.newBuilder().setClientMsgId(id).setOk(true).build())
             }
         }
     }
@@ -184,6 +186,7 @@ object SmsSender {
                 val unconfirmed = !ok && resultCode == android.telephony.SmsManager.RESULT_ERROR_GENERIC_FAILURE && waited > 60_000
                 Log.i(TAG, "SMS $id sent=$ok (result $resultCode after ${waited / 1000} s)${if (unconfirmed) ": not confirmed" else ""}")
                 if (!ok) failed(ctx, unconfirmed, resultCode, waited)
+                if (ok && !reportedOk.first(id)) return
                 Relay.smsSendResult(SmsSendResult.newBuilder().setClientMsgId(id).setOk(ok)
                     .setError(if (ok) "" else if (unconfirmed) "unconfirmed: the network didn't confirm in time" else "result code $resultCode").build())
             }
