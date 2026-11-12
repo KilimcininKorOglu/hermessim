@@ -26,6 +26,7 @@ This repository is the **host side** (the Android app, its root daemon and Magis
 - **Dual SIM.** Each SIM can be turned on or off, and one carries mobile data and the hotspot.
 - **Network mode per SIM.** Automatic, up to 4G or up to 3G, from the client. The networks below the chosen one stay on, so the line still takes calls where the higher one is missing. A change is refused during a call.
 - **SIM unlock.** PIN and PUK from the client; the client can keep a PIN to unlock the host after a restart.
+- **Scheduled texts.** Up to 50 texts wait on the host and go out at their time, up to a year ahead, also while your phone is off or far away.
 - **USSD codes.** Balance and package codes such as `*123#` run on a host line.
 - **Reconnect and restart.** Airplane mode for a few seconds so the line registers again, or a restart of the host; both are refused during a call.
 
