@@ -134,7 +134,7 @@ A Mac is a peer with `ROLE_MAC`. It talks to the host over Bluetooth only: a Mac
 
 **State.** A Mac gets every `State` with the same `seq` as the phone, holding only the groups it may see: `power`, `network`, `signal`, `hotspot` and `hotspot_limits`; with `control` also `lines` and `hotspot_clients`; and `peers` with only its own `Peer`, without `window_open` and `code`. A `State` with none of them still goes, with its `seq` only. The answer to `GetState` follows the same rule.
 
-**Events.** A Mac with `texts` gets `Event{seq, text_in}` for each text that comes in, and after its `Welcome` the texts of the last 10 minutes, at most 5. It gets no call, no text status and no notice. The host ignores a Mac's `EventAck`: only the phone's moves the text queue. `ReplayEnd` for a Mac carries the host's `text_cursor` and no calls.
+**Events.** A Mac with `texts` gets `Event{seq, text_in}` for each text that comes in, and after its `Welcome` the texts of the last 10 minutes, at most 5. It gets no call, no text status and no notice. The host ignores a Mac's `EventAck`: only the phone's moves the text queue. A Mac's `Hello.text_cursor` names the highest text seq it holds; its replay sends only the texts above it, and its `ReplayEnd` carries the highest text seq it holds after the replay, and no calls.
 
 ## State
 

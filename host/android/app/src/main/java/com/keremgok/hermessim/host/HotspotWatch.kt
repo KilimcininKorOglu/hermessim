@@ -80,7 +80,7 @@ class HotspotWatchCore(private val now: () -> Long) {
 /**
  * The hotspot check (Hotspot.watch): while the hotspot is on and a device uses it, the host pings the set address over
  * its mobile data every few minutes, and the devices on the hotspot report their own failed pings (HostAction
- * HOST_VERB_HOTSPOT_NO_INTERNET, MacControl.hotspot_no_internet). A stuck hotspot keeps its devices connected without
+ * HOST_VERB_HOTSPOT_NO_INTERNET, from the phone or a Mac). A stuck hotspot keeps its devices connected without
  * internet until it is switched off and on (seen by Kerem, 12 Nov 2026). Never in a call: a Wi-Fi change mid-call can
  * cut the call's Bluetooth audio (Hotspot.decideUnused). Main thread, except the ping.
  */

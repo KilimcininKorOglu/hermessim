@@ -10,9 +10,9 @@ import android.os.Handler
 import android.util.Log
 
 /**
- * The Mac service's advertising set, apart from the client's: a central connecting stops a connectable legacy set, and
- * the client's comes back only when its iPhone disconnects. It advertises while [wanted], with the pairing UUID while
- * [pairing], else the Mac service. [refused] runs once the controller turns a second set down. Main thread throughout.
+ * The Macs' advertising set, apart from the phone's: a central connecting stops a connectable legacy set, and the
+ * phone's comes back only when the phone disconnects. It advertises while [wanted], with the Mac pairing UUID while
+ * [pairing], else the service. [refused] runs once the controller turns a second set down. Main thread throughout.
  */
 @SuppressLint("MissingPermission") // runtime permissions are granted by the Magisk module (headless host)
 class MacAdvertiser(
@@ -31,7 +31,7 @@ class MacAdvertiser(
     /** Two sets at once: the controller says it can, and has not refused ours. */
     fun supported(): Boolean = !advRefused && bt.adapter?.isMultipleAdvertisementSupported == true
 
-    private fun adData() = BleLink.advertised(if (pairing()) MacLink.PAIR else MacLink.SERVICE)
+    private fun adData() = BleLink.advertised(if (pairing()) BleLink.MAC_PAIR_SERVICE else BleLink.SERVICE)
 
     private val advCallback = object : AdvertisingSetCallback() {
         override fun onAdvertisingSetStarted(set: AdvertisingSet?, txPower: Int, status: Int) {

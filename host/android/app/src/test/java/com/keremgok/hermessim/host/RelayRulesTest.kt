@@ -24,8 +24,6 @@ import org.junit.Test
 
 /** Which requests and which Hello the host takes: the rules of protocol/v2/SPEC.md that need no phone. */
 class RelayRulesTest {
-    private fun request(ageMs: Int = 0, fill: Request.Builder.() -> Unit): Request = Request.newBuilder().setId(1).setAgeMs(ageMs).apply(fill).build()
-
     private val dial = request { dial = Dial.newBuilder().setNumber("5").build() }
     private val testDial = request { dial = Dial.newBuilder().setNumber("5").setTest(true).build() }
     private val answer = request { callControl = CallControl.newBuilder().setVerb(CallVerb.CALL_VERB_ANSWER).build() }
@@ -104,7 +102,16 @@ class RelayRulesTest {
         assertEquals(Code.CODE_NOT_PAIRED, HelloRules.refusal(hello(), pinned.reversed()))
         assertEquals(Code.CODE_NOT_PAIRED, HelloRules.refusal(hello { installId = ByteString.copyFrom(ByteArray(15)) }, "00".repeat(15)))
         assertEquals(Code.CODE_VERSION, HelloRules.refusal(hello { minVersion = 3; maxVersion = 4 }, pinned))
-        assertEquals(Code.CODE_NOT_ALLOWED, HelloRules.refusal(hello { role = Role.ROLE_MAC }, pinned))
+    }
+
+    @Test fun `a Mac's Hello is taken over Bluetooth when its install id is a paired Mac's`() {
+        val mac = hello { role = Role.ROLE_MAC }
+        val listed = { id: String -> id == pinned }
+        assertNull(HelloRules.refusal(mac, null, listed))
+        assertEquals(Code.CODE_NOT_PAIRED, HelloRules.refusal(mac, pinned, isMac = { false }))
+        assertEquals(Code.CODE_NOT_ALLOWED, HelloRules.refusal(mac, null, listed, bluetooth = false))
+        assertEquals(Code.CODE_NOT_PAIRED, HelloRules.refusal(hello { role = Role.ROLE_MAC; installId = ByteString.copyFrom(ByteArray(15)) }, null, { true }))
+        assertEquals(Code.CODE_NOT_ALLOWED, HelloRules.refusal(hello { role = Role.ROLE_UNSPECIFIED }, pinned))
     }
 
     @Test fun `the host names each of its features with its own bit`() {

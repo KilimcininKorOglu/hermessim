@@ -5,11 +5,11 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** PairedMac.texts and PairedMac.control: which paired Macs may read the texts, and which may change host settings. */
+/** PeerGrants.texts and PeerGrants.control: which paired Macs get the texts, and which may change host settings. */
 class MacTextReadersTest {
     private val core = MacCore { 0L }
-    private val listed = "AA:BB:CC:DD:EE:01"
-    private val stranger = "AA:BB:CC:DD:EE:02"
+    private val listed = "01".repeat(16)
+    private val stranger = "02".repeat(16)
 
     /** One permission as MacCore keeps it: set, ask, store and load. */
     private class Permission(
@@ -26,7 +26,7 @@ class MacTextReadersTest {
 
     @Test
     fun onlyAListedMacMayBeAllowedAndRemovingItForgetsThat() {
-        core.openWindow(); core.admit(MacCore.Mac(listed, "Mac"))
+        core.add(MacCore.Mac(listed, "AA:BB:CC:DD:EE:01", "Mac"))
         for (p in permissions) {
             assertFalse(p.has(core, listed))                                 // off for a new Mac
             assertFalse(p.set(core, stranger, true))                         // a stranger can't be allowed
@@ -41,9 +41,10 @@ class MacTextReadersTest {
     }
 
     @Test
-    fun thePermissionsAreApart() {
-        core.openWindow(); core.admit(MacCore.Mac(listed, "Mac"))
+    fun thePermissionsAreApartAndTravelAsGrants() {
+        core.add(MacCore.Mac(listed, "AA:BB:CC:DD:EE:01", "Mac"))
         core.setControl(listed, true)
         assertFalse(core.texts(listed))
+        with(core.grants(listed)) { assertTrue(control); assertFalse(texts) }
     }
 }

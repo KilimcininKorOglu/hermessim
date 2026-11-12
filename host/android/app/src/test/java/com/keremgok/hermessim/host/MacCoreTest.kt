@@ -1,74 +1,78 @@
 package com.keremgok.hermessim.host
 
-import com.keremgok.hermessim.protocol.v1.MacStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+/** The Mac list: by install id, at most 4, one pairing per window, kept across a restart. */
 class MacCoreTest {
     private var clock = 1_000L
     private val core = MacCore { clock }
-    private fun mac(n: Int) = MacCore.Mac("AA:BB:CC:DD:EE:0$n", "Mac $n")
+    private fun mac(n: Int) = MacCore.Mac("0$n".repeat(16), "AA:BB:CC:DD:EE:0$n", "Mac $n")
 
     @Test
-    fun aStrangerIsRefusedUntilTheWindowOpens() {
-        assertEquals(MacCore.Access.DENY, core.access(mac(1).address))
+    fun theWindowCountsDownAndClosesByItselfAfterTwoMinutes() {
+        assertFalse(core.windowOpen())
         core.openWindow()
-        assertEquals(MacCore.Access.ADMIT, core.access(mac(1).address))
+        clock += 30_500
+        assertEquals(89, core.secondsLeft())
         clock += MacCore.WINDOW_MS
-        assertEquals(MacCore.Access.DENY, core.access(mac(1).address))       // closed by itself after 120 s
+        assertFalse(core.windowOpen())
+        assertEquals(0, core.secondsLeft())
     }
 
     @Test
-    fun anAdmittedMacStaysAllowedAndClosesTheWindow() {
+    fun aPairedMacIsListedAndClosesTheWindowUntilItIsRemoved() {
         core.openWindow()
-        core.admit(mac(1))
-        assertEquals(MacCore.Access.ALLOW, core.access(mac(1).address))
+        assertTrue(core.add(mac(1)))
+        assertEquals(mac(1), core.byAddress(mac(1).address))
         assertFalse(core.windowOpen())
-        assertEquals(MacCore.Access.DENY, core.access(mac(2).address))       // one pairing per window
+        assertEquals(mac(1), core.remove(mac(1).id))
+        assertNull(core.remove(mac(1).id))
+        assertFalse(core.isMac(mac(1).id))
     }
 
     @Test
     fun theListHoldsFourMacsAtMost() {
-        (1..4).forEach { core.openWindow(); core.admit(mac(it)) }
+        (1..4).forEach { core.openWindow(); assertTrue(core.add(mac(it))) }
         core.openWindow()
-        assertEquals(MacCore.Access.DENY, core.access(mac(5).address))
-        core.admit(mac(5))
+        assertFalse(core.add(mac(5)))
         assertEquals(4, core.macs.size)
+        assertFalse(core.windowOpen())
     }
 
     @Test
-    fun aRemovedMacIsAStrangerAgain() {
-        core.openWindow(); core.admit(mac(1))
-        assertTrue(core.remove(mac(1).address))
-        assertFalse(core.remove(mac(1).address))
-        assertEquals(MacCore.Access.DENY, core.access(mac(1).address))
+    fun aMacPairedAgainIsNotListedTwice() {
+        core.add(mac(1))
+        assertFalse(core.add(mac(1).copy(name = "Renamed")))
+        assertEquals(listOf(mac(1)), core.macs)
+    }
+
+    @Test
+    fun aHelloFromANewAddressOrNameIsKept() {
+        core.add(mac(1))
+        assertFalse(core.seen(mac(1).id, mac(1).address, mac(1).name))
+        assertTrue(core.seen(mac(1).id, "11:22:33:44:55:66", "Office"))
+        assertEquals(MacCore.Mac(mac(1).id, "11:22:33:44:55:66", "Office"), core.macs.single())
+        assertFalse(core.seen(mac(2).id, "11:22:33:44:55:66", "Stranger"))
     }
 
     @Test
     fun theListSurvivesStorageAndDropsBrokenEntries() {
-        core.openWindow(); core.admit(MacCore.Mac("AA:BB:CC:DD:EE:01", "Kerem's Mac | Pro"))
-        val again = MacCore { clock }.apply { load(core.stored() + "broken" + "|nameless") }
+        core.add(mac(1).copy(name = "Kerem's Mac | Pro"))
+        val old = "AA:BB:CC:DD:EE:01|Mac from the old service"
+        val again = MacCore { clock }.apply { load(core.stored() + "broken" + old + "${"g".repeat(32)}|a|b") }
         assertEquals(core.macs, again.macs)
         assertNull(MacCore.decode("no separator"))
     }
 
     @Test
-    fun theWindowCountsDownInSeconds() {
-        core.openWindow()
-        clock += 30_500
-        assertEquals(89, core.secondsLeft())
-        core.closeWindow()
-        assertEquals(0, core.secondsLeft())
-    }
-
-    @Test
-    fun theMacSeesOnStartingFailedOrOff() {
-        assertEquals(MacStatus.State.ON, MacCore.state(on = true, starting = false, failed = true))
-        assertEquals(MacStatus.State.STARTING, MacCore.state(on = false, starting = true, failed = true))
-        assertEquals(MacStatus.State.FAILED, MacCore.state(on = false, starting = false, failed = true))
-        assertEquals(MacStatus.State.OFF, MacCore.state(on = false, starting = false, failed = false))
+    fun anIdTravelsAsSixteenBytes() {
+        val id = "00112233445566778899aabbccddeeff"
+        assertEquals(16, MacCore.idBytes(id).size)
+        assertEquals(id, hexOf(MacCore.idBytes(id)))
+        assertEquals(id.replaceFirst("00", "80"), hexOf(MacCore.idBytes(id.replaceFirst("00", "80"))))
     }
 }

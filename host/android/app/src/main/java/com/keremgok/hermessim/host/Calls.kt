@@ -47,7 +47,7 @@ object CallCore {
         before == null || before.phase != now.phase || before.farEndRings != now.farEndRings || before.farEndKnown != now.farEndKnown
 
     /** A client ref as the text the host keeps it under. */
-    fun refText(ref: ByteString): String = ref.toByteArray().joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+    fun refText(ref: ByteString): String = hexOf(ref.toByteArray())
 
     fun refBytes(text: String): ByteString = ByteString.copyFrom(text.chunked(2).map { it.toInt(16).toByte() }.toByteArray())
 

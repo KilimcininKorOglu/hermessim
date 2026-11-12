@@ -41,7 +41,7 @@ class BleLink(
     /** The next bytes for a peer, at most the given count; empty when it has nothing to send. Main thread. */
     private val next: (BluetoothDevice, Int) -> ByteArray,
     private val pairable: () -> Boolean = { false },
-    private val mac: MacLink? = null,
+    private val mac: MacPeers? = null,
 ) {
     companion object {
         /** The link's connection interval as last reported to our client role (ms; 0 = not yet): call audio check. */
@@ -49,6 +49,8 @@ class BleLink(
 
         /** Advertised instead of [SERVICE] while the host shows a pairing code; a phone's Add host sheet looks for it only. */
         val PAIR_SERVICE: UUID = UUID.fromString("7d5f00f0-3c1a-4b6e-9e42-5a1c0de51a00")
+        /** Advertised by the Macs' set while the host takes a new Mac; a Mac's Add phone search looks for it only. */
+        val MAC_PAIR_SERVICE: UUID = UUID.fromString("7d5f00f1-3c1a-4b6e-9e42-5a1c0de51a00")
         private const val TAG = "HermesSimHost"
         val SERVICE: UUID = UUID.fromString("7d5f0001-3c1a-4b6e-9e42-5a1c0de51a00")
         val DOWN: UUID = UUID.fromString("7d5f0002-3c1a-4b6e-9e42-5a1c0de51a00")
@@ -67,7 +69,7 @@ class BleLink(
     private var gatt: BluetoothGattServer? = null
     private lateinit var tx: BluetoothGattCharacteristic
     private val mtu = ConcurrentHashMap<String, Int>()
-    init { mac?.apply { admitted = { restartAdvertising() }; mtu = { address -> this@BleLink.mtu[address] ?: 23 } } }
+    init { mac?.admitted = { restartAdvertising() } }
     /** Main thread: the value in the air per link, and the one a failed notify left to send again. */
     private val inFlight = HashSet<String>()
     private val held = HashMap<String, ByteArray>()
@@ -212,7 +214,7 @@ class BleLink(
     fun setCallPriority(high: Boolean) {
         if (wantHigh == high) return
         wantHigh = high
-        for (d in subscribers()) {
+        for (d in subscribers().filter { mac?.isMac(it.address) != true }) {     // a Mac's link has no call audio
             applyPriority(d)
             // A call starts: its numbers say what the link runs on
             if (high) runCatching { gatt?.readPhy(d) }
@@ -323,22 +325,16 @@ class BleLink(
     /** Our GATT service is registered: notifications can reach clients from now on. */
     var onServiceReady: (() -> Unit)? = null
 
-    /** The request is for the Mac service: MacLink answers it (true), BleLink stays out of it. */
-    private fun forMac(c: BluetoothGattCharacteristic?): Boolean = mac != null && c?.service?.uuid == MacLink.SERVICE
-
     private val callback = object : BluetoothGattServerCallback() {
         override fun onServiceAdded(status: Int, service: BluetoothGattService) {
             Log.i(TAG, "GATT service ${service.uuid} added status=$status")
             if (status != BluetoothGatt.GATT_SUCCESS) return
-            if (service.uuid == MacLink.SERVICE) { mac?.kick(); return }
             main.post { onServiceReady?.invoke() }
-            // Android adds one service at a time: the Mac's goes in once the client's is in.
-            val server = gatt ?: return
-            mac?.let { m -> runCatching { server.addService(m.service(server)) }.onFailure { Log.w(TAG, "Mac service not added: $it") } }
+            mac?.serviceReady()
         }
 
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
-            mac?.connectionChanged(device, newState == BluetoothProfile.STATE_CONNECTED)
+            mac?.kick()
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 Log.i(TAG, "BLE connected ${device.address} bond=${device.bondState}")
                 ignoredDown.remove(device.address)
@@ -354,8 +350,6 @@ class BleLink(
             Log.i(TAG, "BLE disconnected ${device.address} status=$status (stack says ${if (stillUp) "STILL UP, ignored" else "down"})")
             if (stillUp) { ignoredDown.add(device.address); return }
             ignoredDown.remove(device.address)
-            // A Mac is never the client's link: its going changes nothing the client relies on.
-            if (mac?.isMac(device.address) == true) { resetStream(device.address); restartAdvertising(); return }
             linkDown(device)
         }
 
@@ -376,7 +370,6 @@ class BleLink(
 
         override fun onDescriptorWriteRequest(device: BluetoothDevice, requestId: Int, d: BluetoothGattDescriptor,
                                               prepared: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray) {
-            if (forMac(d.characteristic)) { mac?.onCccd(device, requestId, d.characteristic.uuid, responseNeeded, value); return }
             if (d.uuid == CCCD) {
                 val on = value.isNotEmpty() && value[0].toInt() and 1 == 1
                 setSubscribed(device.address, on)
@@ -384,7 +377,7 @@ class BleLink(
                 if (on) {
                     resetStream(device.address); onLink(device, true)
                     // Subscribed during a call: the fast interval applies to it too (it was only asked for on a change)
-                    if (wantHigh) applyPriority(device)
+                    if (wantHigh && mac?.isMac(device.address) != true) applyPriority(device)
                 }
             }
             if (responseNeeded) gatt?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
@@ -392,30 +385,17 @@ class BleLink(
 
         override fun onCharacteristicReadRequest(device: BluetoothDevice, requestId: Int, offset: Int,
                                                  c: BluetoothGattCharacteristic) {
-            if (forMac(c)) { mac?.onRead(device, requestId, offset, c.uuid); return }
             gatt?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, ByteArray(0))
         }
 
         override fun onCharacteristicWriteRequest(device: BluetoothDevice, requestId: Int, c: BluetoothGattCharacteristic,
                                                   prepared: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray) {
-            if (forMac(c)) {
-                if (prepared) mac?.onPreparedWrite(device, requestId, c.uuid, offset, responseNeeded, value)
-                else mac?.onWrite(device, requestId, c.uuid, responseNeeded, value)
-                return
-            }
             if (responseNeeded) gatt?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
             if (c.uuid == UP) onBytes(device, value)
         }
 
-        /** The end of a long (prepared) write: only the Mac service takes them. */
-        override fun onExecuteWrite(device: BluetoothDevice, requestId: Int, execute: Boolean) {
-            if (mac?.isMac(device.address) == true) { mac.onExecuteWrite(device, requestId, execute); return }
-            gatt?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
-        }
-
         override fun onNotificationSent(device: BluetoothDevice, status: Int) {
             if (status != BluetoothGatt.GATT_SUCCESS) Log.w(TAG, "notification to ${device.address} status=$status")
-            if (mac?.isMac(device.address) == true) { mac.notificationSent(device); return }
             main.post { inFlight.remove(device.address); pump(device) }
         }
     }

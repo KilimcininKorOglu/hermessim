@@ -1,7 +1,6 @@
 // HermesSIM host. Copyright (C) 2026 SIM Relay authors. GPL-3.0-or-later.
 package com.keremgok.hermessim.host
 
-import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.content.Context
 import android.content.Intent
@@ -10,7 +9,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.telephony.TelephonyManager
 import android.util.Log
 import com.google.protobuf.ByteString
 import com.keremgok.hermessim.host.wire.Channel
@@ -22,8 +20,6 @@ import com.keremgok.hermessim.host.wire.StreamChoice
 import com.keremgok.hermessim.host.wire.Wire
 import com.keremgok.hermessim.host.wire.WireException
 import com.keremgok.hermessim.host.wire.WireFault
-import com.keremgok.hermessim.protocol.v1.MacCommand
-import com.keremgok.hermessim.protocol.v1.MacStatus
 import com.keremgok.hermessim.wire.Bye
 import com.keremgok.hermessim.wire.ByeReason
 import com.keremgok.hermessim.wire.CallPhase
@@ -42,18 +38,29 @@ import com.keremgok.hermessim.wire.Refuse
 import com.keremgok.hermessim.wire.ReplayEnd
 import com.keremgok.hermessim.wire.Reply
 import com.keremgok.hermessim.wire.Request
+import com.keremgok.hermessim.wire.Role
 import com.keremgok.hermessim.wire.StateMark
 import com.keremgok.hermessim.wire.TextIn
 import com.keremgok.hermessim.wire.TextStatus
 import com.keremgok.hermessim.wire.Welcome
 import java.util.concurrent.ConcurrentHashMap
 
-/** One transport to the phone and the session on it. Main thread, except [Channel.serving]. */
+/** One transport to a peer (the phone or a Mac) and the session on it. Main thread, except [Channel.serving]. */
 sealed class Link(val id: String) {
     val channel = Channel(SystemClock::elapsedRealtime) { java.security.SecureRandom().nextInt() }
 
-    /** The install id of the Hello this link was refused for: a pairing proof covers it. */
+    /** The role of the Hello the host took on this link; the peer's install id in hex for a Mac. */
+    var role: Role = Role.ROLE_UNSPECIFIED
+    var macId: String? = null
+
+    /** The install id, role and name of the Hello this link was refused for: a pairing proof covers the id. */
     var claimed: ByteArray? = null
+    var claimedRole: Role = Role.ROLE_UNSPECIFIED
+    var claimedName = ""
+
+    /** Served now as the phone, or as a Mac. */
+    val phone: Boolean get() = channel.serving && role == Role.ROLE_PHONE
+    val mac: Boolean get() = channel.serving && role == Role.ROLE_MAC
 
     /** The ids of the requests that still run: one that comes again meanwhile is not run again. */
     val running = HashSet<Int>()
@@ -114,7 +121,7 @@ object Relay {
 
     private lateinit var app: Context
     private lateinit var ble: BleLink
-    private lateinit var macLink: MacLink
+    private lateinit var macPeers: MacPeers
     private var audio: AudioBridge? = null
     private val main = Handler(Looper.getMainLooper())
     private val links = ConcurrentHashMap<String, Link.Ble>()
@@ -129,7 +136,7 @@ object Relay {
     private var lastHotspotRadio = false
     private var relayStarted = false
 
-    internal val mac: MacLink get() = macLink
+    internal val macs: MacPeers get() = macPeers
 
     private fun prefs() = app.getSharedPreferences("relay", Context.MODE_PRIVATE)
 
@@ -169,12 +176,11 @@ object Relay {
     }
 
     private fun startLinks() {
-        macLink = MacLink(app, ::macStatus, { Hotspot.info(app).passphrase }, ::macCommand,
-            changed = { touch(StateBook.PEERS) },
-            unbond = { address -> pairExec.execute { RootBt.unbond(app, address) } },
-            control = { address, value -> MacControlRunner.run(app, main, address, value) })
+        val bt = app.getSystemService(android.bluetooth.BluetoothManager::class.java)
+        macPeers = MacPeers(app, main, bt, changed = { touch(StateBook.PEERS) },
+            connected = { macTargets().mapNotNull { it.macId }.toSet() })
         ble = BleLink(app, ::onBytes, ::onLink, { device, max -> links[device.address]?.channel?.next(max) ?: ByteArray(0) },
-            ::pairable, macLink)
+            ::pairable, macPeers)
         ble.onServiceReady = { askForHello() }
         ble.start()
         val adapter = (app.getSystemService(Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager).adapter
@@ -255,7 +261,7 @@ object Relay {
     fun advertisingStatus(): Int? = if (::ble.isInitialized) ble.advStatus else null
 
     /** The paired phone is here on Bluetooth (it said Hello on a subscribed link). */
-    private fun bleNear(): Boolean = ::ble.isInitialized && ble.subscribers().any { links[it.address]?.channel?.serving == true }
+    private fun bleNear(): Boolean = ::ble.isInitialized && ble.subscribers().any { links[it.address]?.phone == true }
 
     fun clientConnected(): Boolean = bleNear() || (RemoteLink.peerPresent && Link.Internet.channel.serving)
 
@@ -331,31 +337,37 @@ object Relay {
     private fun pairingRequest(dev: BluetoothDevice) {
         val address = dev.address
         val known = pinned() != null && address == prefs().getString("client_mac", null)
-        val forMac = macLink.windowOpen()       // a Mac pairs while the phone holds its window open
+        val forMac = macPeers.windowOpen()      // a Mac pairs while the phone holds its window open
         if (!pairable() && !known && !forMac) return
         if (known && !pairable()) Log.i(TAG, "pairing request from the paired phone (its keys were reset): accepting")
         if (forMac) Log.i(TAG, "pairing request inside the Mac window: accepting")
         pairExec.execute { RootBt.confirm(app, address) }
     }
 
+    /** A Mac pairs with the code the phone shows (MacPeers), a phone with the one on the host's screen. */
+    private fun deskFor(link: Link): PairingDesk = if (link.claimedRole == Role.ROLE_MAC) macPeers.desk else desk
+
     private fun pairStart(link: Link, m: PairStart) {
         if (!link.bluetooth) return refuse(link, Code.CODE_NOT_ALLOWED)
-        val (hostKey, salt) = desk.offer(m.publicKey.toByteArray()) ?: return refuse(link, Code.CODE_PAIRING_CLOSED)
+        val d = deskFor(link)
+        val (hostKey, salt) = d.offer(m.publicKey.toByteArray()) ?: return refuse(link, Code.CODE_PAIRING_CLOSED)
         sendNow(link, Packet.newBuilder().setPairOffer(PairOffer.newBuilder().setPublicKey(ByteString.copyFrom(hostKey))
-            .setSalt(ByteString.copyFrom(salt)).setTriesLeft(desk.triesLeft)).build())
+            .setSalt(ByteString.copyFrom(salt)).setTriesLeft(d.triesLeft)).build())
     }
 
     private fun pairProof(link: Link, m: PairProof) {
         val claimed = link.claimed
         if (!link.bluetooth || claimed == null) return refuse(link, Code.CODE_NOT_PAIRED)
-        when (desk.check(m.proof.toByteArray(), claimed)) {
-            PairResult.PAIRED -> paired(link, claimed)
+        val d = deskFor(link)
+        val mac = link.claimedRole == Role.ROLE_MAC
+        when (d.check(m.proof.toByteArray(), claimed)) {
+            PairResult.PAIRED -> if (mac) macPeers.paired(hexOf(claimed), link.id, link.claimedName) else paired(link, claimed)
             PairResult.CLOSED -> refuse(link, Code.CODE_PAIRING_CLOSED)
             PairResult.WRONG -> {
-                Log.w(TAG, "pairing: wrong proof from ${link.id}, ${desk.triesLeft} tries left")
-                pairingChanged()                                  // the third wrong proof made a new code
+                Log.w(TAG, "pairing: wrong proof from ${link.id}, ${d.triesLeft} tries left")
+                if (mac) macPeers.wrongProof() else pairingChanged()      // the third wrong proof made a new code
                 sendNow(link, Packet.newBuilder().setRefuse(Refuse.newBuilder().setCode(Code.CODE_PAIRING_WRONG)
-                    .setTriesLeft(desk.triesLeft)).build())
+                    .setTriesLeft(d.triesLeft)).build())
             }
         }
     }
@@ -390,12 +402,16 @@ object Relay {
         if (e.incoming && e.phase == CallPhase.CALL_PHASE_RINGING && !bleNear()) Push.call(seq, e)
     }
 
-    /** A text came in ([event]: its stored `Event` bytes): to the phone now, as a push if it does not store it, and to the Macs. */
+    /**
+     * A text came in ([event]: its stored `Event` bytes): to the phone now, as a push if it does not store it, and to
+     * the Macs with the texts grant.
+     */
     fun textIn(seq: Long, text: TextIn, event: ByteArray) = Bg.onMain {
         if (!started()) return@onMain
         textEvent(event)
         Push.text(seq, event)
-        macLink.textArrived(seq, text)
+        macPeers.textArrived(seq, text)
+        macTargets().filter { macPeers.mayGetTexts(it.macId) }.forEach { sendBytes(it, Fields.bytes(Packet.EVENT_FIELD_NUMBER, event)) }
     }
 
     /** A stored text event to the phone served now. It stays stored until an EventAck names it. */
@@ -421,13 +437,19 @@ object Relay {
         if (!bleNear()) Push.notice(n)
     }
 
-    /** Bluetooth links when any serves, else the internet room. */
+    /** The phone's Bluetooth links when any serves, else the internet room. A Mac is never one of them. */
     private fun targets(): List<Link> {
         if (!::ble.isInitialized) return emptyList()
-        val viaBle = ble.subscribers().mapNotNull { links[it.address] }.filter { it.channel.serving }
+        val viaBle = ble.subscribers().mapNotNull { links[it.address] }.filter { it.phone }
         if (viaBle.isNotEmpty()) return viaBle
-        return if (RemoteLink.peerPresent && Link.Internet.channel.serving) listOf(Link.Internet) else emptyList()
+        return if (RemoteLink.peerPresent && Link.Internet.phone) listOf(Link.Internet) else emptyList()
     }
+
+    /** The Macs served now (always over Bluetooth). */
+    private fun macTargets(): List<Link> = links.values.filter { it.mac }
+
+    /** A `State` as [link] may see it: a Mac gets its own view (MacPeers.view). */
+    private fun stateFor(link: Link, state: ByteArray): ByteArray = if (link.role == Role.ROLE_MAC) macPeers.view(state, link.macId) else state
 
     /** True when a phone was there to hear it. */
     private fun broadcast(packet: Packet): Boolean {
@@ -491,35 +513,34 @@ object Relay {
         Bg.guard("state") {
             val groups = dirty.toSet()
             dirty.clear()
-            val (reading, signalWait) = HostState.refresh(app, groups, macLink::peers)
+            val (reading, signalWait) = HostState.refresh(app, groups, macPeers::peers)
             signalWait?.let { touchLater(it + 50, StateBook.SIGNAL) }
             sendChanges()
             if (StateBook.POWER in groups || StateBook.LINES in groups)
                 Health.notices(HealthView(reading.battery, reading.charging, reading.sims, Box.chargeState, Box.chargeLimit)).forEach(::notice)
             if (StateBook.HOTSPOT_USAGE in groups) dataLimit(reading)
         }
-        if (::macLink.isInitialized) macLink.statusChanged()            // the Macs hear the same changes
     }
 
     /** The `State` with what changed since the last one, to the links served now; [except] gets a base instead. */
     private fun sendChanges(except: Link? = null) {
         val state = HostState.book.next() ?: return
-        val to = targets().filter { it !== except }
-        to.forEach { link -> link.stateSeq = HostState.book.seq; sendBytes(link, Fields.bytes(Packet.STATE_FIELD_NUMBER, state)) }
+        val to = (targets() + macTargets()).filter { it !== except }
+        to.forEach { link -> link.stateSeq = HostState.book.seq; sendBytes(link, Fields.bytes(Packet.STATE_FIELD_NUMBER, stateFor(link, state))) }
         if (to.isNotEmpty()) Updater.informed()
     }
 
     /** GetState: the named groups read again and sent whole, with the book's current seq. */
     internal fun sendState(link: Link, groups: List<Int>) {
         val wanted = if (groups.isEmpty()) HostState.ALL else groups.toSet()
-        val (reading, _) = HostState.refresh(app, wanted - StateBook.SIGNAL, macLink::peers)
+        val (reading, _) = HostState.refresh(app, wanted - StateBook.SIGNAL, macPeers::peers)
         if (StateBook.SIGNAL in wanted) {
             HostState.signal.asked(SystemClock.elapsedRealtime())
             HostState.signal(reading, force = true)
         }
         sendChanges()                         // what the reading changed goes to every link first, with its own seq
         link.stateSeq = HostState.book.seq
-        sendBytes(link, Fields.bytes(Packet.STATE_FIELD_NUMBER, HostState.book.whole(groups)))
+        sendBytes(link, Fields.bytes(Packet.STATE_FIELD_NUMBER, stateFor(link, HostState.book.whole(groups))))
     }
 
     /** This month's hotspot usage against its limit (DataLimit): a notice, and at the limit the hotspot off once. */
@@ -543,8 +564,10 @@ object Relay {
             return@post
         }
         val wasServed = link.channel.serving
+        val wasMac = link.role == Role.ROLE_MAC
         link.channel.close()
         link.claimed = null
+        if (wasMac) { Log.i(TAG, "Mac ${d.address} gone"); touch(StateBook.PEERS); return@post }
         Log.i(TAG, "client ${d.address} gone")
         HostWifi.evaluate("Bluetooth gone")
         HotspotPause.transportChanged("Bluetooth gone")
@@ -598,28 +621,51 @@ object Relay {
             // A host whose app restarted while the link stayed up: ask for a Hello (the phone would otherwise wait)
             !link.channel.serving -> link.channel.reset(WireFault.NO_SESSION)
             p.hasRequest() -> Requests.handle(app, main, link, p.request)
-            p.hasEventAck() -> Events.log(app).ack(p.eventAck.textsUpTo)
+            // Only the phone's moves the text queue: a Mac's is left alone (SPEC.md "Macs")
+            p.hasEventAck() -> if (link.role == Role.ROLE_PHONE) Events.log(app).ack(p.eventAck.textsUpTo)
             else -> Log.w(TAG, "unexpected ${p.kindCase} from ${link.id}")
         }
     }
 
     private fun hello(link: Link, h: Hello) {
-        val refusal = HelloRules.refusal(h, pinned())
+        val refusal = HelloRules.refusal(h, pinned(), macPeers::known, link.bluetooth)
         if (refusal != null) {
+            link.role = Role.ROLE_UNSPECIFIED
             if (refusal == Code.CODE_NOT_PAIRED) notPaired(link, h)
             return refuse(link, refusal)
         }
         val resumed = link.channel.open(if (h.hasResume()) h.resume.sessionId else null)
         if (!resumed) link.running.clear()
         link.claimed = null
+        link.role = h.role
+        link.macId = if (h.role == Role.ROLE_MAC) HelloRules.id(h) else null
+        val phone = h.role == Role.ROLE_PHONE
         val welcome = Welcome.newBuilder().setVersion(Wire.VERSION).setFeatures(HelloRules.FEATURES)
             .setSessionId(link.channel.sessionId).setResumed(resumed).setEpoch(HostState.epoch).setHost(hostInfo())
-            .setAudioPsm(if (link.bluetooth) ble.audioPsm else 0)
+            .setAudioPsm(if (link.bluetooth && phone) ble.audioPsm else 0)
         if (resumed) welcome.received = link.channel.received.toInt()
         send(link, Packet.newBuilder().setWelcome(welcome).build())
+        val mark = if (h.hasStateMark()) h.stateMark else null
+        if (!phone) return macServed(link, h, mark)
         served(link, h, resumed)
-        val cursor = storedTexts(h.textCursor)
-        replay(link, if (h.hasStateMark()) h.stateMark else null, cursor)
+        replay(link, mark, storedTexts(h.textCursor))
+    }
+
+    /**
+     * A Mac's session (SPEC.md "Macs"): its own view of the state, the recent texts above its cursor when it may get
+     * them, and ReplayEnd with the highest text seq it was sent. No call and no text status.
+     */
+    private fun macServed(link: Link, h: Hello, mark: StateMark?) {
+        Log.i(TAG, "Hello from the Mac ${h.deviceModel} app ${h.appVersion}")
+        macPeers.seen(HelloRules.id(h), link.id, h.deviceModel)
+        var lane = sendBase(link, mark)
+        var cursor = h.textCursor
+        for (text in macPeers.texts(link.macId, h.textCursor)) {
+            val event = Event.newBuilder().setSeq(text.seq).setTextIn(text.text).build()
+            lane = maxOf(lane, sendBytes(link, Fields.bytes(Packet.EVENT_FIELD_NUMBER, event.toByteArray())))
+            cursor = maxOf(cursor, text.seq)
+        }
+        sendBytes(link, Packet.newBuilder().setReplayEnd(ReplayEnd.newBuilder().setTextCursor(cursor)).build().toByteArray(), lane)
     }
 
     /**
@@ -663,11 +709,7 @@ object Relay {
      * statuses nobody heard; then ReplayEnd, on the stream that carries the slowest of them, so it arrives last.
      */
     private fun replay(link: Link, mark: StateMark?, textCursor: Long) {
-        val (reading, _) = HostState.refresh(app, HostState.ALL - StateBook.SIGNAL, macLink::peers)
-        HostState.signal(reading, force = true)
-        sendChanges(except = link)
-        link.stateSeq = HostState.book.seq
-        var lane =sendBytes(link, Fields.bytes(Packet.STATE_FIELD_NUMBER, HostState.book.since(mark?.epoch, mark?.seq ?: 0)))
+        var lane = sendBase(link, mark)
         Updater.informed()
         val log = Events.log(app)
         val calls = CallRegistry.snapshot()
@@ -681,6 +723,16 @@ object Relay {
         val end = ReplayEnd.newBuilder().setTextCursor(log.textCursor).setCallCursor(log.callCursor)
             .addAllLiveCalls(calls.filter { it.phase != CallPhase.CALL_PHASE_ENDED }.map { it.call }).build()
         sendBytes(link, Packet.newBuilder().setReplayEnd(end).build().toByteArray(), lane)
+    }
+
+    /** Every group read again, what changed to the other links, then [link]'s base `State` since [mark]. Its stream. */
+    private fun sendBase(link: Link, mark: StateMark?): Int {
+        val (reading, _) = HostState.refresh(app, HostState.ALL - StateBook.SIGNAL, macPeers::peers)
+        HostState.signal(reading, force = true)
+        sendChanges(except = link)
+        link.stateSeq = HostState.book.seq
+        val base = HostState.book.since(mark?.epoch, mark?.seq ?: 0)
+        return sendBytes(link, Fields.bytes(Packet.STATE_FIELD_NUMBER, stateFor(link, base)))
     }
 
     private fun refuse(link: Link, code: Code) {
@@ -698,9 +750,12 @@ object Relay {
      */
     private fun notPaired(link: Link, h: Hello) {
         link.claimed = h.installId.toByteArray()
+        link.claimedRole = h.role
+        link.claimedName = h.deviceModel
         if (link !is Link.Ble) return
         rejected.add(link.id)
-        main.postDelayed({ if (!link.channel.serving && link.id in rejected) link.drop() }, if (pairingOpen()) PAIR_GRACE_MS else 500)
+        val open = if (h.role == Role.ROLE_MAC) macPeers.windowOpen() else pairingOpen()
+        main.postDelayed({ if (!link.channel.serving && link.id in rejected) link.drop() }, if (open) PAIR_GRACE_MS else 500)
     }
 
     // ------------------------------------------------------------- the end of a pairing
@@ -719,8 +774,9 @@ object Relay {
         return address
     }
 
+    /** The phone's sessions end; a Mac's stays (it goes only with the Mac or with Retire). */
     private fun closeSessions() {
-        links.values.forEach { it.channel.close() }
+        links.values.filter { it.role != Role.ROLE_MAC }.forEach { it.channel.close() }
         Link.Internet.channel.close()
     }
 
@@ -746,16 +802,22 @@ object Relay {
      * host forgets it as after ForgetHost and stops advertising. [done] runs off main.
      */
     fun retire(done: () -> Unit) = main.post {
-        broadcast(Packet.newBuilder().setBye(Bye.newBuilder().setReason(ByeReason.BYE_REASON_RETIRED)).build())
+        val bye = Packet.newBuilder().setBye(Bye.newBuilder().setReason(ByeReason.BYE_REASON_RETIRED)).build()
+        broadcast(bye)
+        macTargets().forEach { send(it, bye) }                  // the Macs forget the host too
         main.postDelayed({
-            targets().forEach { it.drop() }
+            (targets() + macTargets()).forEach { it.drop() }
+            val macAddresses = macPeers.clear()
             val address = forgetPin()
             closeSessions()
             desk.close()
             shownCode = null
             if (::ble.isInitialized) runCatching { ble.stop() }
             Log.i(TAG, "RETIRED: the phone was told, pairing forgotten")
-            pairExec.execute { if (address != null) RootBt.unbond(app, address); done() }
+            pairExec.execute {
+                (listOfNotNull(address) + macAddresses).forEach { RootBt.unbond(app, it) }
+                done()
+            }
         }, 1500)                                               // time for the Bye to reach the phone
     }
 
@@ -827,6 +889,7 @@ object Relay {
      * Sent once the GATT service is up and again with every tick until the phone says Hello.
      */
     private fun askForHello() {
+        askMacsForHello()
         // Only the paired phone, and not after it was told it isn't paired: the phone's other LE links (a watch, a band)
         // aren't ours to ask, and asking a rejected phone looped Hello / NOT_PAIRED every minute (29 Oct 2026, 23 times)
         val ours = prefs().getString("client_mac", null)
@@ -834,6 +897,22 @@ object Relay {
         val silent = ble.connectedDevices().filter { it.address == ours && links[it.address]?.channel?.serving != true && it.address !in rejected }
         watchSilent(silent.firstOrNull())
         silent.forEach { askForHello(it) }
+    }
+
+    /** A listed Mac whose link outlived this process: told there is no session, so it says Hello. */
+    private fun askMacsForHello() {
+        ble.connectedDevices().filter { macPeers.isMac(it.address) && !serving(it) }.forEach { d ->
+            val link = links.getOrPut(d.address) { Link.Ble(d, ble) }
+            link.channel.reset(WireFault.NO_SESSION)
+            link.kick()
+        }
+    }
+
+    /** SetPeer{remove}: the Mac is forgotten, its link ends and its Bluetooth bond goes. */
+    internal fun removeMac(id: String) {
+        val gone = macPeers.remove(id) ?: return
+        links.values.filter { it.macId == id }.forEach { it.channel.close(); it.drop() }
+        pairExec.execute { RootBt.unbond(app, gone.address) }
     }
 
     @Volatile private var noHelloSince = 0L
@@ -937,7 +1016,7 @@ object Relay {
         link.kick()
     }
 
-    // ------------------------------------------------------------- the hotspot switch and the Macs
+    // ------------------------------------------------------------- the hotspot switch
 
     private val hotspotGroups = intArrayOf(StateBook.HOTSPOT, StateBook.HOTSPOT_CLIENTS)
 
@@ -962,37 +1041,6 @@ object Relay {
         // A start Android accepted can still die before the AP is up (no state change then): end "starting"
         // as soon as its 15 s window closes.
         if (on) touchLater(15_500, *hotspotGroups)
-    }
-
-    /**
-     * What a Mac is shown (MacStatus): the hotspot as the phone sees it, plus the host's battery and signal, and the
-     * lines and devices MacLink keeps for a Mac with control.
-     */
-    @SuppressLint("MissingPermission")
-    private fun macStatus(): MacStatus {
-        val hs = Hotspot.info(app)
-        val bm = app.getSystemService(BatteryManager::class.java)
-        val name = runCatching { (app.getSystemService(Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager).adapter?.name }.getOrNull()
-        return MacStatus.newBuilder()
-            .setState(MacCore.state(hs.on, hs.starting, HostState.hotspotFailed))
-            .setSsid(hs.ssid).setFrequencyMhz(hs.frequencyMhz).setGateway(hs.gateway)
-            .setBatteryPercent(bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)).setCharging(bm.isCharging)
-            .setSignalLevel(app.getSystemService(TelephonyManager::class.java).signalStrength?.level ?: 0)
-            .setHostName(name?.takeIf { it.isNotBlank() } ?: Build.MODEL)
-            .setControllable(hs.available && HostWifi.clientOverride == null)
-            .setPausedForCall(HotspotPause.paused && !hs.on).setOffWhenUnused(true)
-            .setLimitReached(DataLimit.reached(DataUsage.usage().month))
-            .setDevices(hs.clients.size).setHostActions(true)
-            .apply { HotspotWatch.setting.let { w -> setWatch(w.on).setWatchEveryS(w.everyS).setWatchAddress(w.address).setWatchMisses(w.misses) } }
-            .addAllLines(MacControlCore.lines(Sims.status(app)))
-            .addAllClients(MacControlCore.devices(hs.clients)).addAllBlocked(MacControlCore.devices(HotspotGuard.blocked()))
-            .build()
-    }
-
-    /** A Mac's command (MacLink, main thread): the same switch as the phone's SetHotspot. */
-    private fun macCommand(cmd: MacCommand) {
-        if (HostWifi.clientOverride != null) { Log.i(TAG, "rig running: the Mac's hotspot switch ignored"); return }
-        switchHotspot(cmd.on, cmd.offWhenUnusedS) { code -> if (code != Code.CODE_OK) Log.w(TAG, "Mac hotspot switch: $code") }
     }
 }
 

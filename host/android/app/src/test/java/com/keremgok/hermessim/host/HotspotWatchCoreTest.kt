@@ -1,10 +1,7 @@
 package com.keremgok.hermessim.host
 
 import com.keremgok.hermessim.host.HotspotWatchCore.Step
-import com.keremgok.hermessim.protocol.v1.MacControl
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -49,13 +46,6 @@ class HotspotWatchCoreTest {
     @Test fun `a report during a call waits for its end`() {
         assertEquals(Step.WAIT, core.reported(inCall = true))
         assertEquals(Step.RESTART_HOTSPOT, core.afterCall())
-    }
-
-    @Test fun `a Mac's report is taken from every Mac and during a call`() {
-        val report = MacControl.newBuilder().setHotspotNoInternet(true).build()
-        assertNull(MacControlCore.refusal(report, inCall = true, slots = emptySet()))
-        assertTrue(MacControlCore.forEveryMac(report.toByteArray()))
-        assertFalse(MacControlCore.forEveryMac(MacControl.newBuilder().setDataSlot(1).build().toByteArray()))
     }
 
     @Test fun `the default check is on and pings every 5 minutes, 3 misses in a row`() {

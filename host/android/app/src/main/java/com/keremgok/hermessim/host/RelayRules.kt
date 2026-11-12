@@ -71,13 +71,23 @@ object HelloRules {
     ).fold(0L) { bits, f -> bits or (1L shl f.number) }
 
     /** The install id as the host stores it. */
-    fun id(hello: Hello): String = hello.installId.toByteArray().joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+    fun id(hello: Hello): String = hexOf(hello.installId.toByteArray())
 
-    /** Why the Hello is refused, or null. [pinned]: the install id of the paired phone, null for none. */
-    fun refusal(hello: Hello, pinned: String?): Code? = when {
+    /**
+     * Why the Hello is refused, or null. [pinned]: the install id of the paired phone, null for none; [isMac]: an
+     * install id is a paired Mac's; [bluetooth]: the link is a Bluetooth one (a Mac talks over Bluetooth only).
+     */
+    fun refusal(hello: Hello, pinned: String?, isMac: (String) -> Boolean = { false }, bluetooth: Boolean = true): Code? = when {
         commonVersion(hello.minVersion, hello.maxVersion) == null -> Code.CODE_VERSION
-        hello.role != Role.ROLE_PHONE -> Code.CODE_NOT_ALLOWED            // a Mac keeps its own service for now
+        hello.role == Role.ROLE_MAC -> macRefusal(hello, isMac, bluetooth)
+        hello.role != Role.ROLE_PHONE -> Code.CODE_NOT_ALLOWED
         hello.installId.size() != 16 || id(hello) != pinned -> Code.CODE_NOT_PAIRED
+        else -> null
+    }
+
+    private fun macRefusal(hello: Hello, isMac: (String) -> Boolean, bluetooth: Boolean): Code? = when {
+        !bluetooth -> Code.CODE_NOT_ALLOWED
+        hello.installId.size() != 16 || !isMac(id(hello)) -> Code.CODE_NOT_PAIRED
         else -> null
     }
 }

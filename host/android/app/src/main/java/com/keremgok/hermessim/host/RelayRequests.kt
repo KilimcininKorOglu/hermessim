@@ -11,15 +11,19 @@ import com.keremgok.hermessim.wire.HotspotSecret
 import com.keremgok.hermessim.wire.LineLockNow
 import com.keremgok.hermessim.wire.LogPart
 import com.keremgok.hermessim.wire.Request
+import com.keremgok.hermessim.wire.Role
+import com.keremgok.hermessim.wire.SendText
 import com.keremgok.hermessim.wire.SetHotspotSetup
 import com.keremgok.hermessim.wire.SetLine
 import com.keremgok.hermessim.wire.SetPeer
+import com.keremgok.hermessim.wire.TextOrigin
 import com.keremgok.hermessim.wire.TextQueued
 import com.keremgok.hermessim.wire.UssdAnswer
 
 /**
- * The requests of a phone that is served (protocol/v2/SPEC.md "Requests"). Each request has one handler, and each
- * handler answers exactly once (GetLog: once per part), at once or when the phone system has answered. Main thread.
+ * The requests of a peer that is served (protocol/v2/SPEC.md "Requests"; a Mac's as "Macs" allows). Each request has
+ * one handler, and each handler answers exactly once (GetLog: once per part), at once or when the phone system has
+ * answered. Main thread.
  */
 object Requests {
     private const val TAG = "HermesSimHost"
@@ -77,7 +81,8 @@ object Requests {
     }
 
     private fun refusal(link: Link, req: Request): Code? =
-        RequestRules.refusal(req, link.bluetooth)
+        (if (link.role == Role.ROLE_MAC) MacRules.refusal(req, Relay.macs.grants(link.macId)) else null)
+            ?: RequestRules.refusal(req, link.bluetooth)
             ?: RequestRules.voiceRefusal(req, VoiceGate.fullVoice, Daemon.hasProfile())
             // Test rig running (adb override): the real phone's switches would fight the scenario.
             ?: Code.CODE_NOT_ALLOWED.takeIf { HostWifi.clientOverride != null && req.opCase in RequestRules.heldByRig }
@@ -100,8 +105,19 @@ object Requests {
     private fun sendTones(a: Ask) = with(a.req.sendTones) { a.answer(CallRegistry.tones(call, digits)) }
 
     private fun sendText(a: Ask) = with(a.req.sendText) {
+        if (a.link.role == Role.ROLE_MAC) return@with macText(a)
         val (code, seq) = SmsSender.sendFromPeer(app, CallCore.refText(clientRef), to, body, if (hasLine()) line else -1)
         a.answer(code) { reply -> if (code == Code.CODE_OK) reply.setText(TextQueued.newBuilder().setText(seq)) }
+    }
+
+    /** A Mac answers a text it was given: to its sender, on its line; the phone sees it as TextByHost. */
+    private fun macText(a: Ask) = with(a.req.sendText) {
+        val line = if (hasLine()) line else null
+        when (val code = MacRules.textRefusal(this, Relay.macs.answers(to, line))) {
+            null -> { SmsSender.sendFromHost(app, to, body, line ?: -1, TextOrigin.TEXT_ORIGIN_MAC); a.ok() }
+            Code.CODE_BAD_VALUE -> a.answer(code, SendText.BODY_FIELD_NUMBER.toLong())
+            else -> a.answer(code)
+        }
     }
 
     private fun runUssd(a: Ask) = with(a.req.runUssd) {
@@ -297,16 +313,17 @@ object Requests {
     // ------------------------------------------------------------- Mac peers and the end of the pairing
 
     private fun openPeerWindow(a: Ask) {
-        Relay.mac.setPairing(a.req.openPeerWindow.open)
+        Relay.macs.setWindow(a.req.openPeerWindow.open)
         a.ok()
     }
 
     private fun setPeer(a: Ask) {
         val p = a.req.setPeer
-        val address = Relay.mac.address(p.id) ?: return a.answer(Code.CODE_BAD_VALUE, 1)
+        val id = hexOf(p.id.toByteArray())
+        if (!Relay.macs.known(id)) return a.answer(Code.CODE_BAD_VALUE, SetPeer.ID_FIELD_NUMBER.toLong())
         when (p.changeCase) {
-            SetPeer.ChangeCase.REMOVE -> Relay.mac.remove(address)
-            SetPeer.ChangeCase.GRANTS -> { Relay.mac.setTexts(address, p.grants.texts); Relay.mac.setControl(address, p.grants.control) }
+            SetPeer.ChangeCase.REMOVE -> Relay.removeMac(id)
+            SetPeer.ChangeCase.GRANTS -> Relay.macs.setGrants(id, p.grants.texts, p.grants.control)
             else -> return a.answer(Code.CODE_BAD_VALUE)
         }
         a.ok()
