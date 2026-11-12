@@ -53,7 +53,7 @@ sealed class Peer(val id: String) {
  */
 object Relay {
     private const val TAG = "HermesSimHost"
-    private const val PROTOCOL_VERSION = 1
+    private const val PROTOCOL_VERSION = 2
     private const val KEEPALIVE_MS = 60_000L
     private const val FIRST_PAIRING_WINDOW_MS = 10 * 60_000L
     private const val PAIRING_WINDOW_MS = 5 * 60_000L
@@ -67,6 +67,10 @@ object Relay {
     private val main = Handler(Looper.getMainLooper())
     /** Our seq per peer and session (protocol: per-sender, per-connection, from 1); a Hello starts it again. */
     private val seqs = ConcurrentHashMap<String, AtomicInteger>()
+    /** The protocol version each peer's Hello named: 2 and up take chunked envelopes and ReplayDone. */
+    private val protocols = ConcurrentHashMap<String, Int>()
+    /** Each peer's chunked envelopes being joined (protocol/README.md "Framing"). */
+    private val joiners = ConcurrentHashMap<String, ChunkJoiner>()
     private val trusted = ConcurrentHashMap.newKeySet<String>()   // peer ids that passed Hello
     private val rejected = ConcurrentHashMap.newKeySet<String>()  // links told NOT_PAIRED since they connected
     private val droppedOnce = ConcurrentHashMap.newKeySet<String>()   // links already dropped for a missing Hello
@@ -100,7 +104,7 @@ object Relay {
         Push.start(app)
         Health.init(app)
         DataLimit.init(app)
-        RemoteLink.start(app, { bytes -> main.post { runCatching { onPeerFrame(Peer.Internet, bytes) }.onFailure { Log.e(TAG, "remote frame failed: $it") } } }) { present, wasThere ->
+        RemoteLink.start(app, { bytes -> main.post { runCatching { receive(Peer.Internet, bytes) }.onFailure { Log.e(TAG, "remote frame failed: $it") } } }) { present, wasThere ->
             main.post {
                 // A room blip mid-call doesn't touch the call's audio (TURN carries it); it ends with the call.
                 if (!present) { trusted.remove(Peer.Internet.id); if (CallRegistry.snapshot().none { it.state != CallEvent.State.ENDED }) RemoteCall.close("the phone left the room") }
@@ -293,10 +297,29 @@ object Relay {
 
     private fun send(p: Peer, b: Envelope.Builder, replyTo: Int = 0) {
         val next = seqs.getOrPut(p.id) { AtomicInteger() }.incrementAndGet()
-        var bytes = b.setSeq(next).setReplyTo(replyTo).build().toByteArray()
+        val whole = b.setSeq(next).setReplyTo(replyTo).build().toByteArray()
+        frames(p, b, whole, next).forEach { bytes ->
+            runCatching { p.send(bytes) }.onFailure { Log.e(TAG, "send ${b.bodyCase} to ${p.id} failed: $it") }
+        }
+    }
+
+    /** The frames that carry an envelope to [p]: one, its chunks, or none when it can't go at all. */
+    private fun frames(p: Peer, b: Envelope.Builder, whole: ByteArray, seq: Int): List<ByteArray> {
+        if (whole.size <= Framing.MAX_FRAME) return listOf(whole)
+        if ((protocols[p.id] ?: 1) < Chunks.MIN_PROTOCOL) return listOfNotNull(fitOneFrame(b, whole))
+        // A protocol 2 peer takes it whole: in chunks over Bluetooth, as one message over the internet (64 KB frames).
+        if (p !is Peer.Ble) return listOf(whole)
+        val chunks = Chunks.split(whole, seq)
+        Log.i(TAG, "${b.bodyCase} is ${whole.size} bytes: sent in ${chunks.size} chunks")
+        return chunks.map { Envelope.newBuilder().setChunk(it).build().toByteArray() }
+    }
+
+    /** A version 1 peer: a status sheds its optional parts to fit one frame; anything else too big is dropped. */
+    private fun fitOneFrame(b: Envelope.Builder, whole: ByteArray): ByteArray? {
+        var bytes = whole
         // A status that outgrew one frame (release notes, many saved networks or hotspot clients) is never dropped:
         // the iPhone would hear nothing from this host again. Shed the optional parts until it fits (audit, 19 Oct).
-        if (bytes.size > Framing.MAX_FRAME && b.bodyCase == Envelope.BodyCase.HOST_STATUS) {
+        if (b.bodyCase == Envelope.BodyCase.HOST_STATUS) {
             val s = b.hostStatus.toBuilder()
             val steps = listOf<() -> Unit>(
                 { s.setUpdate(s.update.toBuilder().clearNotes()) },
@@ -310,8 +333,8 @@ object Relay {
             }
             Log.w(TAG, "status trimmed to ${bytes.size} bytes")
         }
-        if (bytes.size > Framing.MAX_FRAME) { Log.e(TAG, "${b.bodyCase} is ${bytes.size} bytes: too big to send, dropped"); return }
-        runCatching { p.send(bytes) }.onFailure { Log.e(TAG, "send ${b.bodyCase} to ${p.id} failed: $it") }
+        if (bytes.size > Framing.MAX_FRAME) { Log.e(TAG, "${b.bodyCase} is ${bytes.size} bytes: too big to send, dropped"); return null }
+        return bytes
     }
 
     // ------------------------------------------------------------- client -> host
@@ -320,6 +343,8 @@ object Relay {
         rejected.remove(d.address)
         if (!up) {
             val wasServed = trusted.remove(d.address)
+            protocols.remove(d.address)
+            joiners.remove(d.address)
             Log.i(TAG, "client ${d.address} gone")
             main.post {
                 HostWifi.evaluate("Bluetooth gone")
@@ -337,11 +362,20 @@ object Relay {
 
     /** BLE frames arrive on binder threads: handle them on main, and never let one take the process down. */
     private fun onFrame(dev: BluetoothDevice, bytes: ByteArray) {
-        main.post { runCatching { onPeerFrame(Peer.Ble(dev, ble), bytes) }.onFailure { Log.e(TAG, "frame from ${dev.address} failed: $it") } }
+        main.post { runCatching { receive(Peer.Ble(dev, ble), bytes) }.onFailure { Log.e(TAG, "frame from ${dev.address} failed: $it") } }
     }
 
-    private fun onPeerFrame(d: Peer, bytes: ByteArray) {
+    /** One frame from a peer: a chunk waits for the rest of its envelope, anything else is handled now. */
+    private fun receive(d: Peer, bytes: ByteArray) {
         val env = runCatching { Envelope.parseFrom(bytes) }.getOrElse { Log.w(TAG, "bad frame: $it"); return }
+        if (!env.hasChunk()) return onPeerFrame(d, env)
+        val joiner = joiners.getOrPut(d.id) { ChunkJoiner(SystemClock::elapsedRealtime) }
+        val whole = joiner.add(env.chunk)
+        joiner.refused?.let { Log.w(TAG, "chunk from ${d.id} dropped: $it") }
+        if (whole != null) receive(d, whole)
+    }
+
+    private fun onPeerFrame(d: Peer, env: Envelope) {
         if (env.bodyCase == Envelope.BodyCase.HELLO) return hello(d, env)
         if (d.id !in trusted) {
             // A paired host whose app restarted while the link stayed up: ask for a fresh Hello instead of
@@ -486,6 +520,8 @@ object Relay {
         }
         trusted.add(d.id)
         seqs.remove(d.id)
+        protocols[d.id] = env.hello.protocolVersion
+        joiners.remove(d.id)
         if (d is Peer.Ble) {
             noHelloSince = 0
             // What the link agreed on (RadioLook): well after the Hello, when the link serves and nothing is being set up
