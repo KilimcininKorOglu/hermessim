@@ -50,7 +50,7 @@ line. The client must be root or the uid given with `--uid` (checked with `SO_PE
 | `TUNE [prime keep period]` | `OK prime= keep= period=` (playout ticks, inject PCM period; live) |
 | `FRAME 10\|20` | `OK` / `ERR bad value` (length of the packets to the audio client) |
 | `LOSS <0..100>` | `OK` / `ERR bad value` (the encoder's expected loss) |
-| `AUDIO?` | `OK call= session= silence= cap= voiced= sent= played= peak= txdrop= noclient= recv= plc= starved= live= capms= caperr=` (this call's totals) |
+| `AUDIO?` | `OK call= session= silence= cap= voiced= sent= played= peak= txdrop= noclient= recv= plc= starved= live= capms= caperr= fec= late=` (this call's totals) |
 | `SCREEN_OFF`, `WAKE` | `OK` / `ERR spawn failed` |
 | `POWERKEY 1\|0` | `OK <devices>` / `ERR no escape gesture on this phone` |
 | `ROLE <role> <pkg>` | `OK` / `ERR bad role or package` |

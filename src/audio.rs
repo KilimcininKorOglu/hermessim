@@ -396,6 +396,7 @@ fn jb_put(tick: u16, data: &[u8]) {
     let r = lock(&JB).put(tick, samples / DEC_FRAME, data);
     if matches!(r, Put::Late | Put::Resync) {
         st_inc(|s| &mut s.late);
+        st_inc(|s| &mut s.tot_late);
     }
     if r == Put::Resync {
         crate::logw!("audio playout follows the sender from tick {}", tick);
@@ -427,7 +428,10 @@ fn jb_take(buf: &mut [u8; MAX_PACKET]) -> Take {
         st_add(|s| &mut s.catchup, dropped);
     }
     match take {
-        Take::Fec { .. } => st_inc(|s| &mut s.fec),
+        Take::Fec { .. } => {
+            st_inc(|s| &mut s.fec);
+            st_inc(|s| &mut s.tot_fec);
+        }
         Take::Plc => {
             st_inc(|s| &mut s.plc);
             st_inc(|s| &mut s.tot_plc);
@@ -467,6 +471,8 @@ struct Stats {
     tot_live: u32,
     tot_capms: u32,
     tot_caperr: u32,
+    tot_fec: u32,
+    tot_late: u32,
 }
 
 const EMPTY_STATS: Stats = Stats {
@@ -497,6 +503,8 @@ const EMPTY_STATS: Stats = Stats {
     tot_live: 0,
     tot_capms: 0,
     tot_caperr: 0,
+    tot_fec: 0,
+    tot_late: 0,
 };
 
 static STATS: Mutex<Stats> = Mutex::new(EMPTY_STATS);
@@ -1442,6 +1450,8 @@ pub fn totals() -> String {
         live: s.tot_live,
         capms: s.tot_capms,
         caperr: s.tot_caperr,
+        fec: s.tot_fec,
+        late: s.tot_late,
     })
 }
 
@@ -1464,6 +1474,8 @@ pub fn call_begin(cfg: AudioCfg) {
         s.tot_live = 0;
         s.tot_capms = 0;
         s.tot_caperr = 0;
+        s.tot_fec = 0;
+        s.tot_late = 0;
     }
     *lock(&CFG) = cfg;
     LOSS.store(LOSS_DEFAULT, Ordering::Relaxed); // a new call starts without the phone's report

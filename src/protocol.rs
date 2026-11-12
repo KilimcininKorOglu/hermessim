@@ -350,13 +350,17 @@ pub struct CallTotals {
     pub capms: u32,
     /// Failed capture reads.
     pub caperr: u32,
+    /// Client audio played from FEC.
+    pub fec: u32,
+    /// Client packets that came after their tick was played.
+    pub late: u32,
 }
 
 pub fn call_totals_line(t: &CallTotals) -> String {
     format!(
-        "cap={} voiced={} sent={} played={} peak={} txdrop={} noclient={} recv={} plc={} starved={} live={} capms={} caperr={}",
+        "cap={} voiced={} sent={} played={} peak={} txdrop={} noclient={} recv={} plc={} starved={} live={} capms={} caperr={} fec={} late={}",
         t.cap, t.voiced, t.sent, t.played, t.peak, t.txdrop, t.noclient, t.recv, t.plc, t.starved, t.live, t.capms,
-        t.caperr
+        t.caperr, t.fec, t.late
     )
 }
 
@@ -738,10 +742,12 @@ mod tests {
             live: 1150,
             capms: 14100,
             caperr: 2,
+            fec: 9,
+            late: 4,
         };
         assert_eq!(
             call_totals_line(&t),
-            "cap=1200 voiced=800 sent=1190 played=1195 peak=21000 txdrop=3 noclient=7 recv=1180 plc=12 starved=5 live=1150 capms=14100 caperr=2"
+            "cap=1200 voiced=800 sent=1190 played=1195 peak=21000 txdrop=3 noclient=7 recv=1180 plc=12 starved=5 live=1150 capms=14100 caperr=2 fec=9 late=4"
         );
     }
 
