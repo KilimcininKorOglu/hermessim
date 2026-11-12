@@ -42,7 +42,7 @@ This repository is the **host side** (the Android app, its root daemon and Magis
 ### Clients
 
 - **One client phone.** A host pairs with one Android phone or iPhone over Bluetooth LE (GATT, plus an L2CAP channel for call audio); the phone proves the 6-digit code the host shows. They speak HermesSIM protocol 2: every request gets a reply, only the changed parts of the state travel, and a dropped session resumes where it stopped.
-- **Internet mode.** When the client is out of Bluetooth range, the two phones talk through the HermesSIM server. Every message is sealed end to end, so the server never sees calls or texts. The host wakes the client by push for a call, a text, a missed call or a notice.
+- **Internet mode.** When the client is out of Bluetooth range, the two phones talk through the HermesSIM relay. In the room they open a tunnel with fresh X25519 keys and seal every message under it, so the server never sees calls or texts and a leaked room key opens no past traffic. The client replaces the room key over Bluetooth every week. The host wakes the client by push for a call, a text, a missed call or a notice.
 - **Up to 4 Macs.** Each Mac has its own Bluetooth service and permissions: the hotspot always, texts and codes and host settings only when the client allows them.
 
 ### Box mode and battery
