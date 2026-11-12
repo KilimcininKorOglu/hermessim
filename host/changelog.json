@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.1.0",
+    "code": 64,
+    "en": "The host speaks a new protocol with the phone and the Mac: a link that drops picks up where it stopped, requests are answered one by one, and call audio over the internet goes straight between the two phones when it can, with a relay over TCP or TLS when a network blocks UDP. A Mac now pairs with a 6-digit code shown on the phone. The host's root service was rewritten. Update the HermesSIM app on your phone and Mac to 1.1.0 too: older apps can't connect to this host.",
+    "tr": "Ana cihaz telefonla ve Mac'le yeni bir protokol konuşuyor: kopan bir bağlantı kaldığı yerden devam ediyor, istekler tek tek yanıtlanıyor ve internet üzerinden arama sesi mümkün olduğunda iki telefon arasında doğrudan gidiyor; UDP'yi engelleyen ağlarda TCP veya TLS üzerinden bir aktarıcı kullanılıyor. Mac artık telefonda görünen 6 haneli bir kodla eşleşiyor. Ana cihazın root servisi yeniden yazıldı. Telefonunuzdaki ve Mac'inizdeki HermesSIM uygulamasını da 1.1.0'a güncelleyin: eski uygulamalar bu ana cihaza bağlanamaz."
+  },
+  {
     "version": "1.0.0",
     "code": 63,
     "en": "On some phone pairs, calls lost part of the caller's sound: the host sent each 10 ms of sound as its own Bluetooth packet, more than such a link carries, and what didn't fit was dropped. It now sends everything waiting together. Hosts whose hotspot can only use 2.4 GHz, the band Bluetooth carries your calls on, get a new setting: the hotspot turns off while a call's sound is on Bluetooth and comes back when the call ends.",
