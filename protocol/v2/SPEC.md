@@ -4,7 +4,7 @@ Copyright (C) 2026 Kerem Gök. Dual-licensed, see `LICENSE`.
 
 This document and `wire.proto` define how a HermesSIM host talks to a phone or a Mac. `vectors/` holds inputs and the bytes they must give; every implementation reads those files in its tests.
 
-Status: stage 1 (the control channel). The internet carrier, call audio and Mac sessions keep their current form until stages 2, 3 and 4 replace them. Messages and fields are added to `wire.proto` until stage 1 ships; after that a field number is never reused.
+Status: stages 1 (the control channel), 2 (the internet carrier) and 3 (call audio). Mac sessions keep their current form until stage 4 replaces them. The internet carrier and the audio packets are specified in `../README.md`. A field number is never reused.
 
 ## Terms
 
@@ -102,6 +102,14 @@ The phone dials with `Dial.test`, asks `CallTestCheck` during the call and gets 
 - A peer on the host's hotspot (its Wi-Fi gateway is `Hotspot.gateway`) pings through the hotspot's Wi-Fi only, never over another network. After `misses` failures in a row it sends `HostAction{HOST_VERB_HOTSPOT_NO_INTERNET}` and counts again from zero; it sends the next one no sooner than `misses × every_s` later.
 - After `misses` failures in a row of its own, or a peer's report, the host restarts its hotspot. When the next check after that fails too, it turns mobile data off and on and counts again from zero. A report within 2 minutes of a step is dropped. While a call is up the step waits for its end.
 
+### Call audio
+
+Over Bluetooth, call audio runs on the L2CAP channel of `Welcome.audio_psm`. Over the internet it runs on a path the phone opens with `OpenAudioPath`; the phone may open it while Bluetooth still carries the audio, so the path is ready when Bluetooth goes. Packets, keys, candidates and probes are in `../README.md` ("Call audio").
+
+- `OpenAudioPath{audio_id, key, candidates}`: `audio_id` is 16 random bytes and `key` a fresh X25519 public key, both new for each path. The host answers `CODE_OK` with `AudioPath{key, candidates}`, or `CODE_FAILED`. A new `OpenAudioPath` replaces the path before it. `CloseAudioPath` ends it; when the host ends it by itself it sends `Event{audio_path_closed}`.
+- At most one side of a path has a relay candidate. The host takes a TURN allocation only when the phone's candidates have none.
+- `AudioReport`: every 5 s while a call has audio, the phone sends its numbers for the last 5 s and the host answers with its own in `Reply.audio_report`. Each side sets the expected loss of its encoder from the other side's numbers: `lost × 100 / (received + lost)`, at least 5 and at most 30.
+
 ### The end of a pairing
 
 - The phone forgets the host: `ForgetHost`. The host answers `CODE_OK`, then forgets the phone's `install_id`, the keys of internet mode and push, and the Bluetooth bond.
@@ -165,7 +173,7 @@ Known limit: this stops a device that does not know the code. It does not stop a
 
 ## Test vectors
 
-Each file in `vectors/` is a JSON list of cases. `tools/vectors.py` writes them from this document's rules and `protoc`; run it again after a change and commit the result.
+Each `.json` file in `vectors/` is a JSON list of cases; `playout.txt` is a list of lines, so that the host's C daemon can read it too. `tools/vectors.py` writes them from this document's and `../README.md`'s rules and `protoc`; run it again after a change and commit the result.
 
 | File | Case fields | What a test does |
 |---|---|---|
@@ -174,3 +182,5 @@ Each file in `vectors/` is a JSON list of cases. `tools/vectors.py` writes them 
 | `interleave.json` | `name`, `bytes` hex, `messages` (stream, packet hex) in the order they complete | reads `bytes` and gets the messages in that order |
 | `packets.json` | `name`, `text` (protobuf text form), `bytes` hex | builds the packet from its fields and gets `bytes`; parses `bytes` and gets the fields |
 | `pairing.json` | keys, salt, code, install id, `key` hex, `proof` hex | derives `key` and `proof` |
+| `audio.json` | `stream` (L2CAP bytes, packets, skipped bytes, the rest that waits); `keys` (X25519 secrets, `audio_id`, `p2h`, `h2p`, `datagrams`) | reads each stream and gets its packets, skipped count and rest; derives the path keys; seals each datagram and gets its bytes, and opens them |
+| `playout.txt` | `scenario`, `put <tick> <ticks>`, `take <result>`, `count <received> <lost> <late>` | feeds the puts and takes to the playout rule and gets each take's result and the counters |

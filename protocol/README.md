@@ -8,12 +8,69 @@
 The phone clients speak only protocol 2. The Mac keeps its own GATT service and the messages in `hermessim.proto` until
 it moves to protocol 2. Test vectors for protocol 2 are in `v2/vectors/`.
 
-## Call audio over Bluetooth
+## Call audio
 
-Call audio (L2CAP CoC on the PSM the host names in `Welcome.audio_psm`) is a byte stream of
-`[u16 LE length][u16 seq LE][u8 flags][opus]` packets, 10 ms each. A sender puts every packet waiting into one write
-(one L2CAP SDU on Android): a link that carries one SDU per connection event can't take 100 single-packet writes a
-second. Receivers parse the stream, never one packet per read.
+**Packet.** One Opus packet with its time: `[u16 tick LE][opus]`. `tick` counts 10 ms steps of the sender's clock and
+names the packet's first sample; it goes on through silence (a DTX gap is a gap in ticks). A packet holds 10 ms
+over Bluetooth and 20 ms over the internet; the receiver reads the length from the Opus TOC and plays both, mixed in
+one call when the path changes. An Opus packet is at most 250 bytes. Phones encode at most wideband (16 kHz audio,
+the most the mobile network carries), 24 kbit/s, with in-band FEC.
+
+**Bluetooth.** L2CAP CoC on the PSM the host names in `Welcome.audio_psm`. The stream is a row of
+`[u8 0xA5][u8 length][packet]` (length 3 to 252). A sender puts every packet waiting into one write (one L2CAP SDU
+on Android): a link that carries one SDU per connection event can't take 100 single-packet writes a second. A
+receiver parses the stream, never one packet per read; on a byte that is not `0xA5`, or a length below 3, it skips one
+byte, counts it and looks again, and the channel stays open. Each sender keeps at most 100 ms of audio waiting for
+the link and drops the oldest packet when more comes.
+
+**Internet.** A path carries datagrams `[u8 type][u32 counter BE][sealed]`: type `0xA6` audio (`sealed` holds one
+packet), `0xA7` probe (`sealed` holds `[u8 1 ask, 2 answer][u32 probe id BE]`). `sealed` is
+ChaCha20-Poly1305(direction key, nonce = 8 zero bytes ‖ counter, AAD = the 5 bytes before it). Each direction counts
+from 0 across audio and probes. A receiver takes a counter once, within 64 below the highest it took (the push
+window's rule); others are dropped. Datagrams never start with a STUN (0x00, 0x01) or ChannelData (0x40-0x7F) byte.
+Vectors: `v2/vectors/audio.json`.
+
+**Path keys.** `OpenAudioPath` carries the phone's fresh X25519 key and 16 random bytes `audio_id`; `AudioPath` the
+host's fresh key. `PRK = HMAC-SHA256(audio_id, X25519(phone, host))`, the phone-to-host key
+`HMAC-SHA256(PRK, "audio p2h" ‖ 0x01)`, the host-to-phone key `HMAC-SHA256(PRK, "audio h2p" ‖ 0x01)`. The control
+channel that carried the two messages (the bonded Bluetooth link or the tunnel) vouches for them.
+
+**Candidates.** Each side asks the TURN server's STUN for its public address over UDP (a `DIRECT` candidate). A phone
+that gets no answer within 1 s has no UDP: it takes a TURN allocation over TCP 3478, then over TLS 443
+(`turns:`), and offers it as a `RELAY` candidate. The host takes a UDP allocation only when the phone offered no
+relay, so a path has at most one relay. Addresses are 4 or 16 bytes; a side whose peer has only IPv6 candidates asks
+its allocation for an IPv6 relay (`REQUESTED-ADDRESS-FAMILY`). `POST /api/v1/turn {install_id}` gives short-lived
+REST credentials and the server's `turn:`/`turns:` URLs.
+
+**Probes.** Once the path's messages are through, both sides send a probe to every candidate of the other, every
+50 ms, at most 20 times, and answer each probe they open on the address it came from. A direct answer wins over a
+relay answer. The side with the allocation lets the other side's public IPv4 or IPv6 address in (CreatePermission),
+learns the peer's real address from the first datagram it opens (a NAT may change the port), and then ChannelBinds
+it; until then it sends with Send indications. Every TURN answer that carries MESSAGE-INTEGRITY is checked; one that
+fails is dropped. Allocations are refreshed every 4 minutes and released with `Refresh(lifetime=0)`.
+
+**Ready path.** When internet mode is on, the phone opens the path as the call's audio starts, over the control
+channel it has (usually Bluetooth). An unused path sends a probe every 5 s, which keeps NAT bindings and permissions
+alive. The phone sends its audio on the path it chooses: Bluetooth while it works, else the internet path. The host
+sends on the path the phone's latest packet came on, so a change needs no message, and neither side stops its audio
+engine; the sender only changes where packets go and their length (10 or 20 ms).
+
+**Playout.** One rule in every receiver (vectors: `v2/vectors/playout.txt`). Packets go into a ring by tick; depth is
+the ticks between the next tick to play and the end of the last packet, plus the decoded ticks still waiting. Each
+10 ms the player takes one tick:
+
+- Before it plays it waits for 2 ticks; when it runs dry it waits for 2 ticks again.
+- A packet at the next tick is decoded whole; a 20 ms packet's second half plays at the next take.
+- A missing tick: the first packet after it within 4 ticks is looked at. When the gap to it is at least that packet's
+  length, the gap is decoded from the packet's FEC (`opus_decode` with `decode_fec` and the gap as frame size: Opus
+  conceals the part FEC does not cover). Otherwise one tick is concealed.
+- A packet older than the next tick is late and dropped; after 50 late packets in a row the sender is taken to have
+  started again and playback follows it. A packet 63 or more ticks ahead moves playback to it.
+- Over 2 s windows, when the smallest depth was above 1 tick, the excess is dropped one tick per take; above 8 ticks
+  one tick is dropped at every take.
+
+**Report.** Every 5 s of a call the phone sends `AudioReport` and the host answers with its own (`v2/SPEC.md`). Each
+side sets its encoder's expected loss from the other's numbers.
 
 ## Internet mode
 
@@ -30,7 +87,6 @@ its next session. No clock of the other side is involved. Derived keys, all HKDF
 | --- | --- |
 | `room-token` | `room_id = hex(sha256(room_token))`; the server checks this and nothing else |
 | `auth` | proves the room key in the tunnel handshake; never encrypts anything |
-| `audio` | call audio (until audio moves to the tunnel's keys) |
 
 **Relay.** One WebSocket per phone, and one per host, at `wss://hermessim.keremgok.tr/api/v1/relay`. Every message
 is binary: `[u8 type][u8 room slot][body]`. A phone joins the room of each of its hosts on the same socket, each in a
@@ -69,13 +125,7 @@ and `PEER` arrival, when a counter reaches 2³², and after 24 hours. The host c
 right `HS3`. `frames` are protocol 2 frames, the same stream as over Bluetooth: Hello, resume, requests and replies
 follow `v2/SPEC.md`. No clock takes part. `State.remote` says whether the host reaches the relay.
 
-**Audio.** Each side takes a TURN allocation on the HermesSIM relay (`POST /api/v1/turn {install_id}` gives short-lived
-REST credentials). The phone sends its relay address in `OpenAudioPath{address, port}`; the host answers with its own
-in the reply (`AudioPath`), and each side ChannelBinds (channel 0x4000) the other's relay address. One UDP datagram
-carries one audio packet: `nonce12 || ChaCha20-Poly1305(audio key, nonce, [u16 seq LE][u8 flags][opus])`, AAD `"h2c"` /
-`"c2h"`, the same inner packet as the L2CAP channel (10 ms frames; the receiver's jitter buffer reorders). Allocations
-are refreshed and channels re-bound every 4 minutes while a call lasts. `CloseAudioPath` from the phone, the event
-`AudioPathClosed` from the host, or the call ending releases them.
+**Audio.** Call audio does not travel in the tunnel: it has a path of its own, see "Call audio".
 
 ## Push
 

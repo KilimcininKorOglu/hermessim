@@ -16,7 +16,6 @@ class PushCryptoTest {
             assertEquals(case.getString("room_token"), c.roomToken.hex())
             assertEquals(case.getString("room_id"), c.roomId)
             assertEquals(case.getString("auth"), c.auth.hex())
-            assertEquals(case.getString("audio"), RemoteCrypto.hkdf(Vectors.hex(case.getString("key")), "audio").hex())
         }
     }
 

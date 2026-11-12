@@ -1,0 +1,91 @@
+[
+ {
+  "stream": [
+   {
+    "name": "three packets in one write",
+    "bytes": "a506000078a1b2c3a505010078d4e5a52affff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021222324252627",
+    "packets": [
+     "000078a1b2c3",
+     "010078d4e5",
+     "ffff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021222324252627"
+    ],
+    "skipped": 0,
+    "rest": ""
+   },
+   {
+    "name": "noise before a packet is skipped",
+    "bytes": "00ff13a506000078a1b2c3",
+    "packets": [
+     "000078a1b2c3"
+    ],
+    "skipped": 3,
+    "rest": ""
+   },
+   {
+    "name": "a mark with a too short length is skipped",
+    "bytes": "a502a505010078d4e5",
+    "packets": [
+     "010078d4e5"
+    ],
+    "skipped": 2,
+    "rest": ""
+   },
+   {
+    "name": "a packet cut by the write waits for the rest",
+    "bytes": "a506000078a1b2c3a52affff000102030405",
+    "packets": [
+     "000078a1b2c3"
+    ],
+    "skipped": 0,
+    "rest": "a52affff000102030405"
+   }
+  ],
+  "keys": [
+   {
+    "name": "the keys of a path",
+    "phone_secret": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+    "host_secret": "65666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f8081828384",
+    "phone_key": "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c",
+    "host_key": "5714769d116bf76436ae74bc793d2c30ad1903c59ac5273805c7e2698b410c36",
+    "audio_id": "000102030405060708090a0b0c0d0e0f",
+    "shared": "c9ea6a3f79a000b60b076d4afc990b272f3f0b5aaa3f0b8713c209273e363863",
+    "p2h": "a017727219752f98e173f4ed14d5ab1e4283a120235e0e7212af1b6a945efeb3",
+    "h2p": "57020b9c9adbedcbbffdf4886653188d6a66b156bffbd555f50c8fef218c53ea",
+    "datagrams": [
+     {
+      "name": "the phone's first audio",
+      "key": "p2h",
+      "type": 166,
+      "counter": 0,
+      "plain": "000078a1b2c3",
+      "bytes": "a600000000405e0bd74f094b77ef731871d6ca7c843c2cd12c9e09"
+     },
+     {
+      "name": "the host's audio, counter 300",
+      "key": "h2p",
+      "type": 166,
+      "counter": 300,
+      "plain": "ffff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021222324252627",
+      "bytes": "a60000012cbda452ce7aeafc6a2fa68ac460b6ac3dad7c3c0c835fde4bde7b7d733c6197f661f07b8e34f068d6f0f2b6d8e600b2eb6569f41af5edbb7c03ef"
+     },
+     {
+      "name": "a probe from the phone",
+      "key": "p2h",
+      "type": 167,
+      "counter": 1,
+      "plain": "010000004d",
+      "bytes": "a7000000017cb2e3d85768d2cd5c7103b86e52305b29088e3271"
+     },
+     {
+      "name": "the host answers the probe",
+      "key": "h2p",
+      "type": 167,
+      "counter": 0,
+      "plain": "020000004d",
+      "bytes": "a7000000008e9a9c33e727ce6d7b9d881e2f1dd6130a33d28071"
+     }
+    ]
+   }
+  ]
+ }
+]

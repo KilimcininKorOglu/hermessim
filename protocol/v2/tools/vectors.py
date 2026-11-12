@@ -280,7 +280,7 @@ def roomkey_cases() -> list[dict]:
         token = derive(key, "room-token")
         rows.append({"name": name, "key": key.hex(), "room_token": token.hex(),
                      "room_id": hashlib.sha256(token).hexdigest(), "auth": derive(key, "auth").hex(),
-                     "audio": derive(key, "audio").hex(), "push": derive(key, "push").hex(),
+                     "push": derive(key, "push").hex(),
                      "collapse": derive(key, "collapse").hex()})
     return rows
 
@@ -364,6 +364,244 @@ def push_cases() -> list[dict]:
     return [{"seal": seals, "collapse": collapses, "window": windows}]
 
 
+# ---------------------------------------------------------------- call audio (protocol/README.md "Call audio")
+
+MARK, AUDIO, PROBE = 0xA5, 0xA6, 0xA7
+MIN_INNER = 3                       # [u16 tick][at least one Opus byte]
+
+
+def inner(tick: int, opus: bytes) -> bytes:
+    return (tick & 0xFFFF).to_bytes(2, "little") + opus
+
+
+def stream_packet(packet: bytes) -> bytes:
+    """One packet on the L2CAP stream: mark, length, inner packet."""
+    return bytes([MARK, len(packet)]) + packet
+
+
+def parse_stream(data: bytes) -> tuple[list[bytes], int, bytes]:
+    """The receiver's rule: packets, bytes skipped to find a mark, and what waits for more bytes."""
+    packets, skipped, at = [], 0, 0
+    while len(data) - at >= 2:
+        length = data[at + 1]
+        if data[at] != MARK or length < MIN_INNER:
+            at += 1
+            skipped += 1
+            continue
+        if len(data) - at < 2 + length:
+            break
+        packets.append(data[at + 2:at + 2 + length])
+        at += 2 + length
+    return packets, skipped, data[at:]
+
+
+def audio_keys(audio_id: bytes, shared: bytes) -> tuple[bytes, bytes]:
+    prk = hmac.new(audio_id, shared, hashlib.sha256).digest()
+    return (hmac.new(prk, b"audio p2h\x01", hashlib.sha256).digest(),
+            hmac.new(prk, b"audio h2p\x01", hashlib.sha256).digest())
+
+
+def datagram(kind: int, key: bytes, counter: int, plain: bytes) -> bytes:
+    head = bytes([kind]) + counter.to_bytes(4, "big")
+    return head + seal(key, bytes(8) + counter.to_bytes(4, "big"), plain, head)
+
+
+def audio_cases() -> list[dict]:
+    a, b, c = inner(0, bytes.fromhex("78a1b2c3")), inner(1, bytes.fromhex("78d4e5")), inner(65535, bytes(range(40)))
+    clean = stream_packet(a) + stream_packet(b) + stream_packet(c)
+    streams = []
+    for name, data in (("three packets in one write", clean),
+                       ("noise before a packet is skipped", bytes.fromhex("00ff13") + stream_packet(a)),
+                       ("a mark with a too short length is skipped", bytes([MARK, 2]) + stream_packet(b)),
+                       ("a packet cut by the write waits for the rest", stream_packet(a) + stream_packet(c)[:10])):
+        packets, skipped, rest = parse_stream(data)
+        streams.append({"name": name, "bytes": data.hex(), "packets": [p.hex() for p in packets],
+                        "skipped": skipped, "rest": rest.hex()})
+    base = (9).to_bytes(32, "little")
+    phone_secret, host_secret, audio_id = bytes(range(1, 33)), bytes(range(101, 133)), bytes(range(16))
+    phone_key, host_key = x25519(phone_secret, base), x25519(host_secret, base)
+    shared = x25519(phone_secret, host_key)
+    assert shared == x25519(host_secret, phone_key)
+    p2h, h2p = audio_keys(audio_id, shared)
+    probe_ask, probe_answer = bytes([1]) + (77).to_bytes(4, "big"), bytes([2]) + (77).to_bytes(4, "big")
+    keys = [{"name": "the keys of a path", "phone_secret": phone_secret.hex(), "host_secret": host_secret.hex(),
+             "phone_key": phone_key.hex(), "host_key": host_key.hex(), "audio_id": audio_id.hex(),
+             "shared": shared.hex(), "p2h": p2h.hex(), "h2p": h2p.hex(),
+             "datagrams": [
+                 {"name": "the phone's first audio", "key": "p2h", "type": AUDIO, "counter": 0, "plain": a.hex(),
+                  "bytes": datagram(AUDIO, p2h, 0, a).hex()},
+                 {"name": "the host's audio, counter 300", "key": "h2p", "type": AUDIO, "counter": 300,
+                  "plain": c.hex(), "bytes": datagram(AUDIO, h2p, 300, c).hex()},
+                 {"name": "a probe from the phone", "key": "p2h", "type": PROBE, "counter": 1,
+                  "plain": probe_ask.hex(), "bytes": datagram(PROBE, p2h, 1, probe_ask).hex()},
+                 {"name": "the host answers the probe", "key": "h2p", "type": PROBE, "counter": 0,
+                  "plain": probe_answer.hex(), "bytes": datagram(PROBE, h2p, 0, probe_answer).hex()},
+             ]}]
+    return [{"stream": streams, "keys": keys}]
+
+
+# The playout rule: every receiver of call audio (the host's daemon and both phone apps) plays with it.
+PRIME, KEEP, WINDOW, MAX_DEPTH, RESYNC, SLOTS, MAX_GAP = 2, 1, 200, 8, 50, 64, 4
+
+
+def tick_diff(a: int, b: int) -> int:
+    """a - b on the 16-bit tick circle, as a signed number."""
+    d = (a - b) & 0xFFFF
+    return d - 0x10000 if d >= 0x8000 else d
+
+
+class Playout:
+    """Packets in by tick, one 10 ms tick out per take."""
+
+    def __init__(self) -> None:
+        self.slots: dict[int, int] = {}
+        self.started = self.playing = False
+        self.next = self.end = 0
+        self.carry = self.late_run = 0
+        self.win_min, self.win_n, self.trim = 1000, 0, 0
+        self.received = self.lost = self.late = 0
+
+    def depth(self) -> int:
+        return tick_diff(self.end, self.next) + self.carry
+
+    def put(self, tick: int, ticks: int) -> None:
+        if not self.started:
+            self.started, self.next, self.end = True, tick, tick
+        if tick_diff(tick, self.next) < 0:
+            self.late += 1
+            self.late_run += 1
+            if self.late_run < RESYNC:
+                return
+            self.slots.clear()
+            self.next = self.end = tick
+            self.playing, self.carry, self.late_run = False, 0, 0
+        self.late_run = 0
+        if tick_diff(tick, self.next) >= SLOTS - 1:
+            self.slots.clear()
+            self.next = self.end = tick
+            self.playing, self.carry = False, 0
+        self.slots[tick] = ticks
+        if tick_diff((tick + ticks) & 0xFFFF, self.end) > 0:
+            self.end = (tick + ticks) & 0xFFFF
+        self.received += 1
+        if not self.playing and self.depth() >= PRIME:
+            self.playing = True
+
+    def advance(self, ticks: int) -> None:
+        self.next = (self.next + ticks) & 0xFFFF
+
+    def drop(self) -> None:
+        if self.carry:
+            self.carry -= 1
+        elif self.next in self.slots:
+            self.advance(self.slots.pop(self.next))
+        else:
+            self.advance(1)
+
+    def recover(self) -> str:
+        for gap in range(1, MAX_GAP + 1):
+            tick = (self.next + gap) & 0xFFFF
+            if tick in self.slots:
+                if self.slots[tick] > gap:
+                    break
+                self.advance(gap)
+                self.carry = gap - 1
+                self.lost += gap
+                return f"fec {tick} {gap}"
+        self.advance(1)
+        self.lost += 1
+        return "plc"
+
+    def pull(self) -> str:
+        if self.carry:
+            self.carry -= 1
+            return "carry"
+        if not self.playing:
+            return "silence"
+        if tick_diff(self.end, self.next) <= 0:
+            self.playing = False
+            return "silence"
+        if self.next in self.slots:
+            tick, ticks = self.next, self.slots.pop(self.next)
+            self.advance(ticks)
+            self.carry = ticks - 1
+            return f"play {tick}"
+        return self.recover()
+
+    def adapt(self) -> None:
+        depth = self.depth()
+        self.win_min = min(self.win_min, depth)
+        self.win_n += 1
+        if self.win_n >= WINDOW:
+            if self.win_min > KEEP:
+                self.trim = self.win_min - KEEP
+            self.win_min, self.win_n = 1000, 0
+        if self.trim > 0 and self.depth() > KEEP:
+            self.drop()
+            self.trim -= 1
+        if self.depth() > MAX_DEPTH:
+            self.drop()
+
+    def take(self) -> str:
+        out = self.pull()
+        if out != "silence":
+            self.adapt()
+        return out
+
+
+def playout_scenarios() -> list[tuple[str, list[tuple]]]:
+    steady = [("put", t, 1) for t in range(6)] + [x for t in range(6, 260) for x in (("take",), ("put", t, 1))]
+    return [
+        ("10 ms packets in order", [("put", 0, 1), ("take",), ("put", 1, 1), ("take",), ("put", 2, 1),
+                                    ("take",), ("take",), ("take",)]),
+        ("20 ms packets play over two takes", [("put", 0, 2), ("take",), ("take",), ("put", 2, 2), ("take",),
+                                               ("take",), ("take",)]),
+        ("a lost 10 ms packet comes back from the next one's FEC", [("put", 0, 1), ("put", 2, 1), ("put", 3, 1),
+                                                                    ("take",), ("take",), ("take",), ("take",)]),
+        ("a lost 20 ms packet comes back from the next 20 ms one", [("put", 0, 2), ("put", 4, 2), ("take",),
+                                                                    ("take",), ("take",), ("take",), ("take",),
+                                                                    ("take",)]),
+        ("a 10 ms gap before a 20 ms packet is concealed", [("put", 0, 1), ("put", 2, 2), ("take",), ("take",),
+                                                            ("take",), ("take",)]),
+        ("two lost ticks before a 10 ms packet: concealment, then FEC", [("put", 0, 1), ("put", 3, 1), ("take",),
+                                                                         ("take",), ("take",), ("take",)]),
+        ("a packet after its tick was played is late", [("put", 0, 1), ("put", 1, 1), ("put", 2, 1), ("take",),
+                                                        ("take",), ("put", 0, 1), ("take",)]),
+        ("running dry waits for the prime again", [("put", 0, 1), ("put", 1, 1), ("take",), ("take",), ("take",),
+                                                   ("put", 2, 1), ("take",), ("put", 3, 1), ("take",), ("take",)]),
+        ("10 and 20 ms packets mixed, as when the path changes", [("put", 0, 1), ("put", 1, 1), ("put", 2, 2),
+                                                                  ("put", 4, 2), ("put", 6, 1), ("take",), ("take",),
+                                                                  ("take",), ("take",), ("take",), ("take",),
+                                                                  ("take",), ("take",)]),
+        ("ticks wrap around", [("put", 65534, 1), ("put", 65535, 1), ("put", 0, 2), ("take",), ("take",),
+                               ("take",), ("take",), ("take",)]),
+        ("a sender that started again is followed after 50 late packets",
+         [("put", 1000, 1), ("put", 1001, 1), ("take",)] + [("put", t, 1) for t in range(50)] + [("put", 50, 1),
+                                                                                                 ("take",), ("take",)]),
+        ("a packet far ahead moves playback to it", [("put", 0, 1), ("put", 1, 1), ("take",), ("put", 100, 1),
+                                                     ("take",), ("put", 101, 1), ("take",), ("take",)]),
+        ("more than 8 ticks buffered drops one per take", [("put", t, 1) for t in range(12)] + [("take",)] * 6),
+        ("a buffer that stayed deep for a window is trimmed to 1 tick", steady + [("take",)] * 3),
+    ]
+
+
+def playout_lines() -> list[str]:
+    lines = ["# The playout rule of call audio (protocol/README.md \"Playout\"), written by tools/vectors.py.",
+             "# scenario <name> | put <tick> <ticks> | take <silence|play T|carry|fec T GAP|plc>",
+             "# | count <received> <lost> <late>, the counters after the scenario's last step."]
+    for name, steps in playout_scenarios():
+        player = Playout()
+        lines.append(f"scenario {name}")
+        for step in steps:
+            if step[0] == "put":
+                player.put(step[1], step[2])
+                lines.append(f"put {step[1]} {step[2]}")
+            else:
+                lines.append(f"take {player.take()}")
+        lines.append(f"count {player.received} {player.lost} {player.late}")
+    return lines
+
+
 def check_aead() -> None:
     """RFC 8439 section 2.8.2."""
     plain = (b"Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, "
@@ -387,10 +625,13 @@ def main() -> None:
     OUT.mkdir(exist_ok=True)
     files = {"frames": frame_cases(), "messages": message_cases(), "interleave": interleave_cases(),
              "packets": packet_cases(), "pairing": pairing_cases(), "relay": relay_cases(),
-             "roomkey": roomkey_cases(), "tunnel": tunnel_cases(), "push": push_cases()}
+             "roomkey": roomkey_cases(), "tunnel": tunnel_cases(), "push": push_cases(), "audio": audio_cases()}
     for name, cases in files.items():
         (OUT / f"{name}.json").write_text(json.dumps(cases, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
         print(f"{name}.json: {len(cases)} cases")
+    lines = playout_lines()
+    (OUT / "playout.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"playout.txt: {sum(line.startswith('scenario') for line in lines)} scenarios")
 
 
 if __name__ == "__main__":
