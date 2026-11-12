@@ -131,12 +131,25 @@ PACKETS = [
                          'app_version: "1.0.0" device_model: "Pixel 8" state_mark { epoch: 7 seq: 41 } text_cursor: 12 call_cursor: 3 }'),
     ("hello that resumes", 'hello { min_version: 2 max_version: 2 role: ROLE_PHONE install_id: "0123456789abcdef" resume { session_id: 9 received: 17 } }'),
     ("welcome", 'welcome { version: 2 features: 126 session_id: 9 epoch: 7 audio_psm: 193 host { app_version: "1.0.0" device_model: "Redmi Note 12" '
-                'hotspot { bands: HOTSPOT_BAND_2G bands: HOTSPOT_BAND_5G securities: HOTSPOT_SECURITY_WPA2 max_clients: 10 call_pause: true } '
-                "max_blocked_numbers: 50 max_mac_peers: 4 } }"),
+                'firmware: "Redmi/begonia/begonia:11/RP1A" max_blocked_numbers: 50 max_mac_peers: 4 max_blocked_clients: 20 } }'),
+    ("what the hotspot can do", "state { seq: 2 hotspot_limits { bands: HOTSPOT_BAND_2G bands: HOTSPOT_BAND_5G bands: HOTSPOT_BAND_AUTO "
+                                "securities: HOTSPOT_SECURITY_WPA2 hidden_name: true idle_off: true call_pause: true month_limit: true } }"),
+    ("a minute of hotspot use", "state { seq: 302 hotspot_usage { session_down: 5242880 session_up: 131072 today: 73400320 month: 2147483648 } }"),
     ("refused: not paired", "refuse { code: CODE_NOT_PAIRED }"),
     ("dial on the default line", 'request { id: 4 age_ms: 120 dial { number: "+905551112233" client_ref: "ref-ref-ref-ref-" } }'),
     ("dial on line 0", 'request { id: 5 dial { number: "112" line: 0 } }'),
-    ("the call started", "reply { id: 4 code: CODE_OK dial { call: 88 } }"),
+    ("the host started to dial", "reply { id: 4 code: CODE_OK }"),
+    ("a call test dial", 'request { id: 10 dial { number: "+905551112233" client_ref: "ref-ref-ref-ref-" test: true } }'),
+    ("the call test did not pass: echo", "reply { id: 11 code: CODE_CALL_TEST_FAILED args: 6 }"),
+    ("a text was queued", "reply { id: 12 code: CODE_OK text { text: 15 } }"),
+    ("the lock after a wrong PIN", "reply { id: 6 code: CODE_WRONG_PIN args: 2 line_lock { lock: LINE_LOCK_PIN tries_left: 2 } }"),
+    ("networks around the host", 'reply { id: 13 code: CODE_OK wifi_list { networks { name: "Ev" secure: true level: 4 saved: true } networks { name: "Misafir" level: 2 } } }'),
+    ("forget this host", "request { id: 14 forget_host { } }"),
+    ("the host retired", "bye { reason: BYE_REASON_RETIRED }"),
+    ("the far end rings", 'event { seq: 5 call { call: 90 phase: CALL_PHASE_DIALING number: "05551112233" number_e164: "+905551112233" line: 1 '
+                          'phase_since_ms: 1794466002000 client_ref: "ref-ref-ref-ref-" far_end_rings: true far_end_known: true } }'),
+    ("the busy reply went out", 'event { seq: 16 text_by_host { to: "+905551112233" body: "Mesgulum" line: 0 at_ms: 1794466003000 origin: TEXT_ORIGIN_BUSY_REPLY } }'),
+    ("the internet audio path closed", "event { audio_path_closed { } }"),
     ("wrong PIN, two tries left", "reply { id: 6 code: CODE_WRONG_PIN args: 2 }"),
     ("a negative argument", "reply { id: 7 code: CODE_FAILED args: -3 }"),
     ("turn roaming off on line 1", "request { id: 8 set_line { line: 1 roaming: false } }"),

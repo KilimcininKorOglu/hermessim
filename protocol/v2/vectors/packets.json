@@ -21,8 +21,18 @@
  },
  {
   "name": "welcome",
-  "text": "welcome { version: 2 features: 126 session_id: 9 epoch: 7 audio_psm: 193 host { app_version: \"1.0.0\" device_model: \"Redmi Note 12\" hotspot { bands: HOTSPOT_BAND_2G bands: HOTSPOT_BAND_5G securities: HOTSPOT_SECURITY_WPA2 max_clients: 10 call_pause: true } max_blocked_numbers: 50 max_mac_peers: 4 } }",
-  "bytes": "12340802107e180930073a270a05312e302e30120d5265646d69204e6f7465203132220b0a020102120101180a30012832300440c101"
+  "text": "welcome { version: 2 features: 126 session_id: 9 epoch: 7 audio_psm: 193 host { app_version: \"1.0.0\" device_model: \"Redmi Note 12\" firmware: \"Redmi/begonia/begonia:11/RP1A\" max_blocked_numbers: 50 max_mac_peers: 4 max_blocked_clients: 20 } }",
+  "bytes": "12480802107e180930073a3b0a05312e302e30120d5265646d69204e6f74652031321a1d5265646d692f6265676f6e69612f6265676f6e69613a31312f5250314128323004381440c101"
+ },
+ {
+  "name": "what the hotspot can do",
+  "text": "state { seq: 2 hotspot_limits { bands: HOTSPOT_BAND_2G bands: HOTSPOT_BAND_5G bands: HOTSPOT_BAND_AUTO securities: HOTSPOT_SECURITY_WPA2 hidden_name: true idle_off: true call_pause: true month_limit: true } }",
+  "bytes": "3214080272100a030102041201012001280130015001"
+ },
+ {
+  "name": "a minute of hotspot use",
+  "text": "state { seq: 302 hotspot_usage { session_down: 5242880 session_up: 131072 today: 73400320 month: 2147483648 } }",
+  "bytes": "321908ae027a14088080c002108080081880808023208080808008"
  },
  {
   "name": "refused: not paired",
@@ -40,9 +50,59 @@
   "bytes": "220b08055a070a033131321000"
  },
  {
-  "name": "the call started",
-  "text": "reply { id: 4 code: CODE_OK dial { call: 88 } }",
-  "bytes": "2a080804100152020858"
+  "name": "the host started to dial",
+  "text": "reply { id: 4 code: CODE_OK }",
+  "bytes": "2a0408041001"
+ },
+ {
+  "name": "a call test dial",
+  "text": "request { id: 10 dial { number: \"+905551112233\" client_ref: \"ref-ref-ref-ref-\" test: true } }",
+  "bytes": "2227080a5a230a0d2b3930353535313131323233331a107265662d7265662d7265662d7265662d2001"
+ },
+ {
+  "name": "the call test did not pass: echo",
+  "text": "reply { id: 11 code: CODE_CALL_TEST_FAILED args: 6 }",
+  "bytes": "2a07080b101b1a010c"
+ },
+ {
+  "name": "a text was queued",
+  "text": "reply { id: 12 code: CODE_OK text { text: 15 } }",
+  "bytes": "2a08080c10015a02080f"
+ },
+ {
+  "name": "the lock after a wrong PIN",
+  "text": "reply { id: 6 code: CODE_WRONG_PIN args: 2 line_lock { lock: LINE_LOCK_PIN tries_left: 2 } }",
+  "bytes": "2a0e080610141a010482010408021002"
+ },
+ {
+  "name": "networks around the host",
+  "text": "reply { id: 13 code: CODE_OK wifi_list { networks { name: \"Ev\" secure: true level: 4 saved: true } networks { name: \"Misafir\" level: 2 } } }",
+  "bytes": "2a20080d10019201190a0a0a0245761001180420010a0b0a074d6973616669721802"
+ },
+ {
+  "name": "forget this host",
+  "text": "request { id: 14 forget_host { } }",
+  "bytes": "2205080eca0200"
+ },
+ {
+  "name": "the host retired",
+  "text": "bye { reason: BYE_REASON_RETIRED }",
+  "bytes": "6a020801"
+ },
+ {
+  "name": "the far end rings",
+  "text": "event { seq: 5 call { call: 90 phase: CALL_PHASE_DIALING number: \"05551112233\" number_e164: \"+905551112233\" line: 1 phase_since_ms: 1794466002000 client_ref: \"ref-ref-ref-ref-\" far_end_rings: true far_end_known: true } }",
+  "bytes": "3a430805123f085a1002220b3035353531313132323333280130d0e888f49c3442107265662d7265662d7265662d7265662d4a0d2b39303535353131313232333350015801"
+ },
+ {
+  "name": "the busy reply went out",
+  "text": "event { seq: 16 text_by_host { to: \"+905551112233\" body: \"Mesgulum\" line: 0 at_ms: 1794466003000 origin: TEXT_ORIGIN_BUSY_REPLY } }",
+  "bytes": "3a28081032240a0d2b39303535353131313232333312084d657367756c756d180020b8f088f49c342801"
+ },
+ {
+  "name": "the internet audio path closed",
+  "text": "event { audio_path_closed { } }",
+  "bytes": "3a023a00"
  },
  {
   "name": "wrong PIN, two tries left",
@@ -77,7 +137,7 @@
  {
   "name": "an incoming call rings",
   "text": "event { seq: 4 call { call: 89 phase: CALL_PHASE_RINGING incoming: true number: \"+905551112233\" line: 0 phase_since_ms: 1794466001000 } }",
-  "bytes": "3a200804121c085910011801220d2b39303535353131313232333330e8e088f49c34"
+  "bytes": "3a220804121e085910011801220d2b393035353531313132323333280030e8e088f49c34"
  },
  {
   "name": "texts stored",

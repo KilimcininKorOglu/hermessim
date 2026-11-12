@@ -55,7 +55,7 @@ length = unsigned LEB128, at most 1024
 
 Before the first CREDIT the limit is 4096. A receiver sends CREDIT when half of its last grant is used, when a message arrived and it sent none for 200 ms, and at least once in 60 s while the link is idle. A side that hears no frame for 150 s treats the link as dead. There is no other keep-alive.
 
-**RESET.** The body is one unsigned LEB128 reason (1 bad header, 2 bad length, 3 bad packet, 4 limit passed). Both sides drop the messages in progress. The peer then sends `Hello` with `resume`.
+**RESET.** The body is one unsigned LEB128 reason (1 bad header, 2 bad length, 3 bad packet, 4 limit passed, 5 no session). Both sides drop the messages in progress. The peer then sends `Hello` with `resume`. A host sends reason 5 on a link that is up while it holds no session for it, for example after the host app started again.
 
 ## Session
 
@@ -80,7 +80,18 @@ Every `Request` gets exactly one `Reply` with the same id, except `GetLog`, whos
 
 `Request.age_ms` is the time since the user asked. The host answers `CODE_TOO_OLD` when it is above 10 000 for `Dial`, `CallControl` and `SendTones`, and above 30 000 for any other request that changes something. `SendText` has no limit; its `client_ref` keeps a resent text from being sent twice.
 
-Requests that carry or return a secret (`SetHotspotSetup.passphrase`, `GetHotspotSecret`, `SaveWifi`, `SetRemote`) are answered `CODE_BLUETOOTH_ONLY` over the internet.
+Requests that carry or return a secret or a network name (`SetHotspotSetup.passphrase`, `GetHotspotSecret`, `ScanWifi`, `SaveWifi`, `ForgetWifi`, `SetRemote` with `on`, `SetPushKey` with a key) are answered `CODE_BLUETOOTH_ONLY` over the internet. `SetMobileData` with `on` = false is answered `CODE_CARRIES_LINK` over the internet.
+
+`Dial` is answered as soon as the host started to dial; the call itself comes as `CallState` events that repeat `Dial.client_ref`. Until the call test has passed (`Voice.relays_audio`), `Dial` without `test` and `CallControl` with `CALL_VERB_ANSWER` are answered `CODE_CALL_TEST_NEEDED`.
+
+### The call test
+
+The phone dials with `Dial.test`, asks `CallTestCheck` during the call and gets a `CallTestReading`, then sends the user's answers in `CallTestVerdict`. The host answers `CODE_OK` when its last reading and the answers agree that audio went both ways and the host stayed silent; from then on `Voice.relays_audio` is true for this firmware and profile. Otherwise it answers `CODE_CALL_TEST_FAILED` with a `CallTestFault`.
+
+### The end of a pairing
+
+- The phone forgets the host: `ForgetHost`. The host answers `CODE_OK`, then forgets the phone's `install_id`, the keys of internet mode and push, and the Bluetooth bond.
+- The host stops being a host: it sends `Bye{BYE_REASON_RETIRED}` and does the same. The peer forgets the host.
 
 ## State
 
@@ -97,13 +108,15 @@ After its base, a peer that receives a `State` whose `seq` is not one above the 
 
 A group is sent whole. `Power` is the exception: the host sends only its fields that changed, and all of its fields in a `State` that is a base.
 
-`Signal` changes often. The host sends it at most once in 30 s, and only while the peer said it is in the foreground (the last `GetState` that named the group was at most 5 minutes ago).
+`Signal` changes often. The host sends it at once when a line loses its signal or gets it back, and otherwise at most once in 30 s and only while the peer said it is in the foreground (the last `GetState` that named the group was at most 5 minutes ago).
+
+`HotspotUsage` and the byte counts in `HotspotClients` change about once a minute while the hotspot is in use; they have groups of their own so that `Hotspot` is not sent again with them. The hotspot's passphrase is in no group: the phone asks for it with `GetHotspotSecret`.
 
 ## Events
 
 Texts and calls have sequence numbers that the host keeps on disk; each kind counts apart, from 1.
 
-- **Texts.** `Event{seq, text_in}` and `Event{seq, text_status}`. The peer answers with `EventAck{texts_up_to}` once it stored them; the host then forgets the incoming texts up to that seq. In `Hello.text_cursor` the peer names the highest seq it stored, and the host sends only the texts above it.
+- **Texts.** `Event{seq, text_in}` is a text that came in. `Event{seq, text_by_host}` is a text the host sent by itself. A text the peer sends gets its seq in `TextQueued`. `Event{text_status}` carries the seq of the text it is about in `TextStatus.text` and has no seq of its own. The peer answers with `EventAck{texts_up_to}` once it stored the texts; the host then forgets them up to that seq. In `Hello.text_cursor` the peer names the highest seq it stored, and the host sends only the texts above it.
 - **Calls.** `Event{seq, call}` replaces the peer's copy of that call. After `Welcome` the host sends the `CallState` of every live call.
 - **Replay end.** `ReplayEnd` closes the replay. A call the peer holds that is not in `live_calls` has ended. A peer whose stored text seq is below `text_cursor` after the replay sends `Hello` again.
 
@@ -131,7 +144,7 @@ Known limit: this stops a device that does not know the code. It does not stop a
 | Message | 262 144 bytes |
 | Limit before the first CREDIT | 4096 bytes |
 | Replies the host keeps for resume | 64 |
-| Blocked numbers, Mac peers | `HostInfo` |
+| Blocked numbers, blocked hotspot devices, Mac peers | `HostInfo` |
 
 ## Test vectors
 

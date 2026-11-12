@@ -14,7 +14,7 @@ import org.junit.Test
 
 class StateBookTest {
     private fun power(battery: Int, charging: Boolean = false) =
-        Power.newBuilder().setBattery(battery).setCharging(charging).setBoxMode(true).setChargeLimit(80).setLimitUndone(false).build().toByteArray()
+        Power.newBuilder().setBattery(battery).setCharging(charging).setBoxMode(true).setChargeLimit(80).setBoxPaused(false).build().toByteArray()
 
     private val hotspot = Hotspot.newBuilder().setPhase(HotspotPhase.HOTSPOT_PHASE_ON).setName("Hermes").build().toByteArray()
 
