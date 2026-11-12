@@ -9,7 +9,10 @@ APK="$ROOT/host/android/app/build/outputs/apk/debug/app-debug.apk"
 DAEMONS="$ROOT/host/daemon/out"
 ABIS="arm64-v8a armeabi-v7a"
 XML="$HERE/template/system/etc/permissions/privapp-permissions-com.keremgok.hermessim.host.xml"
-AAPT="$(ls "$HOME"/Library/Android/sdk/build-tools/*/aapt2 | sort -V | tail -1)"
+SDK="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
+AAPT="$(ls "$SDK"/build-tools/*/aapt2 2>/dev/null | sort -V | tail -1)"
+# Without aapt2 the permission check below would read no permissions and pass.
+[ -x "$AAPT" ] || { echo "aapt2 not found under $SDK/build-tools: set ANDROID_HOME"; exit 1; }
 [ -f "$APK" ] || { echo "build host/android first"; exit 1; }
 for abi in $ABIS; do [ -f "$DAEMONS/$abi/hermessimd" ] || { echo "build host/daemon first ($abi)"; exit 1; }; done
 
