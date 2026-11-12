@@ -46,6 +46,7 @@ enum Feature {
   FEATURE_HOTSPOT_CALL_PAUSE = 5;
   FEATURE_AUTO_UPDATE = 6;
   FEATURE_MAC_PEERS = 7;
+  FEATURE_SCHEDULED_TEXTS = 8;
 }
 
 // The first message of a link, from the side that connected.
@@ -205,6 +206,8 @@ message Request {
     CloseAudioPath close_audio_path = 40;
     ForgetHost forget_host = 41;
     AudioReport audio_report = 42;
+    ScheduleText schedule_text = 43;
+    CancelScheduled cancel_scheduled = 44;
   }
 }
 
@@ -606,6 +609,33 @@ message SetHostWifi {
 }
 
 // Bluetooth only. The networks around the host.
+// A text the host keeps and sends at send_at_ms (the host's clock, ms since 1970). text.client_ref names it;
+// asked again with the same ref, nothing is added. The text then goes out as if the peer sent it at that moment:
+// its TextStatus events carry the same client_ref.
+message ScheduleText {
+  SendText text = 1;
+  uint64 send_at_ms = 2;
+}
+
+// Drops a scheduled text, or with send_now sends it at once. An unknown ref is CODE_OK: it already went out.
+message CancelScheduled {
+  bytes client_ref = 1;
+  bool send_now = 2;
+}
+
+// The texts the host waits to send, the soonest first.
+message ScheduledTexts {
+  repeated ScheduledText texts = 1;
+}
+
+message ScheduledText {
+  bytes client_ref = 1;
+  string to = 2;
+  string body = 3;
+  optional uint32 line = 4;
+  uint64 send_at_ms = 5;
+}
+
 message ScanWifi {}
 
 message WifiSeen {
@@ -936,6 +966,7 @@ message State {
   Peers peers = 13;
   HotspotLimits hotspot_limits = 14;
   HotspotUsage hotspot_usage = 15;
+  ScheduledTexts scheduled = 16;
 }
 
 // ---------------------------------------------------------------- events

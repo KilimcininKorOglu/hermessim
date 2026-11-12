@@ -91,6 +91,8 @@ Requests that carry or return a secret or a network name (`SetHotspotSetup.passp
 
 `HostAction` with `HOST_VERB_REGISTER_AGAIN` or `HOST_VERB_RESTART` is answered `CODE_IN_CALL` while a call is up. `HOST_VERB_HOTSPOT_NO_INTERNET` is answered `CODE_OK` at any time; a step it causes waits for the end of the call (see "The hotspot check").
 
+`ScheduleText` (`FEATURE_SCHEDULED_TEXTS`) is answered `CODE_BAD_VALUE` with args[0] = 2 when `send_at_ms` is in the past or more than 366 days ahead, with args[0] = 1 when the text has no recipient or body, `CODE_LINE_OFF` when the named line is off, and `CODE_LIMIT_REACHED` (args[0] = 50) when the host already keeps 50 scheduled texts. The text is in the `scheduled` group from the reply on. At `send_at_ms` the host sends it as a `SendText` with the same `client_ref`, and the text leaves the group; its statuses follow as `Event{text_status}`. A text whose time passed while the host app was not running goes out when the app starts, unless it is more than 24 hours late: then it gets `TEXT_PHASE_FAILED` and is not sent. `CancelScheduled` removes the text from the group, or sends it at once with `send_now`. Macs may make neither request and get no `scheduled` group.
+
 `Dial` is answered as soon as the host started to dial; the call itself comes as `CallState` events that repeat `Dial.client_ref`. Until the call test has passed (`Voice.relays_audio`), `Dial` without `test` and `CallControl` with `CALL_VERB_ANSWER` are answered `CODE_CALL_TEST_NEEDED`.
 
 ### The call test
