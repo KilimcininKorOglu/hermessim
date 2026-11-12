@@ -13,8 +13,8 @@ import com.keremgok.hermessim.wire.Code
 import com.keremgok.hermessim.wire.HostVerb
 
 /**
- * A Mac's control write (protocol/README.md "Mac", Control): the mobile data line, a host action or a hotspot device
- * block. The answer is the write's ATT status: success, [IN_CALL] for a host action during a call, [FAILED] for
+ * A Mac's control write (protocol/README.md "Mac", Control): the mobile data line, a host action, a hotspot device
+ * block, or a failed hotspot check. The answer is the write's ATT status: success, [IN_CALL] for a host action during a call, [FAILED] for
  * anything else refused. Pure.
  */
 object MacControlCore {
@@ -41,8 +41,12 @@ object MacControlCore {
             else -> FAILED
         }
         MacControl.WhatCase.BLOCK -> if (HotspotGuardCore.validMac(control.block.mac.lowercase())) null else FAILED
+        MacControl.WhatCase.HOTSPOT_NO_INTERNET -> if (control.hotspotNoInternet) null else FAILED
         else -> FAILED
     }
+
+    /** True for a write every paired Mac may make, with or without control: its failed hotspot check. */
+    fun forEveryMac(value: ByteArray): Boolean = parse(value)?.whatCase == MacControl.WhatCase.HOTSPOT_NO_INTERNET
 
     /** The host's lines as a Mac with control chooses among them (MacStatus.lines). */
     fun lines(sims: List<SimLine>): List<MacLine> = sims.map { sim ->
@@ -85,6 +89,10 @@ object MacControlRunner {
                 if (Sims.setDataLine(ctx, c.dataSlot) == Code.CODE_OK) MacControlCore.OK else MacControlCore.FAILED
             MacControl.WhatCase.HOST_ACTION -> {
                 HostActions.run(ctx, MacControlCore.verb(c.hostAction), main) { code -> Log.i(TAG, "Mac $address: ${c.hostAction} $code") }
+                MacControlCore.OK
+            }
+            MacControl.WhatCase.HOTSPOT_NO_INTERNET -> {
+                HotspotWatch.reported("the Mac $address")
                 MacControlCore.OK
             }
             else -> if (HotspotGuard.set(c.block.mac, c.block.blocked, c.block.name)) MacControlCore.OK else MacControlCore.FAILED

@@ -13,6 +13,10 @@ class HostActionCoreTest {
         assertEquals(listOf(null, null), both.map { HostActionCore.refusal(it, inCall = false) })
     }
 
+    @Test fun aHotspotReportIsTakenDuringACallToo() {
+        assertTrue(listOf(true, false).all { HostActionCore.refusal(HostVerb.HOST_VERB_HOTSPOT_NO_INTERNET, it) == null })
+    }
+
     @Test fun anUnknownActionIsABadValueEvenDuringACall() {
         assertEquals(Code.CODE_BAD_VALUE, HostActionCore.refusal(HostVerb.HOST_VERB_UNSPECIFIED, inCall = false))
         assertEquals(Code.CODE_BAD_VALUE, HostActionCore.refusal(HostVerb.UNRECOGNIZED, inCall = true))

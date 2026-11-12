@@ -415,7 +415,7 @@ object Hotspot {
         val wm = ctx.getSystemService(WifiManager::class.java)
         val b = HotspotLimits.newBuilder().setHiddenName(true).setIdleOff(true).setOffWhenUnused(true)
             .setCallPause(callPauseOffered(ctx)).setAppleMarker(android.os.Build.VERSION.SDK_INT >= 33).setMonthLimit(true)
-            .setClientUsage(HotspotGuard.ready).setBlockClients(HotspotGuard.ready)
+            .setClientUsage(HotspotGuard.ready).setBlockClients(HotspotGuard.ready).setWatch(true)
         b.addBands(HotspotBand.HOTSPOT_BAND_2G)
         if (wm.is5GHzBandSupported) b.addBands(HotspotBand.HOTSPOT_BAND_5G).addBands(HotspotBand.HOTSPOT_BAND_AUTO)
         if (wm.is5GHzBandSupported && android.os.Build.VERSION.SDK_INT >= 31 && wm.isBridgedApConcurrencySupported)
@@ -505,8 +505,11 @@ object Hotspot {
     @Volatile private var tethered: List<String> = emptyList()
     @Volatile private var whenDown: (() -> Unit)? = null
 
-    /** New settings on a running hotspot: stop it, start it again once Android reports Wi-Fi tethering gone. */
-    private fun restart(ctx: Context, reply: (Boolean, String) -> Unit) {
+    /**
+     * New settings on a running hotspot, or a stuck one (HotspotWatch): stop it, start it again once Android reports
+     * Wi-Fi tethering gone.
+     */
+    fun restart(ctx: Context, reply: (Boolean, String) -> Unit) {
         val again = Runnable { whenDown = null; set(ctx, true, reply) }
         whenDown = { main.removeCallbacks(again); main.post(again) }
         main.postDelayed(again, 5_000)                 // no tethering event (callback unavailable): go anyway

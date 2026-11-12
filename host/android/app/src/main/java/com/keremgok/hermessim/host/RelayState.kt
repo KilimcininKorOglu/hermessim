@@ -119,7 +119,7 @@ object HostState {
     private fun hotspot(r: Reading) = HotspotCore.message(r.hotspot,
         HotspotCore.phase(r.hotspot, paused = HotspotPause.paused, failed = hotspotFailed),
         monthLimit = DataLimit.limitBytes, limitReached = DataLimit.reached(r.usage.month),
-        pauseInCalls = HotspotPause.setting && Hotspot.callPauseOffered(r.ctx))
+        pauseInCalls = HotspotPause.setting && Hotspot.callPauseOffered(r.ctx)).toBuilder().setWatch(HotspotWatch.setting).build()
 
     private fun remote(): Remote {
         val b = Remote.newBuilder().setOn(RemoteLink.enabled).setHostOnline(RemoteLink.online)

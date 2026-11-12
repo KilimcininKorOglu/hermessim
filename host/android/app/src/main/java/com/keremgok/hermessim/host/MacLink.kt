@@ -157,7 +157,7 @@ class MacLink(
 
     /** A whole write: answered first, then acted on (a command or a reply the value is valid for). */
     private fun written(device: BluetoothDevice, requestId: Int, uuid: UUID, responseNeeded: Boolean, value: ByteArray) {
-        val ok = allowed(device, uuid)
+        val ok = allowed(device, uuid, everyMac = uuid == CONTROL && MacControlCore.forEveryMac(value))
         val action = if (!ok) null else when (uuid) {
             COMMAND -> commandFrom(device, value)
             REPLY -> replyFrom(device, value)
@@ -205,13 +205,13 @@ class MacLink(
 
     /**
      * A listed Mac is served (the texts and the control only where allowed); inside the window a bonded newcomer is put
-     * on the list first.
+     * on the list first. [everyMac]: a write any listed Mac may make (MacControlCore.forEveryMac).
      */
-    private fun allowed(device: BluetoothDevice, uuid: UUID): Boolean {
+    private fun allowed(device: BluetoothDevice, uuid: UUID, everyMac: Boolean = false): Boolean {
         if (!allowed(device)) return false
         val permitted = when (uuid) {
             TEXTS, REPLY -> core.texts(device.address)
-            CONTROL -> core.control(device.address)
+            CONTROL -> everyMac || core.control(device.address)
             else -> true
         }
         if (!permitted) Log.w(TAG, "Mac service: ${device.address} may not use $uuid")

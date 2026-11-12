@@ -15,17 +15,21 @@ object HostActionCore {
     /** When a hotspot that was on before a reconnect is asked to come back, counted from the request. */
     val HOTSPOT_RETRY_MS = listOf(15_000L, 30_000L, 45_000L)
 
-    /** Null when the action may run; a call up refuses both, an unknown action is a bad value. */
-    fun refusal(verb: HostVerb, inCall: Boolean): Code? = when {
-        verb != HostVerb.HOST_VERB_REGISTER_AGAIN && verb != HostVerb.HOST_VERB_RESTART -> Code.CODE_BAD_VALUE
-        inCall -> Code.CODE_IN_CALL
-        else -> null
+    /**
+     * Null when the action may run. A call up refuses a reconnect and a restart; a hotspot report is taken during a
+     * call too (HotspotWatch makes its step wait); an unknown action is a bad value.
+     */
+    fun refusal(verb: HostVerb, inCall: Boolean): Code? = when (verb) {
+        HostVerb.HOST_VERB_HOTSPOT_NO_INTERNET -> null
+        HostVerb.HOST_VERB_REGISTER_AGAIN, HostVerb.HOST_VERB_RESTART -> if (inCall) Code.CODE_IN_CALL else null
+        else -> Code.CODE_BAD_VALUE
     }
 }
 
 /**
  * Reconnects the host's network (the daemon's detached airplane-mode cycle) or restarts the phone, for a client or a
- * Mac. A hotspot that was on comes back on after a reconnect. Main thread only.
+ * Mac, or hands a phone's failed hotspot check to HotspotWatch. A hotspot that was on comes back on after a reconnect.
+ * Main thread only.
  */
 object HostActions {
     private const val TAG = "HostActions"
@@ -36,6 +40,10 @@ object HostActions {
         if (refusal != null) {
             Log.i(TAG, "$verb refused: $refusal")
             return answer(refusal)
+        }
+        if (verb == HostVerb.HOST_VERB_HOTSPOT_NO_INTERNET) {
+            answer(Code.CODE_OK)
+            return HotspotWatch.reported("a phone")
         }
         if (verb == HostVerb.HOST_VERB_RESTART) {
             Log.i(TAG, "restart asked: in ${REBOOT_DELAY_MS / 1000} s")

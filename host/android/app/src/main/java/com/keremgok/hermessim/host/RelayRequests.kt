@@ -149,12 +149,14 @@ object Requests {
         val s = a.req.setHotspotSetup
         // Pausing during calls is only for hosts whose hotspot can only use 2.4 GHz
         if (s.hasPauseInCalls() && s.pauseInCalls && !Hotspot.callPauseOffered(app)) return a.answer(Code.CODE_NOT_OFFERED)
+        if (s.hasWatch() && !WatchSettings.valid(s.watch)) return a.answer(Code.CODE_BAD_VALUE, SetHotspotSetup.WATCH_FIELD_NUMBER.toLong())
         val now = Hotspot.info(app)
         val wanted = HotspotCore.wanted(now, s)
         val radio = HotspotCore.touchesRadio(s) && wanted != HotspotCore.wanted(now, SetHotspotSetup.getDefaultInstance())
         if (radio) HotspotCore.refusal(wanted)?.let { (code, field) -> return a.answer(code, field.toLong()) }
         if (s.hasMonthLimitBytes() && DataLimit.set(s.monthLimitBytes)) Log.i(TAG, "hotspot month limit ${s.monthLimitBytes / 1_000_000} MB")
         if (s.hasPauseInCalls()) HotspotPause.setSetting(s.pauseInCalls)
+        if (s.hasWatch()) HotspotWatch.setSetting(s.watch)
         Relay.touch(StateBook.HOTSPOT)
         if (!radio) return a.ok()             // a running hotspot is not started again for these
         Hotspot.configure(app, wanted) { code ->

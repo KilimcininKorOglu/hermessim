@@ -189,6 +189,7 @@ object Relay {
         MobileData.watch(app) { touch(StateBook.NETWORK, delayMs = 800) }
         Updater.start(app) { touch(StateBook.UPDATE, delayMs = 500) }
         HotspotPause.init(app, ::bleNear) { touch(StateBook.HOTSPOT, StateBook.HOTSPOT_LIMITS) }
+        HotspotWatch.init(app) { touch(StateBook.HOTSPOT) }
         Box.start(app) { hotspotMoved(); touch(StateBook.POWER, *lines) }
         watchBattery()
         DataUsage.init(app) { touch(StateBook.HOTSPOT_USAGE, StateBook.HOTSPOT) }
@@ -226,6 +227,7 @@ object Relay {
         if (on == lastHotspotOn) return
         lastHotspotOn = on
         Box.hotspotChanged(on)
+        HotspotWatch.hotspotChanged(radio)
         HostWifi.evaluate("hotspot ${if (on) "on" else "off"}")
     }
 
@@ -981,6 +983,7 @@ object Relay {
             .setPausedForCall(HotspotPause.paused && !hs.on).setOffWhenUnused(true)
             .setLimitReached(DataLimit.reached(DataUsage.usage().month))
             .setDevices(hs.clients.size).setHostActions(true)
+            .apply { HotspotWatch.setting.let { w -> setWatch(w.on).setWatchEveryS(w.everyS).setWatchAddress(w.address).setWatchMisses(w.misses) } }
             .addAllLines(MacControlCore.lines(Sims.status(app)))
             .addAllClients(MacControlCore.devices(hs.clients)).addAllBlocked(MacControlCore.devices(HotspotGuard.blocked()))
             .build()
