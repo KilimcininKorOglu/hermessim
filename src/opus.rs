@@ -47,6 +47,15 @@ extern "C" {
         decode_fec: c_int,
     ) -> c_int;
     fn opus_decoder_destroy(st: *mut OpusDecoder);
+    fn opus_packet_get_nb_samples(data: *const u8, len: c_int, fs: c_int) -> c_int;
+}
+
+/// The samples one packet holds at `rate`, read from its TOC; negative for a malformed packet.
+pub fn packet_samples(data: &[u8], rate: i32) -> i32 {
+    if data.is_empty() {
+        return -1;
+    }
+    unsafe { opus_packet_get_nb_samples(data.as_ptr(), data.len() as c_int, rate) }
 }
 
 pub struct Encoder {

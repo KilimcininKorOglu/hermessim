@@ -10,6 +10,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use crate::alsa;
 use crate::opus;
+use crate::playout::{self, Playout, Put, Take};
 
 const SOCK_NAME: &[u8] = b"hermessimd-audio";
 const CAP_RATE: i32 = 16000;
@@ -20,14 +21,12 @@ const CAP_FRAMES_PER_READ: u32 = (CAP_READ / CAP_FRAME) as u32;
 const CAP_MAX_ERRORS: u32 = 600;
 const CAP_SLOW_AFTER: u32 = 5;
 const DEC_RATE: i32 = 48000;
-const MAX_PACKET: usize = 400;
-const HDR: usize = 3;
+const DEC_FRAME: i32 = 480; // 10 ms at 48 kHz
+const MAX_PACKET: usize = playout::MAX_PACKET;
+const MAX_OPUS: usize = 250; // an encoded packet's ceiling (protocol README "Call audio")
+const HDR: usize = 2; // [u16 tick]
 const BITRATE: i32 = 24000;
-const LOSS_PERC: i32 = 10;
-const JB_SLOTS: usize = 64;
-const JB_MASK: u16 = (JB_SLOTS - 1) as u16;
-const JB_WINDOW: i32 = 200;
-const JB_MAX: i16 = 8;
+const LOSS_DEFAULT: i32 = 10; // expected loss until the phone's AudioReport says otherwise (LOSS)
 const VOICED_PEAK: i32 = 1000;
 
 const LIVE_CAP: usize = 0;
@@ -373,214 +372,69 @@ fn client_send(buf: &[u8]) {
     }
 }
 
-// ------------------------------------------------------------------ jitter buffer
+// ------------------------------------------------------------------ playout
 
-#[derive(Clone, Copy)]
-struct Slot {
-    len: usize,
-    seq: u16,
-    data: [u8; MAX_PACKET],
-}
+static JB: Mutex<Playout> = Mutex::new(Playout::new());
 
-const EMPTY_SLOT: Slot = Slot {
-    len: 0,
-    seq: 0,
-    data: [0; MAX_PACKET],
-};
-
-struct Jitter {
-    slots: [Slot; JB_SLOTS],
-    valid: [bool; JB_SLOTS],
-    next: u16,
-    highest: u16,
-    started: bool,
-    playing: bool,
-    win_min: i32,
-    win_n: i32,
-    trim: i32,
-    consecutive_late: u32,
-}
-
-static JB: Mutex<Jitter> = Mutex::new(Jitter {
-    slots: [EMPTY_SLOT; JB_SLOTS],
-    valid: [false; JB_SLOTS],
-    next: 0,
-    highest: 0,
-    started: false,
-    playing: false,
-    win_min: 1000,
-    win_n: 0,
-    trim: 0,
-    consecutive_late: 0,
-});
-
-static JB_PRIME: AtomicI32 = AtomicI32::new(2);
-static JB_KEEP: AtomicI32 = AtomicI32::new(1);
 static PLAY_PERIOD: AtomicI32 = AtomicI32::new(480);
 static STALL_MS: AtomicI32 = AtomicI32::new(0);
 static CALL_RUNNING: AtomicBool = AtomicBool::new(false);
+/// Set by the host app (FRAME, LOSS) when the call's audio changes path or the phone reports its loss.
+static FRAME_TICKS: AtomicI32 = AtomicI32::new(1);
+static LOSS: AtomicI32 = AtomicI32::new(LOSS_DEFAULT);
 
 fn jb_reset() {
-    let mut jb = lock(&JB);
-    jb.valid = [false; JB_SLOTS];
-    jb.started = false;
-    jb.playing = false;
-    jb.win_min = 1000;
-    jb.win_n = 0;
-    jb.trim = 0;
-    jb.next = 0;
-    jb.highest = 0;
+    lock(&JB).reset();
 }
 
-fn jb_has(jb: &Jitter, seq: u16) -> bool {
-    let i = (seq & JB_MASK) as usize;
-    jb.valid[i] && jb.slots[i].seq == seq
-}
-
-fn jb_depth(jb: &Jitter) -> i16 {
-    jb.highest.wrapping_sub(jb.next) as i16
-}
-
-fn jb_put(seq: u16, data: &[u8]) {
-    let len = data.len();
-    if len == 0 || len > MAX_PACKET {
-        return;
+/// One packet from the client (or the loopback): its length comes from the Opus TOC.
+fn jb_put(tick: u16, data: &[u8]) {
+    let samples = opus::packet_samples(data, DEC_RATE);
+    if samples < DEC_FRAME || samples % DEC_FRAME != 0 {
+        return; // not a whole number of 10 ms steps
     }
-    let mut jb = lock(&JB);
-    if !jb.started {
-        jb.started = true;
-        jb.next = seq;
-        jb.highest = seq.wrapping_sub(1);
+    let r = lock(&JB).put(tick, samples / DEC_FRAME, data);
+    if matches!(r, Put::Late | Put::Resync) {
+        st_inc(|s| &mut s.late);
     }
-    if !jb_accept_late(&mut jb, seq) {
-        return;
+    if r == Put::Resync {
+        crate::logw!("audio playout follows the sender from tick {}", tick);
     }
-    jb.consecutive_late = 0;
-    let prime = JB_PRIME.load(Ordering::Relaxed);
-    if (seq.wrapping_sub(jb.next) as i16) >= (JB_SLOTS - 1) as i16 {
-        jb.next = seq.wrapping_sub(prime.saturating_sub(1).max(0) as u16);
-        jb.playing = false;
-    }
-    jb_store(&mut jb, seq, data, prime);
-    st_inc(|s| &mut s.recv);
-    st_inc(|s| &mut s.tot_recv);
-}
-
-/// A packet behind the playout point is dropped, unless 50 in a row were late: then the
-/// buffer starts over at this packet. False when the packet is dropped.
-fn jb_accept_late(jb: &mut Jitter, seq: u16) -> bool {
-    if (seq.wrapping_sub(jb.next) as i16) >= 0 {
-        return true;
-    }
-    st_inc(|s| &mut s.late);
-    jb.consecutive_late += 1;
-    if jb.consecutive_late < 50 {
-        return false;
-    }
-    jb.valid = [false; JB_SLOTS];
-    jb.next = seq;
-    jb.highest = seq.wrapping_sub(1);
-    jb.playing = false;
-    jb.consecutive_late = 0;
-    crate::logw!("audio jitter buffer resync at seq {}", seq);
-    true
-}
-
-/// Put the packet in its slot; playing starts once `prime` frames are buffered.
-fn jb_store(jb: &mut Jitter, seq: u16, data: &[u8], prime: i32) {
-    let len = data.len();
-    let i = (seq & JB_MASK) as usize;
-    jb.slots[i].len = len;
-    jb.slots[i].seq = seq;
-    jb.slots[i].data[..len].copy_from_slice(data);
-    jb.valid[i] = true;
-    if (seq.wrapping_sub(jb.highest) as i16) > 0 {
-        jb.highest = seq;
-    }
-    if !jb.playing && jb_depth(jb) + 1 >= prime as i16 {
-        jb.playing = true;
+    if matches!(r, Put::Ok | Put::Resync) {
+        st_inc(|s| &mut s.recv);
+        st_inc(|s| &mut s.tot_recv);
     }
 }
 
-/// The jitter buffer saw this client's first packet: the per-call loss totals start there.
+/// The playout saw this client's first packet: the per-call loss totals start there.
 fn jb_started() -> bool {
     lock(&JB).started
 }
 
-fn jb_take(out: &mut [u8; MAX_PACKET], outlen: &mut usize, mode: &mut i32) -> bool {
-    let mut jb = lock(&JB);
-    if !jb.playing {
-        return false;
-    }
-    if jb_depth(&jb) < 0 {
-        jb.playing = false;
-        return false;
-    }
-    *mode = jb_pull(&mut jb, out, outlen);
-    jb.next = jb.next.wrapping_add(1);
-    jb_window(&mut jb);
-    let keep = JB_KEEP.load(Ordering::Relaxed);
-    if jb.trim > 0 && jb_depth(&jb) as i32 > keep {
-        jb.trim -= 1;
-        jb_skip(&mut jb);
-    }
-    if jb_depth(&jb) > JB_MAX {
-        jb_skip(&mut jb);
-    }
-    true
-}
-
-/// Copy the frame to play: 0 = the next packet, 1 = the one after it (its FEC part), 2 = none
-/// (concealment).
-fn jb_pull(jb: &mut Jitter, out: &mut [u8; MAX_PACKET], outlen: &mut usize) -> i32 {
-    let next = jb.next;
-    let mode = if jb_has(jb, next) {
-        0
-    } else if jb_has(jb, next.wrapping_add(1)) {
-        1
-    } else {
-        st_inc(|s| &mut s.plc);
-        st_inc(|s| &mut s.tot_plc);
-        return 2;
+/// One 10 ms tick from the playout; FEC, concealment and trimming are counted here.
+fn jb_take(buf: &mut [u8; MAX_PACKET]) -> Take {
+    let (take, depth, dropped) = {
+        let mut jb = lock(&JB);
+        let before = jb.dropped;
+        let take = jb.take(buf);
+        (take, jb.depth(), jb.dropped - before)
     };
-    let i = (next.wrapping_add(mode as u16) & JB_MASK) as usize;
-    let len = jb.slots[i].len;
-    out[..len].copy_from_slice(&jb.slots[i].data[..len]);
-    *outlen = len;
-    if mode == 0 {
-        jb.valid[i] = false;
-    } else {
-        st_inc(|s| &mut s.fec);
+    if take == Take::Silence {
+        return take;
     }
-    mode
-}
-
-/// Track the lowest depth over each JB_WINDOW pulls; depth above `keep` across a whole window
-/// is trimmed one frame per pull.
-fn jb_window(jb: &mut Jitter) {
-    let d = jb_depth(jb) as i32;
-    st_jb_depth(d);
-    if d < jb.win_min {
-        jb.win_min = d;
+    st_jb_depth(depth);
+    if dropped > 0 {
+        st_add(|s| &mut s.catchup, dropped);
     }
-    jb.win_n += 1;
-    if jb.win_n < JB_WINDOW {
-        return;
+    match take {
+        Take::Fec { .. } => st_inc(|s| &mut s.fec),
+        Take::Plc => {
+            st_inc(|s| &mut s.plc);
+            st_inc(|s| &mut s.tot_plc);
+        }
+        _ => {}
     }
-    let keep = JB_KEEP.load(Ordering::Relaxed);
-    if jb.win_min > keep {
-        jb.trim = jb.win_min - keep;
-    }
-    jb.win_min = 1000;
-    jb.win_n = 0;
-}
-
-/// Drop the next frame to catch up.
-fn jb_skip(jb: &mut Jitter) {
-    let i = (jb.next & JB_MASK) as usize;
-    jb.valid[i] = false;
-    jb.next = jb.next.wrapping_add(1);
-    st_inc(|s| &mut s.catchup);
+    take
 }
 
 // ------------------------------------------------------------------ statistics
@@ -677,6 +531,10 @@ fn st_umax(f: impl FnOnce(&mut Stats) -> &mut u32, value: u32) {
 
 /// The 5 s counters as one window, cleared under the same lock so no count is lost between read and reset.
 fn take_window(fps: f64) -> crate::protocol::AudioWindow {
+    let (prime, keep) = {
+        let jb = lock(&JB);
+        (jb.prime, jb.keep)
+    };
     let mut s = lock(&STATS);
     let w = crate::protocol::AudioWindow {
         sent: s.sent,
@@ -697,9 +555,11 @@ fn take_window(fps: f64) -> crate::protocol::AudioWindow {
             -1.0
         },
         reopen: s.reopen,
-        prime: JB_PRIME.load(Ordering::Relaxed),
-        keep: JB_KEEP.load(Ordering::Relaxed),
+        prime,
+        keep,
         period: PLAY_PERIOD.load(Ordering::Relaxed),
+        frame_ms: FRAME_TICKS.load(Ordering::Relaxed) * 10,
+        loss: LOSS.load(Ordering::Relaxed),
     };
     s.jb_sum = 0.0;
     s.jb_n = 0;
@@ -915,8 +775,11 @@ fn capture_main() {
         ta,
         pcm,
         pcmbuf: [0i16; 480 * 2],
-        pkt: [0u8; HDR + MAX_PACKET],
-        seq: 0,
+        gathered: [0i16; 480 * 2],
+        have: 0,
+        loss: LOSS_DEFAULT,
+        pkt: [0u8; HDR + MAX_OPUS],
+        tick: 0,
         t0: crate::platform::now_ns(libc::CLOCK_MONOTONIC),
         frames: 0,
         err_log: 0,
@@ -957,7 +820,7 @@ fn capture_encoder(rate: i32) -> Option<opus::Encoder> {
     let enc = opus::Encoder::new(rate, 1, opus::APPLICATION_VOIP)?;
     enc.ctl(opus::SET_BITRATE, BITRATE);
     enc.ctl(opus::SET_INBAND_FEC, 1);
-    enc.ctl(opus::SET_PACKET_LOSS_PERC, LOSS_PERC);
+    enc.ctl(opus::SET_PACKET_LOSS_PERC, LOSS_DEFAULT);
     enc.ctl(opus::SET_SIGNAL, opus::SIGNAL_VOICE);
     Some(enc)
 }
@@ -972,8 +835,13 @@ struct Capture {
     ta: Ta,
     pcm: Option<PcmPtr>,
     pcmbuf: [i16; 480 * 2],
-    pkt: [u8; HDR + MAX_PACKET],
-    seq: u16,
+    /// Up to two 10 ms reads for one 20 ms packet.
+    gathered: [i16; 480 * 2],
+    have: usize,
+    /// The expected loss the encoder has now.
+    loss: i32,
+    pkt: [u8; HDR + MAX_OPUS],
+    tick: u16,
     t0: i64,
     frames: u32,
     err_log: i64,
@@ -1013,11 +881,33 @@ impl Capture {
             .read(crate::platform::now_ns(libc::CLOCK_MONOTONIC));
         st_umax(|s| &mut s.tot_capms, capms);
         self.count_level();
-        for f in 0..CAP_FRAMES_PER_READ as usize {
-            self.send_frame(f);
-        }
+        self.gather();
         self.window_log();
         true
+    }
+
+    /// Keeps the read for its packet; a whole packet (10 or 20 ms, FRAME) is encoded and sent.
+    fn gather(&mut self) {
+        let n = self.frame as usize;
+        let start = self.have * n;
+        self.gathered[start..start + n].copy_from_slice(&self.pcmbuf[..n]);
+        self.have += 1;
+        let want = if FRAME_TICKS.load(Ordering::Relaxed) == 2 { 2 } else { 1 };
+        if self.have < want {
+            return;
+        }
+        self.follow_loss();
+        self.send_packet();
+        self.have = 0;
+    }
+
+    /// The expected loss the phone's last report asked for (LOSS), set on the encoder when it changed.
+    fn follow_loss(&mut self) {
+        let want = LOSS.load(Ordering::Relaxed);
+        if want != self.loss {
+            self.enc.ctl(opus::SET_PACKET_LOSS_PERC, want);
+            self.loss = want;
+        }
     }
 
     /// The PCM was closed after an error: open it again, giving up after CAP_MAX_ERRORS tries.
@@ -1055,7 +945,11 @@ impl Capture {
         if self.consecutive_err >= CAP_SLOW_AFTER {
             crate::platform::sleep_ns(100_000_000);
         }
-        self.seq = self.seq.wrapping_add(CAP_FRAMES_PER_READ as u16);
+        // That 10 ms (and what was gathered for its packet) is lost; the tick goes on so the receiver conceals it.
+        self.tick = self
+            .tick
+            .wrapping_add((self.have as u32 + CAP_FRAMES_PER_READ) as u16);
+        self.have = 0;
         if self.consecutive_err == 1 {
             return true;
         }
@@ -1087,29 +981,28 @@ impl Capture {
         }
     }
 
-    /// Encode frame `f` of the read and send it; a DTX frame (2 bytes or less) only uses a number.
-    fn send_frame(&mut self, f: usize) {
-        let n = self.frame as usize;
-        let start = f * n;
+    /// Encode the gathered reads as one packet and send it; an error or a DTX packet (2 bytes or less) only uses
+    /// its ticks.
+    fn send_packet(&mut self) {
+        let samples = self.have * self.frame as usize;
         let len = self.enc.encode(
-            &self.pcmbuf[start..start + n],
-            self.frame,
+            &self.gathered[..samples],
+            samples as i32,
             &mut self.pkt[HDR..],
         );
         if len < 0 {
             crate::logw!("opus encode: {}", len);
-            return;
         }
-        let seq = self.seq;
-        self.seq = seq.wrapping_add(1);
+        let tick = self.tick;
+        self.tick = tick.wrapping_add(self.have as u16);
         if len <= 2 {
             return;
         }
         let end = HDR + len as usize;
-        self.pkt[..HDR].copy_from_slice(&[(seq & 0xff) as u8, (seq >> 8) as u8, 0]);
+        self.pkt[..HDR].copy_from_slice(&tick.to_le_bytes());
         client_send(&self.pkt[..end]);
         if self.cfg.loopback {
-            jb_put(seq, &self.pkt[HDR..end]);
+            jb_put(tick, &self.pkt[HDR..end]);
         }
         st_inc(|s| &mut s.sent);
         st_inc(|s| &mut s.tot_sent);
@@ -1163,6 +1056,7 @@ fn playback_main() {
         periods: 2,
         pcm: None,
         mono: [0i16; 480],
+        held: [0i16; 480 * playout::MAX_TICKS as usize],
         out: [0i16; 480 * 2],
         pkt: [0u8; MAX_PACKET],
         win_frames: 0,
@@ -1229,6 +1123,8 @@ struct Playback {
     periods: u32,
     pcm: Option<PcmPtr>,
     mono: [i16; 480],
+    /// A decoded packet's ticks: the later ones wait here for their Carry takes.
+    held: [i16; 480 * playout::MAX_TICKS as usize],
     out: [i16; 480 * 2],
     pkt: [u8; MAX_PACKET],
     win_frames: u32,
@@ -1346,35 +1242,44 @@ impl Playback {
         self.pcm.is_some()
     }
 
-    /// Decode the next frame into `mono` (a packet, FEC from the next one, or concealment);
-    /// silence when the buffer is empty or the decoder fails. Returns the sample count.
+    /// The next tick into `mono`: a packet decoded whole, FEC over a gap (Opus conceals the part FEC does not
+    /// cover), concealment, the next tick of the last decode, or silence while the playout waits. Whatever a decode
+    /// did not fill is silence. Returns the sample count (one tick).
     fn next_frame(&mut self) -> i32 {
-        let mut len = 0usize;
-        let mut mode = 2i32;
-        let have = jb_take(&mut self.pkt, &mut len, &mut mode);
+        let take = jb_take(&mut self.pkt);
         if CLIENT_UP.load(Ordering::Relaxed) && jb_started() {
             st_inc(|s| &mut s.tot_live);
-            if !have {
+            if take == Take::Silence {
                 st_inc(|s| &mut s.tot_starved);
             }
         }
-        let samples = match (have, mode) {
-            (false, _) => -1,
-            (true, 0) => {
-                self.dec
-                    .decode(Some(&self.pkt[..len]), &mut self.mono, self.dframe, false)
+        let d = self.dframe;
+        let n = d as usize;
+        let (got, want) = match take {
+            Take::Play { len, ticks, .. } => {
+                let all = self.held.len() as i32;
+                (self.dec.decode(Some(&self.pkt[..len]), &mut self.held, all, false), d * ticks)
             }
-            // FEC from the next packet
-            (true, 1) => self
-                .dec
-                .decode(Some(&self.pkt[..len]), &mut self.mono, self.dframe, true),
-            _ => self.dec.decode(None, &mut self.mono, self.dframe, false), // PLC
+            Take::Fec { len, gap, .. } => {
+                (self.dec.decode(Some(&self.pkt[..len]), &mut self.held, d * gap, true), d * gap)
+            }
+            Take::Plc => (self.dec.decode(None, &mut self.held, d, false), d),
+            Take::Carry { index } => {
+                let at = index as usize * n;
+                self.mono[..n].copy_from_slice(&self.held[at..at + n]);
+                return d;
+            }
+            Take::Silence => {
+                self.mono = [0i16; 480];
+                return d;
+            }
         };
-        if samples < 0 {
-            self.mono = [0i16; 480];
-            return self.dframe;
+        let got = got.max(0) as usize;
+        if got < want as usize {
+            self.held[got..want as usize].fill(0);
         }
-        samples
+        self.mono[..n].copy_from_slice(&self.held[..n]);
+        d
     }
 
     /// Write `samples` of `mono` (duplicated for a stereo PCM); a failed write re-prepares it.
@@ -1436,14 +1341,16 @@ impl Playback {
     }
 }
 
-/// Count one played frame and the jitter buffer's depth while it plays.
+/// Count one played tick and the playout's depth while it plays.
 fn count_played() {
     st_inc(|s| &mut s.played);
     st_inc(|s| &mut s.tot_played);
-    let jb = lock(&JB);
-    let d = jb_depth(&jb);
-    if jb.playing {
-        st_umax(|s| &mut s.depth_max, if d < 0 { 0 } else { d as u32 });
+    let (d, playing) = {
+        let jb = lock(&JB);
+        (jb.depth(), jb.playing)
+    };
+    if playing {
+        st_umax(|s| &mut s.depth_max, d.max(0) as u32);
     }
 }
 
@@ -1467,8 +1374,11 @@ pub fn tune(prime: i32, keep: i32, period: i32) -> bool {
     if crate::protocol::tune_values(prime, keep, period).is_none() {
         return false;
     }
-    JB_PRIME.store(prime, Ordering::Relaxed);
-    JB_KEEP.store(keep, Ordering::Relaxed);
+    {
+        let mut jb = lock(&JB);
+        jb.prime = prime;
+        jb.keep = keep;
+    }
     PLAY_PERIOD.store(period, Ordering::Relaxed);
     crate::logi!(
         "audio tune: prime={} keep={} period={}",
@@ -1486,12 +1396,34 @@ pub fn stall(ms: i32) {
 }
 
 pub fn tune_get() -> String {
+    let (prime, keep) = {
+        let jb = lock(&JB);
+        (jb.prime, jb.keep)
+    };
     format!(
         "prime={} keep={} period={}",
-        JB_PRIME.load(Ordering::Relaxed),
-        JB_KEEP.load(Ordering::Relaxed),
+        prime,
+        keep,
         PLAY_PERIOD.load(Ordering::Relaxed)
     )
+}
+
+/// FRAME: the length of the packets sent to the client, 10 (Bluetooth) or 20 ms (internet). False for another value.
+pub fn frame(ms: i32) -> bool {
+    let Some(ticks) = crate::protocol::frame_ticks(ms) else {
+        return false;
+    };
+    if FRAME_TICKS.swap(ticks, Ordering::Relaxed) != ticks {
+        crate::logi!("audio frame: {} ms", ms);
+    }
+    true
+}
+
+/// LOSS: the encoder's expected loss in percent (0..100), from the phone's AudioReport.
+pub fn loss(percent: i32) -> bool {
+    crate::protocol::loss_percent(percent)
+        .map(|p| LOSS.store(p, Ordering::Relaxed))
+        .is_some()
 }
 
 pub fn totals() -> String {
@@ -1534,6 +1466,7 @@ pub fn call_begin(cfg: AudioCfg) {
         s.tot_caperr = 0;
     }
     *lock(&CFG) = cfg;
+    LOSS.store(LOSS_DEFAULT, Ordering::Relaxed); // a new call starts without the phone's report
     jb_reset();
     CALL_RUNNING.store(true, Ordering::Relaxed);
     let cap = std::thread::Builder::new()

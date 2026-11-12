@@ -11,7 +11,9 @@
 //   SET keys: capture, rec_config, inject.1, inject.2, mute.tx, mute.rx, mute.vsid, mute.ramp
 //   HAS <control>  -> OK count=n [items=a|b|c] | ERR   (auto profiles: a control on this card, an enum's options)
 //   INVENTORY      -> OK <n> controls in <file>
-//   TUNE [p k per] -> OK prime= keep= period=   (jitter-buffer frames, inject PCM period; live)
+//   TUNE [p k per] -> OK prime= keep= period=   (playout ticks, inject PCM period; live)
+//   FRAME 10|20    -> OK | ERR   (length of the packets to the audio client: Bluetooth 10 ms, internet 20 ms)
+//   LOSS <0..100>  -> OK | ERR   (the encoder's expected loss, from the phone's audio report)
 //   AUDIO?         -> OK call= session= silence= cap= voiced= sent= played= peak= txdrop= noclient= recv= plc=
 //                     starved= live= capms= caperr=   (this call's totals: the call test, the app's end-of-call check)
 //   Box mode (boxmode.rs): SCREEN_OFF | WAKE | POWERKEY 1|0 | ROLE <role> <pkg> | CHARGE <target> |
@@ -35,6 +37,7 @@ mod boxmode;
 mod mixer;
 #[cfg(target_os = "android")]
 mod opus;
+mod playout;
 mod protocol;
 
 #[cfg(not(target_os = "android"))]
@@ -276,6 +279,8 @@ mod daemon {
                 "OK".into()
             }
             b"TUNE" => cmd_tune(t),
+            b"FRAME" => ok_or(crate::audio::frame(t.next().map(c_atoi).unwrap_or(0)), "ERR bad value"),
+            b"LOSS" => ok_or(crate::audio::loss(t.next().map(c_atoi).unwrap_or(-1)), "ERR bad value"),
             _ => return None,
         })
     }

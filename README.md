@@ -7,7 +7,7 @@ care, network blocking, the key escape gesture and the persistent log capture.
 The wire behaviour is intentionally identical to the C daemon in `host/daemon/`:
 
 - control socket: abstract `@hermessimd`, one line per request, same commands and replies;
-- audio socket: abstract `@hermessimd-audio`, `SOCK_SEQPACKET`, `[u16 seq LE][u8 flags][opus]`;
+- audio socket: abstract `@hermessimd-audio`, `SOCK_SEQPACKET`, `[u16 tick LE][opus]` (a tick is 10 ms);
 - same file paths under `/data/adb/hermessim`, same sysfs charge nodes, same iptables chain;
 - same `hermessimd` logcat tag and `DAEMON_UP` / `BOX_ESCAPE` broadcasts;
 - same safe-mode/crash-breadcrumb behaviour and exit codes (3 sound card gone, 10 update).
@@ -21,7 +21,7 @@ The daemon is the only root process of the host. The host app drives it over the
 
 - **Call routing.** `CALL_START` applies the phone's audio profile (capture route, in-call music mixer, device mutes) for voice session 1 or 2; `CALL_END` restores every control it touched. When the vendor audio HAL rewrites a managed control during a call, the daemon writes it back (ALSA control events).
 - **Safe mode.** A breadcrumb file is kept while audio controls are being written. When the previous boot ended abnormally during such a write, the daemon writes no mixer control for the whole boot, so a control that froze the phone cannot do it again. When a previous run of the same boot died during a call, the next start restores the controls saved at call start.
-- **Call audio bridge.** On `@hermessimd-audio` the daemon captures the call's uplink, encodes it with Opus and sends it to the host app, and plays the client's Opus frames into the call through a jitter buffer with forward error correction and packet loss concealment. `TUNE` adjusts the buffer live; `AUDIO?` reports this call's counters for the call test.
+- **Call audio bridge.** On `@hermessimd-audio` the daemon captures the call's uplink, encodes it with Opus in 10 ms packets (Bluetooth) or 20 ms packets (internet, `FRAME`) and sends it to the host app. It plays the client's packets of any length into the call by their tick, with forward error correction over gaps and packet loss concealment (the shared playout rule, `src/playout.rs`). `LOSS` sets the encoder's expected loss from the phone's report, `TUNE` adjusts the playout live, and `AUDIO?` reports this call's counters for the call test.
 - **Mixer inventory.** `INVENTORY` writes every ALSA control of the sound card to a file, and `HAS` checks one control, for building new phone profiles.
 - **Box mode.** Screen off and wake, the default app roles (`ROLE`, through `cmd role add-role-holder`), and the key escape gesture: Volume Up three times, then Volume Down three times, wakes the screen.
 - **Battery care.** `CHARGE` holds the battery at a target through the kernel's standard `power_supply` nodes (`charge_behaviour`, a cap node, a cut node). Power supply uevents re-check the band; every control is released at start, exit, below 15 % and when the limit is off. `CHARGE?` reports the state and whether the phone keeps undoing the limit.
@@ -47,7 +47,9 @@ line. The client must be root or the uid given with `--uid` (checked with `SO_PE
 | `NEIGH <iface>` | `OK <n> <mac>,<ip>;...` (hotspot devices from the kernel ARP table) |
 | `HAS <control>` | `OK count=<n> [items=a\|b\|c]` / `ERR no such control` |
 | `INVENTORY` | `OK <n> controls in /data/adb/hermessim/inventory.txt` |
-| `TUNE [prime keep period]` | `OK prime= keep= period=` (jitter buffer frames, inject PCM period; live) |
+| `TUNE [prime keep period]` | `OK prime= keep= period=` (playout ticks, inject PCM period; live) |
+| `FRAME 10\|20` | `OK` / `ERR bad value` (length of the packets to the audio client) |
+| `LOSS <0..100>` | `OK` / `ERR bad value` (the encoder's expected loss) |
 | `AUDIO?` | `OK call= session= silence= cap= voiced= sent= played= peak= txdrop= noclient= recv= plc= starved= live= capms= caperr=` (this call's totals) |
 | `SCREEN_OFF`, `WAKE` | `OK` / `ERR spawn failed` |
 | `POWERKEY 1\|0` | `OK <devices>` / `ERR no escape gesture on this phone` |
@@ -68,7 +70,8 @@ and prints each reply.
 | `src/main.rs` | CLI, signals, control socket, command handlers and main loop |
 | `src/alsa.rs` | kernel ALSA control/PCM ABI for aarch64 and armv7 |
 | `src/mixer.rs` | managed controls, call routing, safe mode, call originals, inventory |
-| `src/audio.rs` | Opus pump, jitter buffer, capture/playback, audio client socket |
+| `src/audio.rs` | Opus pump, capture/playback, audio client socket |
+| `src/playout.rs` | the playout rule, with host-side tests against `vectors/playout.txt` (a copy of the protocol's vector) |
 | `src/boxmode.rs` | box mode, battery care, netblock, keys, uevent, log capture |
 | `src/protocol.rs` | pure helpers with host-side tests: C number parsing, reply and log line formats, scripts, validation |
 | `src/opus.rs` | libopus FFI |
@@ -94,7 +97,7 @@ The binaries are `target/<target>/release/hermessimd`. The Cargo config links wi
 `./build.sh` builds both ABIs and copies them to `out/arm64-v8a/hermessimd` and
 `out/armeabi-v7a/hermessimd`, verifying that every loadable segment is 16 KB-aligned.
 
-Host-only unit tests (`cargo test`) cover the pure helpers in `src/protocol.rs`: strtoll/atoi
+Host-only unit tests (`cargo test`) cover the playout rule in `src/playout.rs` and the pure helpers in `src/protocol.rs`: strtoll/atoi
 parsing, command arguments, the `AUDIO?`, `CHARGE?` and 5 s audio line formats, the charge band,
 the netblock and network cycle scripts, enum, call-originals and ARP parsing, the capture clock,
 the PCM rate fallback and the escape gesture. Every other module is Android-only and is compiled

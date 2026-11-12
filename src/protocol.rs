@@ -299,16 +299,30 @@ pub struct AudioWindow {
     pub prime: i32,
     pub keep: i32,
     pub period: i32,
+    /// The packet length sent to the client (FRAME).
+    pub frame_ms: i32,
+    /// The encoder's expected loss (LOSS).
+    pub loss: i32,
 }
 
 /// The "audio 5s:" log line, field for field as the C daemon writes it: the host app's diagnostics trimmer
 /// matches it by position.
 pub fn audio_5s_line(w: &AudioWindow) -> String {
     format!(
-        "audio 5s: sent={} txdrop={} recv={} fec={} plc={} late={} catchup={} caperr={} peak={} played={} depthmax={} ({:.1} fps) | held: jb={:.1}ms reopen={} (tune prime={} keep={} period={})",
+        "audio 5s: sent={} txdrop={} recv={} fec={} plc={} late={} catchup={} caperr={} peak={} played={} depthmax={} ({:.1} fps) | held: jb={:.1}ms reopen={} (tune prime={} keep={} period={} frame={} loss={})",
         w.sent, w.txdrop, w.recv, w.fec, w.plc, w.late, w.catchup, w.caperr, w.peak, w.played, w.depth_max, w.fps,
-        w.jb_ms, w.reopen, w.prime, w.keep, w.period
+        w.jb_ms, w.reopen, w.prime, w.keep, w.period, w.frame_ms, w.loss
     )
+}
+
+/// FRAME's value: the packet length in ms, 10 (Bluetooth) or 20 (internet), as ticks.
+pub fn frame_ticks(ms: i32) -> Option<i32> {
+    matches!(ms, 10 | 20).then_some(ms / 10)
+}
+
+/// LOSS's value: the encoder's expected loss in percent.
+pub fn loss_percent(percent: i32) -> Option<i32> {
+    (0..=100).contains(&percent).then_some(percent)
 }
 
 /// One call's audio totals (AUDIO? and the "audio call end:" log line): the call test and the host app's
@@ -687,17 +701,25 @@ mod tests {
             prime: 2,
             keep: 1,
             period: 480,
+            frame_ms: 20,
+            loss: 10,
             ..Default::default()
         };
         assert_eq!(
             audio_5s_line(&w),
-            "audio 5s: sent=500 txdrop=0 recv=499 fec=0 plc=0 late=0 catchup=0 caperr=0 peak=20458 played=500 depthmax=4 (99.9 fps) | held: jb=22.0ms reopen=0 (tune prime=2 keep=1 period=480)"
+            "audio 5s: sent=500 txdrop=0 recv=499 fec=0 plc=0 late=0 catchup=0 caperr=0 peak=20458 played=500 depthmax=4 (99.9 fps) | held: jb=22.0ms reopen=0 (tune prime=2 keep=1 period=480 frame=20 loss=10)"
         );
         let idle = AudioWindow {
             jb_ms: -1.0,
             ..Default::default()
         };
         assert!(audio_5s_line(&idle).contains("| held: jb=-1.0ms reopen=0"));
+    }
+
+    #[test]
+    fn frame_and_loss_take_only_their_values() {
+        assert_eq!([10, 20, 15, 0].map(frame_ticks), [Some(1), Some(2), None, None]);
+        assert_eq!([0, 30, 101, -1].map(loss_percent), [Some(0), Some(30), None, None]);
     }
 
     #[test]
