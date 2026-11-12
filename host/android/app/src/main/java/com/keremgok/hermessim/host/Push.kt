@@ -32,11 +32,8 @@ object PushCore {
         return text.toBuilder().setBody(cut).build()
     }
 
-    /** The id under which a newer notice replaces an older one of its kind and line. */
+    /** The name under which a newer notice replaces an older one of its kind and line (hashed into the collapse id). */
     fun noticeId(n: Notice): String = "notice-${n.kindValue}-${if (n.hasLine()) n.line.toString() else "x"}"
-
-    /** The server takes a collapse id of at most 64 letters, digits, dots, dashes and underscores. */
-    fun validCollapseId(id: String): Boolean = id.length in 1..64 && id.all { it.isLetterOrDigit() || it in "._-" }
 }
 
 /**
@@ -127,15 +124,30 @@ object Push {
             .setPhaseSinceMs(now)).build()), null, "test call")
     }
 
-    private fun send(kind: String, packet: ByteArray, collapseId: String?, what: String) {
+    /**
+     * Seals under the next counter of this key (kept on disk, so the phone's window never sees one twice) and sends
+     * on the relay socket, or over HTTPS while there is none. [collapseName] is hashed into the collapse id.
+     */
+    private fun send(kind: String, packet: ByteArray, collapseName: String?, what: String) {
         val c = crypto ?: RemoteLink.crypto ?: run { Log.i(TAG, "push: $what not sent (no push key from the phone yet)"); return }
         exec.execute {
+            val sealed = c.sealPush(nextCounter(c), System.currentTimeMillis(), packet)
+            val collapseId = collapseName?.let(c::collapseId) ?: ""
+            if (RemoteLink.push(c.roomToken, kind, collapseId, sealed, "$kind: $what")) return@execute
             val body = JSONObject().put("room_token", RemoteCrypto.hex(c.roomToken)).put("kind", kind)
-                .put("sealed", Base64.encodeToString(c.sealPush(packet), Base64.NO_WRAP))
-            if (collapseId != null && PushCore.validCollapseId(collapseId)) body.put("collapse_id", collapseId)
+                .put("sealed", Base64.encodeToString(sealed, Base64.NO_WRAP))
+            if (collapseId.isNotEmpty()) body.put("collapse_id", collapseId)
             val t = System.currentTimeMillis()
             val (code, _) = Api.postStatus("/push/send", body)
             Log.i(TAG, "push $kind: $what -> HTTP $code in ${System.currentTimeMillis() - t} ms")
         }
+    }
+
+    /** The push counter of [c]'s key: written before the push leaves, so a crash never sends one counter twice. */
+    private fun nextCounter(c: RemoteCrypto): Long {
+        val name = "counter-${c.roomId.take(16)}"
+        val counter = prefs().getLong(name, 0)
+        prefs().edit().putLong(name, counter + 1).commit()
+        return counter
     }
 }

@@ -4,54 +4,55 @@ package com.keremgok.hermessim.host
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
-import android.os.Handler
 import android.os.HandlerThread
 import android.util.Base64
 import android.util.Log
+import com.keremgok.hermessim.host.wire.RelayFrame
+import com.keremgok.hermessim.host.wire.RelayFrames
+import com.keremgok.hermessim.host.wire.Tunnel
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
-import org.json.JSONObject
-import java.nio.ByteBuffer
+import okio.ByteString
+import okio.ByteString.Companion.toByteString
+import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
 
 /**
- * Remote mode control path (protocol/README.md "Remote mode"): the host waits in the presence room on
- * hermessim.keremgok.tr (Pusher protocol) and swaps sealed envelopes with the phone as client events.
- * Runs only while a key is set. The key arrives over Bluetooth (RemoteSetup) and is kept in app-private prefs.
+ * Internet mode (protocol/README.md "Relay", "Tunnel"): the host keeps one binary WebSocket to hermessim.keremgok.tr,
+ * waits in its room, and runs the tunnel the phone opens there. The phone counts as present only once the tunnel is
+ * open. The same socket carries the host's pushes. Runs only while a room key is set; the key arrives over Bluetooth
+ * (SetRemote) and is kept in app-private prefs.
  */
 object RemoteLink {
     private const val TAG = "HermesSimHost"
-    private const val EVENT = "client-m"
-    private const val MAX_AGE_MS = 120_000L
-    private const val SEEN_NONCES = 4096
+    private const val SLOT = 0
+    private const val PUSH_PENDING = 64
 
     private lateinit var app: Context
-    private lateinit var onEnvelope: (ByteArray) -> Unit
-    private lateinit var onPeer: (present: Boolean, wasThere: Boolean) -> Unit
+    private lateinit var onFrames: (ByteArray) -> Unit
+    private lateinit var onPeer: (present: Boolean) -> Unit
     private val thread = HandlerThread("remote").apply { start() }
     private val h = Bg.handler("remote", thread.looper)
     private val http = OkHttpClient.Builder().pingInterval(25, TimeUnit.SECONDS).build()
+    private val rng = SecureRandom()
     private var ws: WebSocket? = null
     private var gen = 0                       // bumps on every (re)connect: callbacks from an old socket are ignored
     private var backoffMs = 2000L
+    private var tunnel: Tunnel? = null
+    private var pushRequest = 0
+    private val pushes = LinkedHashMap<Int, String>()     // request number -> what, until its result comes
     @Volatile var crypto: RemoteCrypto? = null; private set
-    @Volatile var online = false; private set      // subscribed to our room
-    @Volatile var peerPresent = false; private set  // the iPhone is in the room
-    private var channel = ""
-    // The relay lets each client connection send 120 events per 10 s, so two clients send up to
-    // 2 880 in the 120 s window; the cache must hold them all or a nonce in the window is forgotten.
-    private val seen = object : LinkedHashMap<String, Long>(256, 0.75f, false) {
-        override fun removeEldestEntry(e: MutableMap.MutableEntry<String, Long>) = size > SEEN_NONCES
-    }
+    @Volatile var online = false; private set      // in our room on the relay
+    @Volatile var peerPresent = false; private set  // the phone opened the tunnel
 
     val enabled get() = crypto != null
 
-    fun start(ctx: Context, onEnvelope: (ByteArray) -> Unit, onPeer: (present: Boolean, wasThere: Boolean) -> Unit) {
+    fun start(ctx: Context, onFrames: (ByteArray) -> Unit, onPeer: (present: Boolean) -> Unit) {
         app = ctx.applicationContext
-        this.onEnvelope = onEnvelope
+        this.onFrames = onFrames
         this.onPeer = onPeer
         prefs().getString("key", null)?.let { crypto = RemoteCrypto(Base64.decode(it, Base64.NO_WRAP)) }
         app.getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
@@ -60,7 +61,7 @@ object RemoteLink {
         h.post { if (enabled) connect() }
     }
 
-    /** RemoteSetup from the paired iPhone over Bluetooth. */
+    /** SetRemote from the paired phone over Bluetooth: a new room key moves the host to its room. */
     fun configure(on: Boolean, key: ByteArray?) = h.post {
         if (on && key != null && key.size == 32) {
             prefs().edit().putString("key", Base64.encodeToString(key, Base64.NO_WRAP)).apply()
@@ -75,13 +76,29 @@ object RemoteLink {
         }
     }
 
-    /** One envelope to the iPhone over the internet (sealed). */
-    fun send(env: ByteArray) = h.post {
-        val c = crypto ?: return@post
+    /** Frames of the protocol 2 stream to the phone, sealed in the tunnel. */
+    fun send(frames: ByteArray) = h.post {
         val w = ws ?: return@post
-        if (!online) return@post
-        val b = Base64.encodeToString(c.sealEnvelope(env), Base64.NO_WRAP)
-        w.send(JSONObject().put("event", EVENT).put("channel", channel).put("data", JSONObject().put("b", b)).toString())
+        // null: no open tunnel, or its counter ran out (then the phone must open a new one)
+        val body = tunnel?.seal(frames) ?: return@post setPresent(false)
+        w.send(RelayFrames.data(SLOT, body).bytes().toByteString())
+    }
+
+    /**
+     * A push on the relay socket. False when the socket is not in its room; the caller then posts it over HTTPS.
+     * The server answers with PUSH_RESULT, which is only logged.
+     */
+    fun push(roomToken: ByteArray, kind: String, collapseId: String, sealed: ByteArray, what: String): Boolean {
+        val code = RelayFrames.PUSH_KINDS[kind] ?: return false
+        if (!online) return false
+        h.post {
+            val w = ws ?: return@post
+            pushRequest = (pushRequest + 1) and 0xFFFF
+            pushes[pushRequest] = what
+            while (pushes.size > PUSH_PENDING) pushes.remove(pushes.keys.first())
+            w.send(RelayFrames.push(pushRequest, roomToken, code, collapseId, sealed).bytes().toByteString())
+        }
+        return true
     }
 
     private fun prefs() = app.getSharedPreferences("remote", Context.MODE_PRIVATE)
@@ -89,21 +106,17 @@ object RemoteLink {
     private fun disconnect() {
         gen++
         ws?.close(1000, "bye"); ws = null
-        setOnline(false); setPeer(false)
+        tunnel = null
+        setOnline(false); setPresent(false)
     }
 
     private fun connect() {
         disconnect()
+        val c = crypto ?: return
         val my = gen
-        Thread {
-            val url = Api.getJson("/remote")?.optString("ws_url")
-            h.post {
-                if (my != gen) return@post
-                if (url.isNullOrEmpty()) { retry(); return@post }
-                Log.i(TAG, "remote: connecting")
-                ws = http.newWebSocket(Request.Builder().url(url).build(), Listener(my))
-            }
-        }.start()
+        tunnel = Tunnel(c.auth) { n -> ByteArray(n).also(rng::nextBytes) }
+        Log.i(TAG, "remote: connecting")
+        ws = http.newWebSocket(Request.Builder().url(Api.RELAY_URL).build(), Listener(my, c.roomToken))
     }
 
     private fun retry() {
@@ -113,88 +126,66 @@ object RemoteLink {
     }
 
     private fun setOnline(v: Boolean) { if (online != v) { online = v; Relay.remoteChanged() } }
-    /** [wasThere]: the iPhone was in the room before we joined (we learn it from the subscription). */
-    private fun setPeer(v: Boolean, wasThere: Boolean = false) {
+
+    private fun setPresent(v: Boolean) {
         if (peerPresent == v) return
         peerPresent = v
-        Log.i(TAG, "remote: phone ${if (v) "in the room" else "left"}")
-        onPeer(v, wasThere)
+        Log.i(TAG, "remote: phone ${if (v) "opened the tunnel" else "gone"}")
+        onPeer(v)
     }
 
-    private class Listener(val my: Int) : WebSocketListener() {
-        override fun onMessage(webSocket: WebSocket, text: String) { h.post { if (my == gen) handle(webSocket, text) } }
-        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            h.post { if (my == gen) { Log.w(TAG, "remote: socket failed: $t"); ws = null; setOnline(false); setPeer(false); retry() } }
+    private fun closeTunnel(why: String) {
+        tunnel?.reset()
+        if (peerPresent) Log.i(TAG, "remote: tunnel closed ($why)")
+        setPresent(false)
+    }
+
+    private class Listener(val my: Int, val roomToken: ByteArray) : WebSocketListener() {
+        override fun onOpen(webSocket: WebSocket, response: Response) {
+            webSocket.send(RelayFrames.join(SLOT, RelayFrames.ROLE_HOST, roomToken).bytes().toByteString())
         }
-        // The server closing (Reverb pruning or restarting): answer it, so onClosed follows now. Unanswered, the socket
-        // counted as online until the next ping failed, up to ~50 s of messages into nothing (audit, 1 Nov 2026).
+        override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+            val message = bytes.toByteArray()
+            h.post { if (my == gen) handle(webSocket, message) }
+        }
+        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            h.post { if (my == gen) { Log.w(TAG, "remote: socket failed: $t"); lost(); retry() } }
+        }
+        // The server closing (restarting): answer it, so onClosed follows now. Unanswered, the socket counted as
+        // online until the next ping failed, up to ~50 s of messages into nothing (audit, 1 Nov 2026).
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(1000, null) }
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            h.post { if (my == gen) { Log.i(TAG, "remote: socket closed $code"); ws = null; setOnline(false); setPeer(false); retry() } }
+            h.post { if (my == gen) { Log.i(TAG, "remote: socket closed $code"); lost(); retry() } }
         }
     }
 
-    private fun data(m: JSONObject): JSONObject = when (val d = m.opt("data")) {
-        is JSONObject -> d
-        is String -> runCatching { JSONObject(d) }.getOrDefault(JSONObject())
-        else -> JSONObject()
+    private fun lost() {
+        ws = null
+        tunnel?.reset()
+        setOnline(false); setPresent(false)
     }
 
-    private fun handle(w: WebSocket, text: String) {
-        val m = runCatching { JSONObject(text) }.getOrNull() ?: return
-        when (m.optString("event")) {
-            "pusher:connection_established" -> subscribe(w, data(m).optString("socket_id"))
-            "pusher:ping" -> w.send("""{"event":"pusher:pong","data":{}}""")
-            "pusher:error", "pusher:subscription_error" -> {
-                // A rejected subscription leaves the socket open but useless: start over (with backoff).
-                Log.w(TAG, "remote: ${m.optString("event")} ${m.opt("data")}")
-                if (!online) { w.close(1000, "subscription failed") }
-            }
-            "pusher_internal:subscription_succeeded" -> {
-                // "ios" is the room's member id for the client phone, iPhone or Android alike (a wire name that
-                // predates the Android app; the backend allows host|ios)
-                backoffMs = 2000
-                setOnline(true)
-                val ids = data(m).optJSONObject("presence")?.optJSONArray("ids")
-                val ios = ids != null && (0 until ids.length()).any { ids.optString(it) == "ios" }
-                Log.i(TAG, "remote: in the room (phone ${if (ios) "there" else "not there"})")
-                setPeer(ios, wasThere = true)
-            }
-            "pusher_internal:member_added" -> if (data(m).optString("user_id") == "ios") setPeer(true)
-            "pusher_internal:member_removed" -> if (data(m).optString("user_id") == "ios") setPeer(false)
-            EVENT -> receive(data(m).optString("b"))
+    private fun handle(w: WebSocket, message: ByteArray) {
+        val frame = RelayFrame.parse(message) ?: return
+        when (frame.type) {
+            RelayFrames.JOINED -> { backoffMs = 2000; setOnline(true); Log.i(TAG, "remote: in the room") }
+            RelayFrames.PEER -> closeTunnel(if (frame.flag() == 1) "the phone came again" else "the phone left the room")
+            RelayFrames.DATA -> data(w, frame.body)
+            RelayFrames.PUSH_RESULT -> Log.i(TAG, "push ${pushes.remove(frame.code()) ?: "?"}: result ${frame.pushResult()}")
+            RelayFrames.KICKED -> { Log.w(TAG, "remote: another host socket took the room"); w.close(1000, "kicked") }
+            RelayFrames.ERROR -> Log.w(TAG, "remote: server error ${frame.code()}")
         }
     }
 
-    private fun subscribe(w: WebSocket, socketId: String) {
-        val c = crypto ?: return
-        val my = gen
-        channel = "presence-room.${c.roomId}"
-        Thread {
-            val auth = Api.postJson("/remote/auth", JSONObject().put("socket_id", socketId).put("channel_name", channel)
-                .put("room_token", RemoteCrypto.hex(c.roomToken)).put("role", "host"))
-            h.post {
-                if (my != gen) return@post
-                if (auth == null) { w.close(1000, "auth failed"); return@post }
-                w.send(JSONObject().put("event", "pusher:subscribe").put("data", JSONObject().put("channel", channel)
-                    .put("auth", auth.optString("auth")).put("channel_data", auth.optString("channel_data"))).toString())
-                // No "subscription_succeeded" within 15 s: the socket is stuck, start over.
-                h.postDelayed({ if (my == gen && !online) { Log.w(TAG, "remote: no subscription in 15 s, reconnecting"); w.close(1000, "timeout") } }, 15_000)
+    private fun data(w: WebSocket, body: ByteArray) {
+        when (val step = tunnel?.receive(body) ?: return) {
+            is Tunnel.Step.Send -> {
+                setPresent(false)                    // HS1 replaced any tunnel that was open
+                w.send(RelayFrames.data(SLOT, step.body).bytes().toByteString())
             }
-        }.start()
-    }
-
-    private fun receive(b64: String) {
-        val c = crypto ?: return
-        val sealed = runCatching { Base64.decode(b64, Base64.NO_WRAP) }.getOrNull() ?: return
-        val plain = c.openControl(sealed) ?: run { Log.w(TAG, "remote: message failed authentication, dropped"); return }
-        if (plain.size < 8) return
-        val age = System.currentTimeMillis() - ByteBuffer.wrap(plain, 0, 8).long
-        val nonce = RemoteCrypto.hex(sealed.copyOf(12))
-        if (age > MAX_AGE_MS || age < -MAX_AGE_MS || seen.containsKey(nonce)) {
-            Log.w(TAG, "remote: stale or replayed message dropped"); return
+            Tunnel.Step.Opened -> setPresent(true)
+            is Tunnel.Step.Frames -> onFrames(step.bytes)
+            is Tunnel.Step.Broken -> { Log.w(TAG, "remote: ${step.why}"); setPresent(false) }
         }
-        seen[nonce] = System.currentTimeMillis()
-        onEnvelope(plain.copyOfRange(8, plain.size))
     }
 }

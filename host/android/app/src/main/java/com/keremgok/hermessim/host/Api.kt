@@ -17,6 +17,8 @@ import java.util.UUID
 object Api {
     private const val TAG = "HermesSimHost"
     private const val BASE = "https://hermessim.keremgok.tr/api/v1"
+    /** The internet mode relay socket (protocol/README.md "Relay"). */
+    const val RELAY_URL = "wss://hermessim.keremgok.tr/api/v1/relay"
 
     fun installId(ctx: Context): String {
         val p = ctx.getSharedPreferences("api", Context.MODE_PRIVATE)
@@ -98,12 +100,6 @@ object Api {
         if (code !in 200..299) { Log.w(TAG, "POST $path: HTTP $code"); code to null }
         else code to runCatching { JSONObject(c.inputStream.bufferedReader().readText()) }.getOrNull()
     } catch (e: Exception) { Log.w(TAG, "POST $path: $e"); -1 to null }
-
-    fun getJson(path: String): JSONObject? = runCatching {
-        val c = (URL(BASE + path).openConnection() as HttpURLConnection).apply { connectTimeout = 8000; readTimeout = 8000 }
-        if (c.responseCode !in 200..299) return null
-        JSONObject(c.inputStream.bufferedReader().readText())
-    }.onFailure { Log.w(TAG, "GET $path: $it") }.getOrNull()
 
     private fun post(path: String, body: JSONObject): Pair<Boolean, String> = runCatching {
         val c = (URL(BASE + path).openConnection() as HttpURLConnection).apply {

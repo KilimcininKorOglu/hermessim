@@ -1,19 +1,41 @@
-// HermesSIM host. Copyright (C) 2026 SIM Relay authors. GPL-3.0-or-later.
+// HermesSIM host. Copyright (C) 2026 Kerem Gök. GPL-3.0-or-later.
 package com.keremgok.hermessim.host
 
+import com.keremgok.hermessim.host.wire.Vectors
+import com.keremgok.hermessim.host.wire.Vectors.hex
+import com.keremgok.hermessim.host.wire.Vectors.list
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
-import java.io.File
 
-/** Push sealing: [u64 ms][envelope] under the "push" key; writes a vector the iPhone side's opener is checked with. */
+/** The keys of a room key and a push key, the sealed push and its collapse id, against protocol/v2/vectors. */
 class PushCryptoTest {
-    @Test fun sealsUnderItsOwnKey() {
-        val c = RemoteCrypto(ByteArray(32) { it.toByte() })
-        val env = "envelope bytes".toByteArray()
-        val p = c.sealPush(env)
-        assertEquals(12 + 8 + env.size + 16, p.size)
-        assertNotEquals(p.copyOfRange(20, p.size - 16).toList(), c.sealEnvelope(env).copyOfRange(20, p.size - 16).toList())
-        File(System.getProperty("java.io.tmpdir"), "hermessim-push-vector.txt").writeText(java.util.Base64.getEncoder().encodeToString(p))
+    @Test fun `a room key gives the vectors' keys`() {
+        for (case in Vectors.cases("roomkey")) {
+            val c = RemoteCrypto(Vectors.hex(case.getString("key")))
+            assertEquals(case.getString("room_token"), c.roomToken.hex())
+            assertEquals(case.getString("room_id"), c.roomId)
+            assertEquals(case.getString("auth"), c.auth.hex())
+            assertEquals(case.getString("audio"), RemoteCrypto.hkdf(Vectors.hex(case.getString("key")), "audio").hex())
+        }
+    }
+
+    @Test fun `a push is sealed as the vector with its counter first`() {
+        val push = Vectors.cases("push").single()
+        for (case in push.list("seal")) {
+            val c = RemoteCrypto(Vectors.hex(case.getString("push_key")))
+            val sealed = c.sealPush(case.getLong("counter"), case.getLong("sent_ms"), Vectors.hex(case.getString("packet")),
+                Vectors.hex(case.getString("nonce")))
+            assertEquals(case.getString("sealed"), sealed.hex())
+        }
+    }
+
+    @Test fun `the collapse id hides the kind and the line`() {
+        val push = Vectors.cases("push").single()
+        for (case in push.list("collapse")) {
+            val id = RemoteCrypto(Vectors.hex(case.getString("push_key"))).collapseId(case.getString("id"))
+            assertEquals(case.getString("collapse_id"), id)
+            assertFalse(id.contains("text") || id.contains("notice") || id.contains("basic"))
+        }
     }
 }

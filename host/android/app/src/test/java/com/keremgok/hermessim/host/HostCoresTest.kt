@@ -86,9 +86,6 @@ class HostCoresTest {
         val locked = Notice.newBuilder().setKind(NoticeKind.NOTICE_KIND_LINE_LOCKED).setLine(0).build()
         assertEquals("notice-1-x", PushCore.noticeId(battery))
         assertEquals("notice-3-0", PushCore.noticeId(locked))
-        assertTrue(PushCore.validCollapseId(PushCore.noticeId(locked)))
-        assertFalse(PushCore.validCollapseId("a b"))
-        assertFalse(PushCore.validCollapseId("x".repeat(65)))
     }
 
     @Test fun `a call's phase and end come from the phone system's numbers`() {

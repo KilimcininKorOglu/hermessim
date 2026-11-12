@@ -1,6 +1,7 @@
 // HermesSIM host. Copyright (C) 2026 SIM Relay authors. GPL-3.0-or-later.
 package com.keremgok.hermessim.host
 
+import com.keremgok.hermessim.host.wire.Tunnel
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -9,13 +10,17 @@ import javax.crypto.Mac
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
-/** Remote mode keys and sealing (protocol/README.md "Remote mode"): HKDF-SHA256 + ChaCha20-Poly1305, nonce12 || ct. */
+/**
+ * The keys derived from a room key or a push key (protocol/README.md "Room key", "Push"): HKDF-SHA256 with salt
+ * "hermes-remote-v1". Audio and push seal with ChaCha20-Poly1305 as nonce12 || ct; the control path runs in [Tunnel].
+ */
 class RemoteCrypto(key: ByteArray) {
     companion object {
         private val SALT = "hermes-remote-v1".toByteArray()
         val H2C = "h2c".toByteArray()
         val C2H = "c2h".toByteArray()
         private val rng = SecureRandom()
+        private const val COLLAPSE_HEX = 32
 
         fun hkdf(ikm: ByteArray, info: String, len: Int = 32): ByteArray {
             val prk = Mac.getInstance("HmacSHA256").apply { init(SecretKeySpec(SALT, "HmacSHA256")) }.doFinal(ikm)
@@ -39,25 +44,25 @@ class RemoteCrypto(key: ByteArray) {
 
     val roomToken: ByteArray = hkdf(key, "room-token")
     val roomId: String = hex(MessageDigest.getInstance("SHA-256").digest(roomToken))
-    private val control = SecretKeySpec(hkdf(key, "control"), "ChaCha20")
+    /** Proves the room key in the tunnel handshake; it encrypts nothing. */
+    val auth: ByteArray = hkdf(key, "auth")
     private val audio = SecretKeySpec(hkdf(key, "audio"), "ChaCha20")
     private val push = SecretKeySpec(hkdf(key, "push"), "ChaCha20")
+    private val collapse = hkdf(key, "collapse")
 
-    fun sealControl(plain: ByteArray) = seal(control, plain, H2C)
-    fun openControl(sealed: ByteArray) = open(control, sealed, C2H)
     fun sealAudio(plain: ByteArray, len: Int = plain.size) = seal(audio, plain.copyOf(len), H2C)
     fun openAudio(sealed: ByteArray, len: Int = sealed.size) = open(audio, sealed.copyOf(len), C2H)
 
-    /** Control plaintext = [u64 BE unix ms][envelope]. */
-    fun sealEnvelope(env: ByteArray): ByteArray =
-        sealControl(ByteBuffer.allocate(8 + env.size).putLong(System.currentTimeMillis()).put(env).array())
+    /** Push plaintext = [u64 BE counter][u64 BE unix ms][Packet], under its own key (a notification extension holds only it). */
+    fun sealPush(counter: Long, sentMs: Long, packet: ByteArray, nonce: ByteArray = random12()): ByteArray =
+        seal(push, ByteBuffer.allocate(16 + packet.size).putLong(counter).putLong(sentMs).put(packet).array(), H2C, nonce)
 
-    /** Push plaintext = [u64 BE unix ms][envelope], under its own key (the iPhone's notification extension holds only it). */
-    fun sealPush(env: ByteArray): ByteArray =
-        seal(push, ByteBuffer.allocate(8 + env.size).putLong(System.currentTimeMillis()).put(env).array(), H2C)
+    /** The collapse id of an event's notification: neither the server nor the push service learns the kind or the line. */
+    fun collapseId(name: String): String = hex(Tunnel.hmac(collapse, name.toByteArray())).take(COLLAPSE_HEX)
 
-    private fun seal(k: SecretKeySpec, plain: ByteArray, aad: ByteArray): ByteArray {
-        val nonce = ByteArray(12).also { rng.nextBytes(it) }
+    private fun random12() = ByteArray(12).also { rng.nextBytes(it) }
+
+    private fun seal(k: SecretKeySpec, plain: ByteArray, aad: ByteArray, nonce: ByteArray = random12()): ByteArray {
         val c = Cipher.getInstance("ChaCha20-Poly1305")
         c.init(Cipher.ENCRYPT_MODE, k, IvParameterSpec(nonce))
         c.updateAAD(aad)

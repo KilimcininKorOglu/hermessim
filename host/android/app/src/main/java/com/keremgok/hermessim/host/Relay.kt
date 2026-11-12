@@ -79,7 +79,8 @@ sealed class Link(val id: String) {
 
     /** The internet room: a link lasts while the host and the phone are both in it. */
     object Internet : Link("remote") {
-        private const val MESSAGE_BYTES = 16_000        // the relay takes 64 KB a message, sealed and in base64
+        // A DATA body is at most 16 448 bytes; the tunnel adds its 25 bytes to the frames
+        private const val MESSAGE_BYTES = 16_384
         override val bluetooth = false
         override fun kick() {
             while (true) {
@@ -178,7 +179,7 @@ object Relay {
         ble.start()
         val adapter = (app.getSystemService(Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager).adapter
         audio = AudioBridge(adapter, ble).also { it.start() }
-        RemoteLink.start(app, { bytes -> main.post { receive(Link.Internet, bytes) } }) { present, _ -> main.post { roomChanged(present) } }
+        RemoteLink.start(app, { bytes -> main.post { receive(Link.Internet, bytes) } }) { present -> main.post { roomChanged(present) } }
     }
 
     /** The parts whose changes the peers hear: each names the state groups it moves. */
@@ -554,7 +555,7 @@ object Relay {
         }
     }
 
-    /** The phone joined the room or left it: a link lasts while both are in. The phone says Hello on a new link. */
+    /** The phone opened the tunnel or lost it: a link lasts while the tunnel is open. The phone says Hello on a new link. */
     private fun roomChanged(present: Boolean) {
         if (present) { Link.Internet.channel.newLink(); return }
         Link.Internet.channel.close()
