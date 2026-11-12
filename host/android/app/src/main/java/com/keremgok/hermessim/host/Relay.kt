@@ -366,10 +366,13 @@ object Relay {
         main.post { runCatching { receive(Peer.Ble(dev, ble), bytes) }.onFailure { Log.e(TAG, "frame from ${dev.address} failed: $it") } }
     }
 
-    /** One frame from a peer: a chunk waits for the rest of its envelope, anything else is handled now. */
+    /**
+     * One frame from a peer: a chunk waits for the rest of its envelope, anything else is handled now. Only a
+     * peer past Hello may make the host hold chunks; any other gets the usual untrusted answer.
+     */
     private fun receive(d: Peer, bytes: ByteArray) {
         val env = runCatching { Envelope.parseFrom(bytes) }.getOrElse { Log.w(TAG, "bad frame: $it"); return }
-        if (!env.hasChunk()) return onPeerFrame(d, env)
+        if (!env.hasChunk() || d.id !in trusted) return onPeerFrame(d, env)
         val joiner = joiners.getOrPut(d.id) { ChunkJoiner(SystemClock::elapsedRealtime) }
         val whole = joiner.add(env.chunk)
         joiner.refused?.let { Log.w(TAG, "chunk from ${d.id} dropped: $it") }
