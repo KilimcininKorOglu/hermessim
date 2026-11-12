@@ -100,6 +100,7 @@ message Refuse {
   Code code = 1;
   uint32 min_version = 2;         // with CODE_VERSION: what the host speaks
   uint32 max_version = 3;
+  uint32 tries_left = 4;          // with CODE_PAIRING_WRONG: proofs left before the host makes a new code
 }
 
 enum ByeReason {
@@ -137,7 +138,7 @@ enum Code {
   CODE_VERSION = 2;               // no protocol version in common
   CODE_NOT_PAIRED = 3;
   CODE_PAIRING_CLOSED = 4;        // the host shows no pairing code now
-  CODE_PAIRING_WRONG = 5;         // wrong proof; args[0] = tries left
+  CODE_PAIRING_WRONG = 5;         // wrong proof; Refuse.tries_left says how many are left
   CODE_NOT_ALLOWED = 6;           // this role may not make the request
   CODE_UNKNOWN_REQUEST = 7;       // the host does not know the request
   CODE_BAD_VALUE = 8;             // args[0] = the field number of the value

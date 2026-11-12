@@ -40,6 +40,11 @@
   "bytes": "1a020803"
  },
  {
+  "name": "refused: wrong pairing proof",
+  "text": "refuse { code: CODE_PAIRING_WRONG tries_left: 2 }",
+  "bytes": "1a0408052002"
+ },
+ {
   "name": "dial on the default line",
   "text": "request { id: 4 age_ms: 120 dial { number: \"+905551112233\" client_ref: \"ref-ref-ref-ref-\" } }",
   "bytes": "2227080410785a210a0d2b3930353535313131323233331a107265662d7265662d7265662d7265662d"

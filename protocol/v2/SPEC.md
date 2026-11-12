@@ -10,7 +10,7 @@ Status: stage 1 (the control channel). The internet carrier, call audio and Mac 
 
 - **Host:** the Android phone that holds the SIM.
 - **Peer:** a phone or a Mac that talks to the host.
-- **Link:** one connection that carries frames in order and without loss: a Bluetooth LE connection, or an internet room.
+- **Link:** one connection that carries frames in order and without loss: a Bluetooth LE connection from the peer's subscription to `down` until it ends, or the time the host and the peer are both in an internet room. When either side leaves the room and comes back, a new link starts. The peer sends `Hello` at the start of every link. Each kind of link has a session of its own.
 - **Session:** the state both sides keep across links: the message counters and the request ids.
 - **Message:** one `Packet` of `wire.proto`.
 
@@ -53,9 +53,11 @@ length = unsigned LEB128, at most 1024
 1. `received`: the number of the last message that arrived whole.
 2. `limit`: the total of DATA body bytes the sender of this frame accepts on this link. The other side must not send a DATA frame that takes its total above `limit`. Both byte totals start again at 0 on every new link, also when the session is resumed, because the bytes of a lost link may have been counted by one side only.
 
-Before the first CREDIT of a link the limit is 4096. A receiver sends CREDIT when half of its last grant is used, when a message arrived and it sent none for 200 ms, and at least once in 60 s while the link is idle. A side that hears no frame for 150 s treats the link as dead. There is no other keep-alive.
+Before the first CREDIT of a link the limit is 4096. A receiver sends CREDIT when half of its last grant is used, when a message arrived and it sent none for 200 ms, and at least once in 60 s while the link is idle. A side that hears no frame for 150 s treats the link as dead: the peer ends the link, the host sends RESET with reason 5. There is no other keep-alive. A side also sends the CREDIT that is due when a frame arrives, so a peer that only runs when the host's frame wakes it still answers once a minute.
 
-**RESET.** The body is one unsigned LEB128 reason (1 bad header, 2 bad length, 3 bad packet, 4 limit passed, 5 no session). Both sides drop the messages in progress. The peer then sends `Hello` with `resume`. A host sends reason 5 on a link that is up while it holds no session for it, for example after the host app started again.
+**RESET.** The body is one unsigned LEB128 reason (1 bad header, 2 bad length, 3 bad packet, 4 limit passed, 5 no session). Only the host sends it. A host sends reason 5 on a link that is up while it holds no session for it, for example after the host app started again. Both sides drop the messages in progress and start their byte totals again at 0, with the limit 4096. The peer then sends `Hello` with `resume`, as the first bytes of a new write (or relay message). The host reads nothing between its RESET and a write that starts with a `Hello`, because those bytes may start in the middle of a frame.
+
+A peer that finds a fault, or that cannot read the host's bytes, ends the link (it disconnects, or leaves the room) and starts a new one.
 
 ## Session
 
@@ -118,7 +120,8 @@ Texts and calls have sequence numbers that the host keeps on disk; each kind cou
 
 - **Texts.** `Event{seq, text_in}` is a text that came in. `Event{seq, text_by_host}` is a text the host sent by itself. A text the peer sends gets its seq in `TextQueued`. `Event{text_status}` carries the seq of the text it is about in `TextStatus.text` and has no seq of its own. The peer answers with `EventAck{texts_up_to}` once it stored the texts; the host then forgets them up to that seq. In `Hello.text_cursor` the peer names the highest seq it stored, and the host sends only the texts above it.
 - **Calls.** `Event{seq, call}` replaces the peer's copy of that call. After `Welcome` the host sends the `CallState` of every live call.
-- **Replay end.** `ReplayEnd` closes the replay. A call the peer holds that is not in `live_calls` has ended. A peer whose stored text seq is below `text_cursor` after the replay sends `Hello` again.
+- **Replay end.** `ReplayEnd` closes the replay. A call the peer holds that is not in `live_calls` has ended. A peer whose stored text seq is below `text_cursor` after the replay sends `Hello` again. `ReplayEnd` travels on the slowest stream that carried a message of its replay, so it arrives after all of them.
+- **A replay without a Hello.** While a Bluetooth link serves the peer, the host sends state and events only there. When that link ends and the internet link of the same peer serves, the host sends that link a replay by itself: a `State` with the groups that changed since the last one it sent there, the live calls, the texts above the last one it sent there, and `ReplayEnd`.
 
 `CallState.phase_since_ms` is the moment the call entered the phase and does not change in a replay.
 
@@ -130,7 +133,9 @@ The host shows a 6-digit code on its own screen while it accepts a new phone. A 
 2. Host: `PairOffer{public_key, salt, tries_left}`, or `Refuse{CODE_PAIRING_CLOSED}`.
 3. Both: `shared` = X25519 of the two keys. `key` = HKDF-SHA-256(ikm = `shared`, salt = `salt`, info = "hermessim pair v2", 32 bytes).
 4. Phone: `PairProof{proof}`, where `proof` = HMAC-SHA-256(`key`, phone key ‖ host key ‖ code as 6 ASCII digits ‖ `install_id`).
-5. Host: when the proof is right it pins `install_id`, stops showing the code and waits for `Hello`. When it is wrong it answers `Refuse{CODE_PAIRING_WRONG}` with the tries left. After three wrong proofs it makes a new code.
+5. Host: when the proof is right it pins `install_id`, stops showing the code and waits for `Hello`. When it is wrong it answers `Refuse{CODE_PAIRING_WRONG, tries_left}`. After three wrong proofs it makes a new code; `tries_left` then counts for the new code.
+
+The proof covers the `install_id` of the `Hello` that the host refused on the same link, so a phone says `Hello` before it starts to pair.
 
 A host that has a pinned phone takes a `Hello` only with that `install_id`. Pairing a phone again, also from a known Bluetooth address, needs the code again.
 

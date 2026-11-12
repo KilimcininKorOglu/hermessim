@@ -136,6 +136,7 @@ PACKETS = [
                                 "securities: HOTSPOT_SECURITY_WPA2 hidden_name: true idle_off: true call_pause: true month_limit: true } }"),
     ("a minute of hotspot use", "state { seq: 302 hotspot_usage { session_down: 5242880 session_up: 131072 today: 73400320 month: 2147483648 } }"),
     ("refused: not paired", "refuse { code: CODE_NOT_PAIRED }"),
+    ("refused: wrong pairing proof", "refuse { code: CODE_PAIRING_WRONG tries_left: 2 }"),
     ("dial on the default line", 'request { id: 4 age_ms: 120 dial { number: "+905551112233" client_ref: "ref-ref-ref-ref-" } }'),
     ("dial on line 0", 'request { id: 5 dial { number: "112" line: 0 } }'),
     ("the host started to dial", "reply { id: 4 code: CODE_OK }"),
