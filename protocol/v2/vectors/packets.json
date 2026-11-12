@@ -158,5 +158,25 @@
   "name": "signal bars of two lines",
   "text": "state { seq: 301 signal { bars: 3 bars: 0 } }",
   "bytes": "320908ad022a040a020300"
+ },
+ {
+  "name": "hello of a Mac",
+  "text": "hello { min_version: 2 max_version: 2 features: 128 role: ROLE_MAC install_id: \"fedcba9876543210\" app_version: \"1.0.0\" device_model: \"Kerem MacBook Pro\" }",
+  "bytes": "0a350802100218800120022a10666564636261393837363534333231303205312e302e303a114b6572656d204d6163426f6f6b2050726f"
+ },
+ {
+  "name": "the Mac window and its code",
+  "text": "state { seq: 40 peers { window_open: true available: true code: \"071942\" } }",
+  "bytes": "321008286a0c100118012206303731393432"
+ },
+ {
+  "name": "a Mac sees itself",
+  "text": "state { seq: 41 peers { peers { id: \"fedcba9876543210\" name: \"Kerem MacBook Pro\" grants { texts: true } connected: true } available: true } }",
+  "bytes": "323308296a2f0a2b0a106665646362613938373635343332313012114b6572656d204d6163426f6f6b2050726f1a02080120011801"
+ },
+ {
+  "name": "three devices on the hotspot",
+  "text": "state { seq: 42 hotspot { phase: HOTSPOT_PHASE_ON name: \"Hermes\" frequency_mhz: 5180 available: true gateway: \"10.42.0.1\" devices: 3 } }",
+  "bytes": "3221082a321d080312064865726d657358bc286001720931302e34322e302e31880103"
  }
 ]

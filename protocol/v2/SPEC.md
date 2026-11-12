@@ -4,7 +4,7 @@ Copyright (C) 2026 Kerem Gök. Dual-licensed, see `LICENSE`.
 
 This document and `wire.proto` define how a HermesSIM host talks to a phone or a Mac. `vectors/` holds inputs and the bytes they must give; every implementation reads those files in its tests.
 
-Status: stages 1 (the control channel), 2 (the internet carrier) and 3 (call audio). Mac sessions keep their current form until stage 4 replaces them. The internet carrier and the audio packets are specified in `../README.md`. A field number is never reused.
+Status: stages 1 (the control channel), 2 (the internet carrier), 3 (call audio) and 4 (Macs). The internet carrier and the audio packets are specified in `../README.md`. A field number is never reused.
 
 ## Terms
 
@@ -24,6 +24,9 @@ The host is the GATT server.
 | `7d5f0002-3c1a-4b6e-9e42-5a1c0de51a00` | `down`, host to peer | notify, encrypted |
 | `7d5f0003-3c1a-4b6e-9e42-5a1c0de51a00` | `up`, peer to host | write without response, encrypted |
 | `7d5f00f0-3c1a-4b6e-9e42-5a1c0de51a00` | pairing | advertised only while the host shows a pairing code |
+| `7d5f00f1-3c1a-4b6e-9e42-5a1c0de51a00` | Mac pairing | advertised only while the host takes a new Mac (see "Macs") |
+
+While a phone is connected the host keeps a second advertising set for Macs: it names `7d5f00f1` while it takes a new Mac and the service otherwise.
 
 The peer asks for the largest MTU. A sender puts as many whole frames into one notification or write as fit, and splits a frame across several when it does not fit. A receiver reads the values of one direction as one byte stream.
 
@@ -114,6 +117,24 @@ Over Bluetooth, call audio runs on the L2CAP channel of `Welcome.audio_psm`. Ove
 
 - The phone forgets the host: `ForgetHost`. The host answers `CODE_OK`, then forgets the phone's `install_id`, the keys of internet mode and push, and the Bluetooth bond.
 - The host stops being a host: it sends `Bye{BYE_REASON_RETIRED}` and does the same. The peer forgets the host.
+
+## Macs
+
+A Mac is a peer with `ROLE_MAC`. It talks to the host over Bluetooth only: a Mac `Hello` on an internet link is refused with `CODE_NOT_ALLOWED`. The host takes at most `HostInfo.max_mac_peers` Macs and serves each of them with or without the phone.
+
+**Pairing.** The phone sends `OpenPeerWindow{open}`. For 120 s the host takes a new Mac: it advertises `7d5f00f1` and puts a fresh 6-digit code in `Peers.code`. The phone shows the code; the user types it on the Mac. The Mac pairs as in "Pairing", with its own `install_id` and that code. When the proof is right the host adds the Mac to `Peers` (id = `install_id`, name = `Hello.device_model`, no grants) and closes the window. `SetPeer{remove}` forgets the Mac, ends its link and removes its Bluetooth bond.
+
+**Requests.** The host answers `CODE_NOT_ALLOWED` to any other request of a Mac.
+
+| Request | Mac |
+|---|---|
+| `GetState`, `SetHotspot`, `GetHotspotSecret`, `HostAction{HOST_VERB_HOTSPOT_NO_INTERNET}` | every Mac |
+| `SetDataLine`, `SetHotspotClient`, `HostAction` with another verb | with `PeerGrants.control` |
+| `SendText` | with `PeerGrants.texts`, only to the `from` of a text the Mac was sent in the last 10 minutes, on that text's line |
+
+**State.** A Mac gets every `State` with the same `seq` as the phone, holding only the groups it may see: `power`, `network`, `signal`, `hotspot` and `hotspot_limits`; with `control` also `lines` and `hotspot_clients`; and `peers` with only its own `Peer`, without `window_open` and `code`. A `State` with none of them still goes, with its `seq` only. The answer to `GetState` follows the same rule.
+
+**Events.** A Mac with `texts` gets `Event{seq, text_in}` for each text that comes in, and after its `Welcome` the texts of the last 10 minutes, at most 5. It gets no call, no text status and no notice. The host ignores a Mac's `EventAck`: only the phone's moves the text queue. `ReplayEnd` for a Mac carries the host's `text_cursor` and no calls.
 
 ## State
 

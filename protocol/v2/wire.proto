@@ -553,6 +553,7 @@ message Hotspot {
   string gateway = 14;            // the host's own address on the hotspot while on
   bool apple_marker = 15;
   HotspotWatch watch = 16;
+  uint32 devices = 17;            // devices on the hotspot now; a Mac without control sees no HotspotClients
 }
 
 // What this host's hotspot can do. An empty list or false means the setting cannot be changed.
@@ -884,7 +885,7 @@ message AudioPathClosed {}
 // ---------------------------------------------------------------- Mac peers
 
 message OpenPeerWindow {
-  bool open = 1;                  // the host takes a new Mac for 120 s
+  bool open = 1;                  // the host takes a new Mac for 120 s, with the code in Peers.code
 }
 
 message SetPeer {
@@ -901,16 +902,18 @@ message PeerGrants {
 }
 
 message Peer {
-  bytes id = 1;
-  string name = 2;
+  bytes id = 1;                   // the Mac's Hello.install_id
+  string name = 2;                // the Mac's Hello.device_model: the computer's name
   PeerGrants grants = 3;
   bool connected = 4;
 }
 
+// A Mac gets this group with only its own Peer, and without window_open and code.
 message Peers {
   repeated Peer peers = 1;
   bool window_open = 2;
   bool available = 3;             // this host can take Mac peers
+  string code = 4;                // with window_open: the 6 digits the user types on the Mac
 }
 
 // ---------------------------------------------------------------- state

@@ -161,6 +161,13 @@ PACKETS = [
     ("texts stored", "event_ack { texts_up_to: 14 }"),
     ("replay end with one live call", "replay_end { text_cursor: 14 call_cursor: 4 live_calls: 89 }"),
     ("signal bars of two lines", "state { seq: 301 signal { bars: 3 bars: 0 } }"),
+    ("hello of a Mac", 'hello { min_version: 2 max_version: 2 features: 128 role: ROLE_MAC install_id: "fedcba9876543210" '
+                       'app_version: "1.0.0" device_model: "Kerem MacBook Pro" }'),
+    ("the Mac window and its code", 'state { seq: 40 peers { window_open: true available: true code: "071942" } }'),
+    ("a Mac sees itself", 'state { seq: 41 peers { peers { id: "fedcba9876543210" name: "Kerem MacBook Pro" '
+                          'grants { texts: true } connected: true } available: true } }'),
+    ("three devices on the hotspot", 'state { seq: 42 hotspot { phase: HOTSPOT_PHASE_ON name: "Hermes" frequency_mhz: 5180 '
+                                     'available: true gateway: "10.42.0.1" devices: 3 } }'),
 ]
 
 
