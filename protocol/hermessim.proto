@@ -44,6 +44,12 @@ message MacStatus {
   repeated MacLine lines = 17;   // the host's SIMs, for the data line choice
   repeated Hotspot.Client clients = 18;  // devices on the hotspot
   repeated Hotspot.Client blocked = 19;  // devices cut off the internet
+  // The hotspot check: a Mac on the hotspot pings watch_address every watch_every_s seconds through it and, after
+  // watch_misses failures in a row, writes MacControl.hotspot_no_internet.
+  bool watch = 20;
+  int32 watch_every_s = 21;
+  string watch_address = 22;
+  int32 watch_misses = 23;
   enum State { OFF = 0; STARTING = 1; ON = 2; FAILED = 3; }
 }
 
@@ -56,12 +62,13 @@ message MacLine {
 
 // Control (write with response, only for a Mac with control): one change. A Mac without control gets
 // GATT_INSUFFICIENT_AUTHORIZATION; a restart or reconnect during a call gets the application error 0x80; anything else
-// the host refuses gets GATT_FAILURE.
+// the host refuses gets GATT_FAILURE. hotspot_no_internet is taken from every paired Mac.
 message MacControl {
   oneof what {
     int32 data_slot = 1;         // make this line the data line
     HostAction.Action host_action = 2;
     SetHotspotBlock block = 3;
+    bool hotspot_no_internet = 4;  // this Mac failed the hotspot check (MacStatus.watch)
   }
 }
 

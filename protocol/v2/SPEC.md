@@ -86,11 +86,21 @@ Every `Request` gets exactly one `Reply` with the same id, except `GetLog`, whos
 
 Requests that carry or return a secret or a network name (`SetHotspotSetup.passphrase`, `GetHotspotSecret`, `ScanWifi`, `SaveWifi`, `ForgetWifi`, `SetRemote` with `on`, `SetPushKey` with a key) are answered `CODE_BLUETOOTH_ONLY` over the internet. `SetMobileData` with `on` = false is answered `CODE_CARRIES_LINK` over the internet.
 
+`HostAction` with `HOST_VERB_REGISTER_AGAIN` or `HOST_VERB_RESTART` is answered `CODE_IN_CALL` while a call is up. `HOST_VERB_HOTSPOT_NO_INTERNET` is answered `CODE_OK` at any time; a step it causes waits for the end of the call (see "The hotspot check").
+
 `Dial` is answered as soon as the host started to dial; the call itself comes as `CallState` events that repeat `Dial.client_ref`. Until the call test has passed (`Voice.relays_audio`), `Dial` without `test` and `CallControl` with `CALL_VERB_ANSWER` are answered `CODE_CALL_TEST_NEEDED`.
 
 ### The call test
 
 The phone dials with `Dial.test`, asks `CallTestCheck` during the call and gets a `CallTestReading`, then sends the user's answers in `CallTestVerdict`. The host answers `CODE_OK` when its last reading and the answers agree that audio went both ways and the host stayed silent; from then on `Voice.relays_audio` is true for this firmware and profile. Otherwise it answers `CODE_CALL_TEST_FAILED` with a `CallTestFault`.
+
+### The hotspot check
+
+`Hotspot.watch` holds the check's settings; a host offers it with `HotspotLimits.watch`. `SetHotspotSetup.watch` replaces them whole; a value out of range (`every_s` 60..3600, `misses` 1..10, `address` an IPv4 address or a host name of 1..253 characters) is answered `CODE_BAD_VALUE` with field 11. The defaults are on, 300 s, `1.1.1.1`, 3.
+
+- The host pings over its mobile data while its hotspot is on and has a device on it.
+- A peer on the host's hotspot (its Wi-Fi gateway is `Hotspot.gateway`) pings through the hotspot's Wi-Fi only, never over another network. After `misses` failures in a row it sends `HostAction{HOST_VERB_HOTSPOT_NO_INTERNET}` and counts again from zero; it sends the next one no sooner than `misses × every_s` later.
+- After `misses` failures in a row of its own, or a peer's report, the host restarts its hotspot. When the next check after that fails too, it turns mobile data off and on and counts again from zero. A report within 2 minutes of a step is dropped. While a call is up the step waits for its end.
 
 ### The end of a pairing
 

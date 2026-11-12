@@ -509,6 +509,17 @@ message SetHotspotSetup {
   optional bool pause_in_calls = 8;
   optional uint32 idle_off_minutes = 9;
   optional bool apple_marker = 10;         // Apple devices list it as a personal hotspot
+  optional HotspotWatch watch = 11;        // replaces the whole check setting
+}
+
+// The hotspot check: every `every_s` seconds the host (over its mobile data) and each device on its hotspot (through
+// the hotspot) ping `address`. After `misses` failures in a row the host restarts its hotspot; when the next check
+// fails too, it turns mobile data off and on. Never during a call: the step waits for the call's end.
+message HotspotWatch {
+  bool on = 1;
+  uint32 every_s = 2;             // 60..3600
+  string address = 3;             // an IPv4 address or a host name of at most 253 characters
+  uint32 misses = 4;              // 1..10
 }
 
 message SetHotspotClient {
@@ -539,6 +550,7 @@ message Hotspot {
   uint32 idle_off_minutes = 13;
   string gateway = 14;            // the host's own address on the hotspot while on
   bool apple_marker = 15;
+  HotspotWatch watch = 16;
 }
 
 // What this host's hotspot can do. An empty list or false means the setting cannot be changed.
@@ -553,6 +565,7 @@ message HotspotLimits {
   bool apple_marker = 9;
   bool month_limit = 10;
   bool client_usage = 11;
+  bool watch = 12;                // the hotspot check (HotspotWatch)
 }
 
 // Bytes through the hotspot, both directions together unless named.
@@ -706,6 +719,7 @@ enum HostVerb {
   HOST_VERB_UNSPECIFIED = 0;
   HOST_VERB_REGISTER_AGAIN = 1;   // airplane mode for 5 s
   HOST_VERB_RESTART = 2;
+  HOST_VERB_HOTSPOT_NO_INTERNET = 3;  // a device on the hotspot failed the hotspot check; taken during a call too
 }
 
 message HostAction {

@@ -150,7 +150,10 @@ not the Mac. **Control.** `SetPeer{id, grants}` with `control` lets one Mac chan
 `MacStatus.control` tells the Mac, and only such a Mac gets the lines, the hotspot's devices and the blocked list in
 `MacStatus`. It writes `MacControl` to the control characteristic: the data line (`data_slot`), a host action, or a
 device block, as the phone's own requests. A write without the grant gets `GATT_INSUFFICIENT_AUTHORIZATION`, a host
-action during a call the application error `0x80`, any other refusal `GATT_FAILURE`.
+action during a call the application error `0x80`, any other refusal `GATT_FAILURE`. **Hotspot check.** `MacStatus`
+carries the phone's hotspot check settings (`watch`, `watch_every_s`, `watch_address`, `watch_misses`). A Mac on the
+hotspot pings through it as a phone does (protocol 2 SPEC, "The hotspot check") and reports a failure by writing
+`MacControl{hotspot_no_internet}`, which the host takes from every paired Mac, with or without the control grant.
 
 ## Updates
 
