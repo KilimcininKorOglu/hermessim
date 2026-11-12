@@ -17,7 +17,7 @@ AAPT="$(ls "$SDK"/build-tools/*/aapt2 2>/dev/null | sort -V | tail -1)"
 for abi in $ABIS; do [ -f "$DAEMONS/$abi/hermessimd" ] || { echo "build host/daemon first ($abi)"; exit 1; }; done
 
 # Privileged permissions requested vs whitelisted (privileged set taken from the device when connected).
-requested=$("$AAPT" dump permissions "$APK" | sed -n "s/^uses-permission: name='\(.*\)'.*/\1/p")
+requested=$("$AAPT" dump permissions "$APK" | sed -n "s/^uses-permission: name='\([^']*\)'.*/\1/p")
 for perm in $requested; do
   prot=$(adb shell "dumpsys package permission $perm 2>/dev/null | grep -m1 -o 'prot=[a-z|]*'" 2>/dev/null | tr -d '\r' || true)
   case "$prot" in *privileged*)
