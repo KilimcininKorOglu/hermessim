@@ -202,6 +202,8 @@ static unsigned g_tot_txdrop, g_tot_noclient, g_tot_recv, g_tot_plc, g_tot_starv
 // here can drop it, so no other total shows it (a Galaxy A13's phone got 85 of 100 frames a second and the end-of-call
 // check saw nothing wrong, 10 Nov 2026).
 static unsigned g_tot_capms, g_tot_caperr;
+// Ticks played from FEC and packets that came after their tick: with recv and plc, the host's AudioReport.
+static unsigned g_tot_fec, g_tot_late;
 static volatile int g_client_up;
 static int g_tot_peak;
 #define VOICED_PEAK 1000          // |sample| above this in a read = someone is talking (silence/comfort noise stays far below)
@@ -275,7 +277,7 @@ static void jb_put(uint16_t tick, const uint8_t *data, int len) {
     pthread_mutex_lock(&g_jb_lock);
     int r = playout_put(&g_play, tick, samples / DEC_FRAME, data, len);
     pthread_mutex_unlock(&g_jb_lock);
-    if (r == PLAYOUT_PUT_LATE || r == PLAYOUT_PUT_RESYNC) st_inc(&g_st_late);
+    if (r == PLAYOUT_PUT_LATE || r == PLAYOUT_PUT_RESYNC) { st_inc(&g_st_late); st_inc(&g_tot_late); }
     if (r == PLAYOUT_PUT_RESYNC) LOGW("audio playout follows the sender from tick %u", tick);
     if (r == PLAYOUT_PUT_OK || r == PLAYOUT_PUT_RESYNC) { st_inc(&g_st_recv); st_inc(&g_tot_recv); }
 }
@@ -299,7 +301,7 @@ static playout_out_t jb_take(uint8_t *buf) {
     if (out.kind == PLAYOUT_SILENCE) return out;
     st_jb_depth(depth);
     if (dropped) st_add(&g_st_catchup, dropped);
-    if (out.kind == PLAYOUT_FEC) st_inc(&g_st_fec);
+    if (out.kind == PLAYOUT_FEC) { st_inc(&g_st_fec); st_inc(&g_tot_fec); }
     if (out.kind == PLAYOUT_PLC) { st_inc(&g_st_plc); st_inc(&g_tot_plc); }
     return out;
 }
@@ -774,11 +776,12 @@ void audio_totals(char *buf, size_t n) {
     unsigned cap = g_tot_cap, voiced = g_tot_voiced, sent = g_tot_sent, played = g_tot_played;
     unsigned txdrop = g_tot_txdrop, noclient = g_tot_noclient, recv = g_tot_recv, plc = g_tot_plc;
     unsigned starved = g_tot_starved, live = g_tot_live, capms = g_tot_capms, caperr = g_tot_caperr;
+    unsigned fec = g_tot_fec, late = g_tot_late;
     int peak = g_tot_peak;
     pthread_mutex_unlock(&g_stats_lock);
     snprintf(buf, n, "cap=%u voiced=%u sent=%u played=%u peak=%d txdrop=%u noclient=%u recv=%u plc=%u starved=%u live=%u"
-             " capms=%u caperr=%u",
-             cap, voiced, sent, played, peak, txdrop, noclient, recv, plc, starved, live, capms, caperr);
+             " capms=%u caperr=%u fec=%u late=%u",
+             cap, voiced, sent, played, peak, txdrop, noclient, recv, plc, starved, live, capms, caperr, fec, late);
 }
 
 void audio_call_begin(const audio_cfg_t *cfg) {
@@ -786,7 +789,7 @@ void audio_call_begin(const audio_cfg_t *cfg) {
     pthread_mutex_lock(&g_stats_lock);
     g_tot_cap = g_tot_voiced = g_tot_sent = g_tot_played = 0;
     g_tot_txdrop = g_tot_noclient = g_tot_recv = g_tot_plc = g_tot_starved = g_tot_live = 0;
-    g_tot_capms = g_tot_caperr = 0;
+    g_tot_capms = g_tot_caperr = g_tot_fec = g_tot_late = 0;
     g_tot_peak = 0;
     pthread_mutex_unlock(&g_stats_lock);
     g_cfg = *cfg;

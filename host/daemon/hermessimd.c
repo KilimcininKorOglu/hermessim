@@ -25,7 +25,8 @@
 //   FRAME 10|20    -> OK | ERR   (length of the packets to the audio client: Bluetooth 10 ms, internet 20 ms)
 //   LOSS <0..100>  -> OK | ERR   (the encoder's expected loss, from the phone's audio report)
 //   AUDIO?         -> OK call= session= silence= cap= voiced= sent= played= peak= txdrop= noclient= recv= plc=
-//                     starved= live= capms= caperr=   (this call's totals: the call test, the app's end-of-call check)
+//                     starved= live= capms= caperr= fec= late=   (this call's totals: the call test, the app's
+//                     end-of-call check and its audio report)
 //   Box mode (box.c): SCREEN_OFF | WAKE | POWERKEY 1|0 | ROLE <role> <pkg> | CHARGE <target> |
 //                     CHARGE? -> OK <node> target= resume= drain= cutting= held=0|1 stuck=0|1 | ERR
 //                     NETBLOCK <uid> <0|1> (iptables chain hermessim_block)
