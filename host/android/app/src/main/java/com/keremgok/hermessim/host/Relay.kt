@@ -615,7 +615,20 @@ object Relay {
         if (resumed) welcome.received = link.channel.received.toInt()
         send(link, Packet.newBuilder().setWelcome(welcome).build())
         served(link, h, resumed)
-        replay(link, if (h.hasStateMark()) h.stateMark else null, h.textCursor)
+        val cursor = storedTexts(h.textCursor)
+        replay(link, if (h.hasStateMark()) h.stateMark else null, cursor)
+    }
+
+    /**
+     * The phone's text cursor says it stored every text up to it, so those are forgotten here even when its EventAck
+     * was lost. A cursor above this host's own count is from before the host lost its data: then every kept text is
+     * new to the phone and none is forgotten.
+     */
+    private fun storedTexts(cursor: Long): Long {
+        val log = Events.log(app)
+        if (cursor > log.textCursor) return 0
+        log.ack(cursor)
+        return cursor
     }
 
     private fun hostInfo(): HostInfo = HostInfo.newBuilder().setAppVersion(BuildConfigInfo.version(app))
