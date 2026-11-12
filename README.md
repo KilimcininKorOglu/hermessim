@@ -35,6 +35,7 @@ This repository is the **host side** (the Android app, its root daemon and Magis
 - **Devices.** The devices on the hotspot with their data; a blocked device (up to 32) stays connected without internet.
 - **Monthly data limit.** A notice at 80 %, and at the limit the hotspot turns off once.
 - **Hotspot guard.** Two minutes after the client leaves Bluetooth range, the host turns its hotspot off if nothing uses it.
+- **Hotspot check.** While devices use the hotspot, the host pings an address (default `1.1.1.1`, every 5 minutes) over its mobile data, and the client phone or Mac on the hotspot pings it through the hotspot. After 3 failures in a row the host restarts its hotspot; if the next check fails too, it turns mobile data off and on. The steps wait for the end of a call. The address, interval and failure count are set from the client.
 - **Hotspot during calls.** On a host whose hotspot can use only 2.4 GHz, the hotspot can pause while a call's audio runs over Bluetooth.
 - **Mac Personal Hotspot mark.** On Android 13 and later, the hotspot can carry Apple's Personal Hotspot mark, so a Mac treats it as metered.
 - **Wi-Fi when you are away.** Two minutes after the client leaves Bluetooth range, the host can join a saved network instead of using mobile data.
