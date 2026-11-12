@@ -21,7 +21,9 @@
 //                                                   withholds TetheredClient details without NETWORK_SETTINGS)
 //   SET keys: capture, rec_config, inject.1, inject.2, mute.tx, mute.rx, mute.vsid, mute.ramp
 //   HAS <control>  -> OK count=n [items=a|b|c] | ERR   (auto profiles: a control on this card, an enum's options)
-//   TUNE [p k per] -> OK prime= keep= period=   (jitter-buffer frames, inject PCM period; live)
+//   TUNE [p k per] -> OK prime= keep= period=   (playout ticks, inject PCM period; live)
+//   FRAME 10|20    -> OK | ERR   (length of the packets to the audio client: Bluetooth 10 ms, internet 20 ms)
+//   LOSS <0..100>  -> OK | ERR   (the encoder's expected loss, from the phone's audio report)
 //   AUDIO?         -> OK call= session= silence= cap= voiced= sent= played= peak= txdrop= noclient= recv= plc=
 //                     starved= live= capms= caperr=   (this call's totals: the call test, the app's end-of-call check)
 //   Box mode (box.c): SCREEN_OFF | WAKE | POWERKEY 1|0 | ROLE <role> <pkg> | CHARGE <target> |
@@ -665,6 +667,39 @@ static void reply(conn_t *c, const char *fmt, ...) {
     conn_flush(c);
 }
 
+// TUNE [prime keep period]: audio latency trade-offs; without values it only reports them.
+static void tune_command(conn_t *c) {
+    char *prime = strtok(NULL, " "), *keep = strtok(NULL, " "), *period = strtok(NULL, " ");
+    char t[80];
+    if (prime && keep && period && audio_tune(atoi(prime), atoi(keep), atoi(period)) < 0) { reply(c, "ERR bad values"); return; }
+    audio_tune_get(t, sizeof(t));
+    reply(c, "OK %s", t);
+}
+
+// A command with one number, handed to `set`, which refuses a bad one with -1.
+static void number_command(conn_t *c, int (*set)(int)) {
+    char *v = strtok(NULL, " ");
+    reply(c, v && set(atoi(v)) == 0 ? "OK" : "ERR bad value");
+}
+
+// The call audio commands; 0 when `cmd` is none of them. Their arguments come from the same strtok as `cmd`.
+static int audio_command(conn_t *c, const char *cmd) {
+    if (strcmp(cmd, "STALL") == 0) {                    // STALL <ms>: debug, one inject-loop stall
+        char *v = strtok(NULL, " ");
+        audio_stall(v ? atoi(v) : 0);
+        reply(c, "OK");
+    } else if (strcmp(cmd, "TUNE") == 0) {
+        tune_command(c);
+    } else if (strcmp(cmd, "FRAME") == 0) {             // FRAME 10|20: packet length to the audio client
+        number_command(c, audio_frame);
+    } else if (strcmp(cmd, "LOSS") == 0) {              // LOSS <0..100>: the encoder's expected loss
+        number_command(c, audio_loss);
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
 static int valid_iface(const char *iface) {
     if (!iface || !*iface || strlen(iface) > 15) return 0;
     for (const char *c = iface; *c; c++)
@@ -797,16 +832,7 @@ static void handle_line(conn_t *c, char *line) {
         char t[320];
         audio_totals(t, sizeof(t));
         reply(c, "OK call=%d session=%d silence=%d %s", g_call, g_session, g_np, t);
-    } else if (strcmp(cmd, "STALL") == 0) {             // STALL <ms>: debug, one inject-loop stall
-        char *v = strtok(NULL, " ");
-        audio_stall(v ? atoi(v) : 0);
-        reply(c, "OK");
-    } else if (strcmp(cmd, "TUNE") == 0) {              // TUNE [prime keep period]: audio latency trade-offs
-        char *prime = strtok(NULL, " "), *keep = strtok(NULL, " "), *period = strtok(NULL, " ");
-        char t[80];
-        if (prime && keep && period && audio_tune(atoi(prime), atoi(keep), atoi(period)) < 0) { reply(c, "ERR bad values"); return; }
-        audio_tune_get(t, sizeof(t));
-        reply(c, "OK %s", t);
+    } else if (audio_command(c, cmd)) {                 // STALL, TUNE, FRAME, LOSS
     } else if (strcmp(cmd, "POWERKEY") == 0) {          // POWERKEY 1|0: box mode blocks the power button
         char *v = strtok(NULL, " ");
         int n = box_power_block(v && atoi(v) == 1);

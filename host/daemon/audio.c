@@ -1,11 +1,11 @@
 // hermessimd audio pump (M5). Copyright (C) 2026 SIM Relay authors. GPL-3.0-or-later.
 //
 // While a call is up, two directions run on the sound card's own clock (no sleeps):
-//   caller -> client : capture PCM (VOC_REC_DL, 16 kHz mono, 10 ms) -> Opus encode -> audio client
-//   client -> caller : audio client -> jitter buffer -> Opus decode (FEC/PLC) -> injection PCM
-// The "audio client" is the host app, which bridges these packets to the BLE L2CAP channel; the iPhone
-// runs the mirror-image Opus codec. One datagram on the socket = one Opus packet:
-//     [u16 seq little-endian][u8 flags][opus payload]
+//   caller -> client : capture PCM (VOC_REC_DL, 16 kHz mono, 10 ms reads) -> Opus encode (10 or 20 ms) -> audio client
+//   client -> caller : audio client -> playout (playout.c) -> Opus decode (FEC/PLC) -> injection PCM
+// The "audio client" is the host app, which carries these packets over Bluetooth or the internet; the phone runs the
+// mirror-image Opus codec. One datagram on the socket = one packet of protocol/README.md "Call audio":
+//     [u16 tick little-endian][opus payload]        (tick: 10 ms steps of the sender's clock)
 // Opus is sample-rate agnostic at its boundary: we encode 16 kHz (the call-record rate) and decode to
 // 48 kHz mono directly (the injection PCM rate), so no handwritten resampler — just duplicate to stereo.
 //
@@ -13,6 +13,7 @@
 // Threads: one always-on I/O thread owns the client socket (accept + read into the jitter buffer); the
 // capture and playback threads exist only during a call and block on the PCM, which paces them.
 #include "audio.h"
+#include "playout.h"
 
 #include <android/log.h>
 #include <errno.h>
@@ -156,23 +157,17 @@ static int ta_load(void) {
 #define CAP_SLOW_AFTER 5        // after this many consecutive errors, retry only every 100 ms (protects the DSP)
 #define DEC_RATE 48000
 #define DEC_FRAME 480          // 10 ms at 48 kHz
-#define MAX_PACKET 400
-#define HDR 3                  // [u16 seq][u8 flags]
+#define MAX_PACKET PLAYOUT_MAX_PACKET
+#define MAX_OPUS 250           // an encoded packet's ceiling (protocol/README.md "Call audio")
+#define HDR 2                  // [u16 tick]
 #define BITRATE 24000
-#define LOSS_PERC 10
+#define LOSS_DEFAULT 10        // expected loss until the phone's AudioReport says otherwise (LOSS)
 
-#define JB_SLOTS 64            // ring size (power of two)
-#define JB_MASK (JB_SLOTS - 1)
-#define JB_WINDOW 200         // pulls (2 s) per adaptive-latency window
-#define JB_MAX 8             // above this (80 ms), drop one frame per pull to keep latency low
 // Tunable live (TUNE command) so latency trade-offs can be compared within one call (17 Oct 2026):
-static volatile int g_jb_prime = 2;      // frames buffered before playback starts
-static volatile int g_jb_keep = 1;       // frames of slack kept at the window's minimum depth
 static volatile int g_play_period = 480; // inject PCM period in frames at 48 kHz (480 = 10 ms, 240 = 5 ms); 2 periods
-#define JB_PRIME g_jb_prime
-#define JB_KEEP g_jb_keep
-
-typedef struct { int len; uint16_t seq; uint8_t data[MAX_PACKET]; } slot_t;   // seq: which packet the slot holds
+// Set by the host app (FRAME, LOSS) when the call's audio changes path or the phone reports its loss.
+static volatile int g_frame_ticks = 1;   // capture packets of 1 (10 ms, Bluetooth) or 2 ticks (20 ms, internet)
+static volatile int g_loss = LOSS_DEFAULT;
 
 static audio_cfg_t g_cfg;
 static int g_allowed_uid = -1;
@@ -181,15 +176,9 @@ static int g_allowed_uid = -1;
 static int g_client = -1;
 static pthread_mutex_t g_client_lock = PTHREAD_MUTEX_INITIALIZER;
 
-// Jitter buffer (client -> caller), guarded by g_jb_lock.
+// Playout (client -> caller), guarded by g_jb_lock. Its prime and keep are TUNE's.
 static pthread_mutex_t g_jb_lock = PTHREAD_MUTEX_INITIALIZER;
-static slot_t g_jb[JB_SLOTS];
-static int g_jb_valid[JB_SLOTS];
-static uint16_t g_jb_next;      // next seq to play
-static uint16_t g_jb_highest;
-static int g_jb_started;        // seen first packet
-static int g_jb_playing;        // past the prime threshold
-static int g_jb_win_min = 1000, g_jb_win_n, g_jb_trim;   // adaptive latency: min depth per window, frames to drop
+static playout_t g_play;
 
 // Call lifecycle.
 static volatile int g_call_running = 0;
@@ -271,112 +260,48 @@ static void client_send(const uint8_t *buf, int len) {
     pthread_mutex_unlock(&g_client_lock);
 }
 
-// ------------------------------------------------------------------ jitter buffer
+// ------------------------------------------------------------------ playout
 
 static void jb_reset(void) {
     pthread_mutex_lock(&g_jb_lock);
-    memset(g_jb_valid, 0, sizeof(g_jb_valid));
-    g_jb_started = g_jb_playing = 0;
-    g_jb_win_min = 1000; g_jb_win_n = 0; g_jb_trim = 0;
-    g_jb_next = g_jb_highest = 0;
+    playout_reset(&g_play);
     pthread_mutex_unlock(&g_jb_lock);
 }
 
-
-// All sequence arithmetic is signed 16-bit (wraparound-safe): "empty" must never look like "65535 queued".
-static int jb_has(uint16_t seq) { return g_jb_valid[seq & JB_MASK] && g_jb[seq & JB_MASK].seq == seq; }   // lock held
-static int16_t jb_depth(void) { return (int16_t)(g_jb_highest - g_jb_next); }   // < 0 = empty
-
-static void jb_put(uint16_t seq, const uint8_t *data, int len) {
-    static unsigned consecutive_late;
-    if (len <= 0 || len > MAX_PACKET) return;
+// One packet from the client (or the loopback): its length comes from the Opus TOC.
+static void jb_put(uint16_t tick, const uint8_t *data, int len) {
+    int samples = len > 0 ? opus_packet_get_nb_samples(data, len, DEC_RATE) : -1;
+    if (samples < DEC_FRAME || samples % DEC_FRAME != 0) return;   // not a whole number of 10 ms steps
     pthread_mutex_lock(&g_jb_lock);
-    if (!g_jb_started) { g_jb_started = 1; g_jb_next = seq; g_jb_highest = seq - 1; }
-    if ((int16_t)(seq - g_jb_next) < 0) {          // older than the next frame to play
-        st_inc(&g_st_late);
-        if (++consecutive_late >= 50) {             // sender restarted its numbering: resync
-            memset(g_jb_valid, 0, sizeof(g_jb_valid));
-            g_jb_next = seq; g_jb_highest = seq - 1; g_jb_playing = 0; consecutive_late = 0;
-            LOGW("audio jitter buffer resync at seq %u", seq);
-        } else {
-            pthread_mutex_unlock(&g_jb_lock);
-            return;
-        }
-    }
-    consecutive_late = 0;
-    if ((int16_t)(seq - g_jb_next) >= JB_SLOTS - 1) {
-        // Far ahead of playback (nobody pulled: the inject PCM wasn't open yet): the ring would wrap over unplayed
-        // slots. Play from just before this packet instead of hours-old aliases.
-        g_jb_next = (uint16_t)(seq - (JB_PRIME > 1 ? JB_PRIME - 1 : 0));
-        g_jb_playing = 0;
-    }
-    slot_t *s = &g_jb[seq & JB_MASK];
-    s->len = len;
-    s->seq = seq;
-    memcpy(s->data, data, (size_t)len);
-    g_jb_valid[seq & JB_MASK] = 1;
-    if ((int16_t)(seq - g_jb_highest) > 0) g_jb_highest = seq;
-    if (!g_jb_playing && jb_depth() + 1 >= JB_PRIME) g_jb_playing = 1;
-    st_inc(&g_st_recv);
-    st_inc(&g_tot_recv);
+    int r = playout_put(&g_play, tick, samples / DEC_FRAME, data, len);
     pthread_mutex_unlock(&g_jb_lock);
+    if (r == PLAYOUT_PUT_LATE || r == PLAYOUT_PUT_RESYNC) st_inc(&g_st_late);
+    if (r == PLAYOUT_PUT_RESYNC) LOGW("audio playout follows the sender from tick %u", tick);
+    if (r == PLAYOUT_PUT_OK || r == PLAYOUT_PUT_RESYNC) { st_inc(&g_st_recv); st_inc(&g_tot_recv); }
 }
 
-// The jitter buffer saw this client's first packet (the call quality counters start there).
+// The playout saw this client's first packet (the call quality counters start there).
 static int jb_started(void) {
     pthread_mutex_lock(&g_jb_lock);
-    int started = g_jb_started;
+    int started = g_play.started;
     pthread_mutex_unlock(&g_jb_lock);
     return started;
 }
 
-// What to play for g_jb_next: 0 = nothing (emit silence, don't advance); else mode 0 present,
-// 1 FEC (recover from the next packet), 2 PLC (gap with later audio present).
-static int jb_take(uint8_t *out, int *outlen, int *mode) {
+// One 10 ms tick from the playout (protocol/README.md "Playout"); FEC, concealment and trimming are counted here.
+static playout_out_t jb_take(uint8_t *buf) {
     pthread_mutex_lock(&g_jb_lock);
-    if (!g_jb_playing) { pthread_mutex_unlock(&g_jb_lock); return 0; }
-    if (jb_depth() < 0) {                            // drained: underrun -> re-prime before playing again
-        g_jb_playing = 0;
-        pthread_mutex_unlock(&g_jb_lock);
-        return 0;
-    }
-    uint16_t next = g_jb_next;
-    if (jb_has(next)) {
-        slot_t *s = &g_jb[next & JB_MASK];
-        memcpy(out, s->data, (size_t)s->len);
-        *outlen = s->len;
-        *mode = 0;
-        g_jb_valid[next & JB_MASK] = 0;
-    } else if (jb_has((uint16_t)(next + 1))) {
-        slot_t *s = &g_jb[(uint16_t)(next + 1) & JB_MASK];
-        memcpy(out, s->data, (size_t)s->len);
-        *outlen = s->len;
-        *mode = 1;
-        st_inc(&g_st_fec);
-    } else {
-        *mode = 2;                                   // depth >= 0 here, so later audio exists
-        st_inc(&g_st_plc);
-        st_inc(&g_tot_plc);
-    }
-    g_jb_next = next + 1;
-    // Adaptive latency: if even the window's minimum depth exceeded JB_KEEP, that much buffering was never
-    // needed -> trim it one frame per pull. Converges to the jitter BLE actually has.
-    int d = jb_depth();
-    st_jb_depth(d);
-    if (d < g_jb_win_min) g_jb_win_min = d;
-    if (++g_jb_win_n >= JB_WINDOW) {
-        if (g_jb_win_min > JB_KEEP) g_jb_trim = g_jb_win_min - JB_KEEP;
-        g_jb_win_min = 1000; g_jb_win_n = 0;
-    }
-    if (g_jb_trim > 0 && jb_depth() > JB_KEEP) { g_jb_valid[g_jb_next & JB_MASK] = 0; g_jb_next++; g_jb_trim--; st_inc(&g_st_catchup); }
-    // Hard cap: above JB_MAX buffered, drop one frame per pull (gentle; never a jump).
-    if (jb_depth() > JB_MAX) {
-        g_jb_valid[g_jb_next & JB_MASK] = 0;
-        g_jb_next++;
-        st_inc(&g_st_catchup);
-    }
+    unsigned dropped = g_play.dropped;
+    playout_out_t out = playout_take(&g_play, buf);
+    int depth = playout_depth(&g_play);
+    dropped = g_play.dropped - dropped;
     pthread_mutex_unlock(&g_jb_lock);
-    return 1;
+    if (out.kind == PLAYOUT_SILENCE) return out;
+    st_jb_depth(depth);
+    if (dropped) st_add(&g_st_catchup, dropped);
+    if (out.kind == PLAYOUT_FEC) st_inc(&g_st_fec);
+    if (out.kind == PLAYOUT_PLC) { st_inc(&g_st_plc); st_inc(&g_tot_plc); }
+    return out;
 }
 
 static void *io_main(void *arg) {
@@ -515,6 +440,52 @@ static void cap_clock_error(cap_clock_t *c) {
     c->prev.tv_sec = 0; c->prev.tv_nsec = 0;
 }
 
+// Encodes the gathered `ticks` (10 or 20 ms) and hands the packet to the client; returns the next packet's tick.
+static uint16_t encode_send(OpusEncoder *enc, const int16_t *pcm, int samples, int ticks, uint16_t tick) {
+    uint8_t pkt[HDR + MAX_OPUS];
+    int len = opus_encode(enc, pcm, samples, pkt + HDR, MAX_OPUS);
+    if (len < 0) LOGW("opus encode: %d", len);
+    if (len <= 2) return (uint16_t)(tick + ticks);   // an error or DTX: nothing to send, but the tick is time
+    pkt[0] = (uint8_t)(tick & 0xff);
+    pkt[1] = (uint8_t)(tick >> 8);
+    client_send(pkt, HDR + len);
+    if (g_cfg.loopback) jb_put(tick, pkt + HDR, len);
+    st_inc(&g_st_sent);
+    st_inc(&g_tot_sent);
+    return (uint16_t)(tick + ticks);
+}
+
+// The expected loss the phone's last report asked for (LOSS), set on the encoder when it changed.
+static void follow_loss(OpusEncoder *enc, int *loss) {
+    int want = g_loss;
+    if (want == *loss) return;
+    opus_encoder_ctl(enc, OPUS_SET_PACKET_LOSS_PERC(want));
+    *loss = want;
+}
+
+// The 5 s line: what flowed each way and what the buffers held, from the capture thread.
+static void log_window(unsigned frames, double s) {
+    pthread_mutex_lock(&g_stats_lock);
+    unsigned sent = g_st_sent, txdrop = g_st_txdrop, recv = g_st_recv, fec = g_st_fec, plc = g_st_plc;
+    unsigned late = g_st_late, catchup = g_st_catchup, caperr = g_st_caperr;
+    int peak = g_st_peak;
+    unsigned played = g_st_played, depth_max = g_st_depth_max, reopen = g_st_reopen, jb_n = g_st_jb_n;
+    double jb_sum = g_st_jb_sum;
+    g_st_jb_sum = 0; g_st_jb_n = 0; g_st_reopen = 0;
+    g_st_sent = g_st_txdrop = g_st_recv = g_st_fec = g_st_plc = g_st_late = g_st_catchup = g_st_caperr = 0;
+    g_st_peak = 0; g_st_played = 0; g_st_depth_max = 0;
+    pthread_mutex_unlock(&g_stats_lock);
+    pthread_mutex_lock(&g_jb_lock);
+    int prime = g_play.prime, keep = g_play.keep;
+    pthread_mutex_unlock(&g_jb_lock);
+    LOGI("audio 5s: sent=%u txdrop=%u recv=%u fec=%u plc=%u late=%u catchup=%u caperr=%u peak=%d played=%u depthmax=%u (%.1f fps) "
+         "| held: jb=%.1fms reopen=%u (tune prime=%d keep=%d period=%d frame=%d loss=%d)",
+         sent, txdrop, recv, fec, plc, late, catchup, caperr, peak,
+         played, depth_max, frames / s,
+         jb_n ? jb_sum / jb_n * 10.0 : -1.0, reopen,
+         prime, keep, g_play_period, g_frame_ticks * 10, g_loss);
+}
+
 static void *capture_main(void *arg) {
     (void)arg;
     set_realtime("capture");
@@ -530,15 +501,16 @@ static void *capture_main(void *arg) {
     if (!enc) { LOGE("opus encoder: %d", err); return NULL; }
     opus_encoder_ctl(enc, OPUS_SET_BITRATE(BITRATE));
     opus_encoder_ctl(enc, OPUS_SET_INBAND_FEC(1));
-    opus_encoder_ctl(enc, OPUS_SET_PACKET_LOSS_PERC(LOSS_PERC));
+    opus_encoder_ctl(enc, OPUS_SET_PACKET_LOSS_PERC(LOSS_DEFAULT));
     opus_encoder_ctl(enc, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
 
     struct pcm *pcm = pcm_hold(LIVE_CAP, open_pcm(g_cfg.capture_pcm, PCM_IN, (unsigned)crate, (unsigned)cch, (unsigned)cframe));
     if (!pcm) { opus_encoder_destroy(enc); return NULL; }
 
     int16_t pcmbuf[480 * 2];
-    uint8_t pkt[HDR + MAX_PACKET];
-    uint16_t seq = 0;
+    int16_t gathered[480 * 2];                       // up to two 10 ms reads for one 20 ms packet
+    int have = 0, loss = LOSS_DEFAULT;
+    uint16_t tick = 0;
     struct timespec t0;
     clock_gettime(CLOCK_MONOTONIC, &t0);
     unsigned frames = 0;
@@ -572,8 +544,10 @@ static void *capture_main(void *arg) {
                 struct timespec slow = { .tv_nsec = 100 * 1000 * 1000 };
                 nanosleep(&slow, NULL);
             }
-            // Isolated fault: that 10 ms is lost; advance seq so the receiver conceals it.
-            seq += CAP_FRAMES_PER_READ;
+            // Isolated fault: that 10 ms (and what was gathered for its packet) is lost; the tick goes on so the
+            // receiver conceals it.
+            tick = (uint16_t)(tick + have + CAP_FRAMES_PER_READ);
+            have = 0;
             if (consecutive_err == 1) continue;
             // Repeated faults: reopen the stream (fresh hw params).
             pcm_release(LIVE_CAP, pcm);
@@ -590,39 +564,16 @@ static void *capture_main(void *arg) {
         st_peak(&g_tot_peak, rpeak);
         st_add(&g_tot_cap, CAP_FRAMES_PER_READ);
         if (rpeak > VOICED_PEAK) st_add(&g_tot_voiced, CAP_FRAMES_PER_READ);
-        for (int f = 0; f < CAP_FRAMES_PER_READ; f++) {
-        int len = opus_encode(enc, pcmbuf + f * cframe, cframe, pkt + HDR, MAX_PACKET);
-        if (len < 0) { LOGW("opus encode: %d", len); continue; }
-        if (len <= 2) { seq++; continue; }    // DTX: nothing to send, but keep seq = time
-        pkt[0] = (uint8_t)(seq & 0xff);
-        pkt[1] = (uint8_t)(seq >> 8);
-        pkt[2] = 0;
-        client_send(pkt, HDR + len);
-        if (g_cfg.loopback) jb_put(seq, pkt + HDR, len);
-        seq++;
-        st_inc(&g_st_sent);
-        st_inc(&g_tot_sent);
+        memcpy(gathered + have * cframe, pcmbuf, (size_t)cframe * sizeof(int16_t));
+        if (++have >= (g_frame_ticks == 2 ? 2 : 1)) {
+            follow_loss(enc, &loss);
+            tick = encode_send(enc, gathered, have * cframe, have, tick);
+            have = 0;
         }
         frames += CAP_FRAMES_PER_READ;
         if (frames >= 500) {     // ~5 s
             struct timespec now; clock_gettime(CLOCK_MONOTONIC, &now);
-            double s = (now.tv_sec - t0.tv_sec) + (now.tv_nsec - t0.tv_nsec) / 1e9;
-            pthread_mutex_lock(&g_stats_lock);
-            unsigned sent = g_st_sent, txdrop = g_st_txdrop, recv = g_st_recv, fec = g_st_fec, plc = g_st_plc;
-            unsigned late = g_st_late, catchup = g_st_catchup, caperr = g_st_caperr;
-            int peak = g_st_peak;
-            unsigned played = g_st_played, depth_max = g_st_depth_max, reopen = g_st_reopen, jb_n = g_st_jb_n;
-            double jb_sum = g_st_jb_sum;
-            g_st_jb_sum = 0; g_st_jb_n = 0; g_st_reopen = 0;
-            g_st_sent = g_st_txdrop = g_st_recv = g_st_fec = g_st_plc = g_st_late = g_st_catchup = g_st_caperr = 0;
-            g_st_peak = 0; g_st_played = 0; g_st_depth_max = 0;
-            pthread_mutex_unlock(&g_stats_lock);
-            LOGI("audio 5s: sent=%u txdrop=%u recv=%u fec=%u plc=%u late=%u catchup=%u caperr=%u peak=%d played=%u depthmax=%u (%.1f fps) "
-                 "| held: jb=%.1fms reopen=%u (tune prime=%d keep=%d period=%d)",
-                 sent, txdrop, recv, fec, plc, late, catchup, caperr, peak,
-                 played, depth_max, frames / s,
-                 jb_n ? jb_sum / jb_n * 10.0 : -1.0, reopen,
-                 g_jb_prime, g_jb_keep, g_play_period);
+            log_window(frames, (now.tv_sec - t0.tv_sec) + (now.tv_nsec - t0.tv_nsec) / 1e9);
             frames = 0; t0 = now;
         }
     }
@@ -632,6 +583,43 @@ static void *capture_main(void *arg) {
 }
 
 // ------------------------------------------------------------------ playback (client -> caller)
+
+// What the last decode gave: its later ticks wait here for their CARRY takes.
+typedef struct {
+    int16_t pcm[480 * PLAYOUT_MAX_TICKS];
+    int dframe;                                     // samples per tick at the inject rate
+} held_t;
+
+// The PCM of one take into `mono` (one tick): a packet decoded whole, FEC over a gap (Opus conceals the part FEC does
+// not cover), concealment, or silence while the playout waits. Whatever a decode did not fill is silence.
+static int decode_take(OpusDecoder *dec, playout_out_t take, const uint8_t *pkt, held_t *h, int16_t *mono) {
+    const int dframe = h->dframe;
+    int16_t *held = h->pcm;
+    int want = dframe, got;
+    switch (take.kind) {
+    case PLAYOUT_PLAY:
+        want = dframe * take.ticks;
+        got = opus_decode(dec, pkt, take.len, held, dframe * PLAYOUT_MAX_TICKS, 0);
+        break;
+    case PLAYOUT_FEC:
+        want = dframe * take.ticks;
+        got = opus_decode(dec, pkt, take.len, held, want, 1);
+        break;
+    case PLAYOUT_PLC:
+        got = opus_decode(dec, NULL, 0, held, dframe, 0);
+        break;
+    case PLAYOUT_CARRY:
+        memcpy(mono, held + take.ticks * dframe, (size_t)dframe * sizeof(int16_t));
+        return dframe;
+    default:
+        memset(mono, 0, (size_t)dframe * sizeof(int16_t));
+        return dframe;
+    }
+    if (got < 0) got = 0;
+    if (got < want) memset(held + got, 0, (size_t)(want - got) * sizeof(int16_t));
+    memcpy(mono, held, (size_t)dframe * sizeof(int16_t));
+    return dframe;
+}
 
 static void *playback_main(void *arg) {
     (void)arg;
@@ -671,6 +659,7 @@ static void *playback_main(void *arg) {
     jb_reset();                                         // packets queued while the voice path wasn't up are stale
 
     int16_t mono[480];
+    static held_t held;                                 // a decoded packet's ticks, the later ones wait for their take
     int16_t out[480 * 2];
     uint8_t pkt[MAX_PACKET];
     unsigned periods = 2, win_frames = 0, slow_windows = 0;
@@ -692,27 +681,15 @@ static void *playback_main(void *arg) {
                 if (!pcm) break;
             }
         }
-        int len = 0, mode = 2;
-        int have = jb_take(pkt, &len, &mode);
-        if (g_client_up && jb_started()) { st_inc(&g_tot_live); if (!have) st_inc(&g_tot_starved); }
-        int samples;
-        if (!have) {
-            // Nothing to play yet (priming / idle): emit one frame of silence to keep the clock.
-            samples = dframe;
-            memset(mono, 0, sizeof(mono));
-        } else if (mode == 0) {
-            samples = opus_decode(dec, pkt, len, mono, dframe, 0);
-        } else if (mode == 1) {
-            samples = opus_decode(dec, pkt, len, mono, dframe, 1);   // FEC from next packet
-        } else {
-            samples = opus_decode(dec, NULL, 0, mono, dframe, 0);    // PLC
-        }
-        if (samples < 0) { samples = dframe; memset(mono, 0, sizeof(mono)); }
+        playout_out_t take = jb_take(pkt);
+        if (g_client_up && jb_started()) { st_inc(&g_tot_live); if (take.kind == PLAYOUT_SILENCE) st_inc(&g_tot_starved); }
+        held.dframe = dframe;
+        int samples = decode_take(dec, take, pkt, &held, mono);
 
         st_inc(&g_st_played);
         st_inc(&g_tot_played);
-        { pthread_mutex_lock(&g_jb_lock); int d = jb_depth();
-          if (g_jb_playing) st_umax(&g_st_depth_max, d < 0 ? 0 : (unsigned)d); pthread_mutex_unlock(&g_jb_lock); }
+        { pthread_mutex_lock(&g_jb_lock); int d = playout_depth(&g_play);
+          if (g_play.playing) st_umax(&g_st_depth_max, d < 0 ? 0 : (unsigned)d); pthread_mutex_unlock(&g_jb_lock); }
         if (ich == 2) {
             for (int i = 0; i < samples; i++) { out[2 * i] = mono[i]; out[2 * i + 1] = mono[i]; }
             if (ta.write(pcm, out, (unsigned)samples * 2 * sizeof(int16_t)) != 0) { if (log_throttle(&werr_log, 2)) LOGW("inject write: %s", ta.get_error(pcm)); ta.prepare(pcm); nanosleep(&wbackoff, NULL); }
@@ -755,13 +732,17 @@ static void *playback_main(void *arg) {
 
 void audio_init(int allowed_uid) {
     g_allowed_uid = allowed_uid;
+    playout_init(&g_play);
     if (pthread_create(&g_io_t, NULL, io_main, NULL) == 0) g_io_started = 1;
     else LOGE("audio io thread: %s", strerror(errno));
 }
 
 int audio_tune(int prime, int keep, int period) {
     if (prime < 1 || prime > 8 || keep < 0 || keep > 6 || (period != 240 && period != 480 && period != 960)) return -1;
-    g_jb_prime = prime; g_jb_keep = keep; g_play_period = period;
+    pthread_mutex_lock(&g_jb_lock);
+    g_play.prime = prime; g_play.keep = keep;
+    pthread_mutex_unlock(&g_jb_lock);
+    g_play_period = period;
     LOGI("audio tune: prime=%d keep=%d period=%d", prime, keep, period);
     return 0;
 }
@@ -769,7 +750,23 @@ int audio_tune(int prime, int keep, int period) {
 void audio_stall(int ms) { if (ms > 0 && ms <= 500) g_stall_ms = ms; }
 
 void audio_tune_get(char *buf, size_t n) {
-    snprintf(buf, n, "prime=%d keep=%d period=%d", g_jb_prime, g_jb_keep, g_play_period);
+    pthread_mutex_lock(&g_jb_lock);
+    int prime = g_play.prime, keep = g_play.keep;
+    pthread_mutex_unlock(&g_jb_lock);
+    snprintf(buf, n, "prime=%d keep=%d period=%d", prime, keep, g_play_period);
+}
+
+int audio_frame(int ms) {
+    if (ms != 10 && ms != 20) return -1;
+    if (g_frame_ticks != ms / 10) LOGI("audio frame: %d ms", ms);
+    g_frame_ticks = ms / 10;
+    return 0;
+}
+
+int audio_loss(int percent) {
+    if (percent < 0 || percent > 100) return -1;
+    g_loss = percent;
+    return 0;
 }
 
 void audio_totals(char *buf, size_t n) {
@@ -793,6 +790,7 @@ void audio_call_begin(const audio_cfg_t *cfg) {
     g_tot_peak = 0;
     pthread_mutex_unlock(&g_stats_lock);
     g_cfg = *cfg;
+    g_loss = LOSS_DEFAULT;                     // a new call starts without the phone's report
     jb_reset();
     g_call_running = 1;
     g_cap_started = pthread_create(&g_cap_t, NULL, capture_main, NULL) == 0;

@@ -28,6 +28,10 @@ void audio_totals(char *buf, size_t n);     // since audio_call_begin: frames ca
 int audio_tune(int prime, int keep, int period);
 void audio_tune_get(char *buf, size_t n);
 void audio_stall(int ms);                   // debug: stall the inject loop once (tests self-healing)
+// The length of the packets sent to the client: 10 ms (Bluetooth) or 20 ms (internet). -1 for another value.
+int audio_frame(int ms);
+// The encoder's expected loss in percent (0..100), from the phone's AudioReport. -1 out of range.
+int audio_loss(int percent);
 
 // Stop everything and free resources (daemon exit).
 void audio_shutdown(void);
