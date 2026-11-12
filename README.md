@@ -31,7 +31,7 @@ This repository is the **host side** (the Android app, its root daemon and Magis
 
 ### Hotspot
 
-- **Switched from the client.** On or off, name, password, band, security, hidden name, device limit, and off once nothing uses it.
+- **Switched from the client.** On or off, name, password, band, security, hidden name, and off once nothing uses it.
 - **Devices.** The devices on the hotspot with their data; a blocked device (up to 32) stays connected without internet.
 - **Monthly data limit.** A notice at 80 %, and at the limit the hotspot turns off once.
 - **Hotspot guard.** Two minutes after the client leaves Bluetooth range, the host turns its hotspot off if nothing uses it.
@@ -41,8 +41,8 @@ This repository is the **host side** (the Android app, its root daemon and Magis
 
 ### Clients
 
-- **One client phone.** A host pairs with one Android phone or iPhone over Bluetooth LE (GATT, plus an L2CAP channel for call audio).
-- **Internet mode.** When the client is out of Bluetooth range, the two phones talk through the HermesSIM server. Every envelope is sealed end to end, so the server never sees calls or texts. The host wakes the client by push for a call, a text, a missed call or a notice.
+- **One client phone.** A host pairs with one Android phone or iPhone over Bluetooth LE (GATT, plus an L2CAP channel for call audio); the phone proves the 6-digit code the host shows. They speak HermesSIM protocol 2: every request gets a reply, only the changed parts of the state travel, and a dropped session resumes where it stopped.
+- **Internet mode.** When the client is out of Bluetooth range, the two phones talk through the HermesSIM server. Every message is sealed end to end, so the server never sees calls or texts. The host wakes the client by push for a call, a text, a missed call or a notice.
 - **Up to 4 Macs.** Each Mac has its own Bluetooth service and permissions: the hotspot always, texts and codes and host settings only when the client allows them.
 
 ### Box mode and battery
@@ -77,7 +77,7 @@ Requirements: Android 11 or newer, an unlockable bootloader, Magisk, Bluetooth L
 
 - Host app, daemon and module: `host/release.sh` (needs the Android SDK and NDK and your own signing key in `host/signing/` as `release.jks` and `signing.properties`, gitignored, or the `HERMESSIM_SIGNING_*` environment variables), or the developer loop in [host/README.md](host/README.md).
 - Releases: push a tag `host-v<versionName>` (for example `host-v1.0.0`). The [Release host](.github/workflows/release.yml) workflow builds the signed Magisk zip and publishes the GitHub release. It needs the repository secrets `HERMESSIM_SIGNING_KEYSTORE_B64` (base64 of `release.jks`), `HERMESSIM_SIGNING_STORE_PASSWORD`, `HERMESSIM_SIGNING_KEY_ALIAS` and `HERMESSIM_SIGNING_KEY_PASSWORD`.
-- Protocol shared with the client apps: [protocol/](protocol/) (MIT).
+- Protocols shared with the client apps: [protocol/](protocol/). Protocol 2 for the phones is specified in [protocol/v2/SPEC.md](protocol/v2/SPEC.md); the Mac service keeps the messages of `protocol/hermessim.proto`.
 - Device profiles and the support table: [profiles/](profiles/). Measuring a new phone: [tools/](tools/) (read-only dump and the four live-call experiments).
 
 ## Acknowledgements
@@ -86,4 +86,4 @@ The HermesSIM host is built on the original work of [Mert Eren Karabulut](https:
 
 ## Licence
 
-Host: GPL-3.0-or-later ([LICENSE](LICENSE)). Protocol: MIT ([protocol/LICENSE](protocol/LICENSE)).
+Host: GPL-3.0-or-later ([LICENSE](LICENSE)). Protocol 2: GPL-3.0-or-later or the HermesSIM proprietary licence ([protocol/v2/LICENSE](protocol/v2/LICENSE)). Mac service messages: MIT ([protocol/LICENSE](protocol/LICENSE)).
