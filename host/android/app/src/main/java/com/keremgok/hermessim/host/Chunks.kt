@@ -12,6 +12,14 @@ object Chunks {
     /** Slice bytes per chunk: with the chunk's own fields the envelope stays under a 4096-byte frame. */
     const val SLICE = 4000
     const val MIN_PROTOCOL = 2
+    /**
+     * The largest envelope that goes whole over the internet. The relay takes messages up to 64 KB, and
+     * the seal, base64 and the JSON around it make an envelope about a third larger.
+     */
+    const val INTERNET_WHOLE = 32_000
+
+    /** True when [size] bytes go to a protocol 2 peer as one message, false when they go in chunks. */
+    fun goesWhole(size: Int, bluetooth: Boolean, frame: Int): Boolean = size <= if (bluetooth) frame else INTERNET_WHOLE
 
     fun split(bytes: ByteArray, transferId: Int, slice: Int = SLICE): List<Chunk> {
         val count = (bytes.size + slice - 1) / slice

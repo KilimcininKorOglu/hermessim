@@ -26,7 +26,9 @@ frame and the other side said Hello with version 2 or higher, the sender splits 
 index order and handles the result as if it had arrived in one frame. A receiver keeps at most 4 open transfers,
 at most 64 slices (256 KB) per transfer, and drops a transfer not complete within 30 s. Towards a version 1 peer
 the old rules hold: a too-large `HostStatus` sheds its optional parts, anything else too large is dropped. Over
-the internet (frames up to 64 KB) the sender does not split.
+the internet an envelope of up to 32 000 bytes goes as one message, and a larger one is split the same way: the
+relay closes a connection that sends a message above 64 KB, and the seal, base64 and the JSON event make an
+envelope about a third larger.
 
 Call audio (L2CAP CoC on `AUDIO_PSM`) is a byte stream of `[u16 LE length][u16 seq LE][u8 flags][opus]` packets,
 10 ms each. A sender puts every packet waiting into one write (one L2CAP SDU on Android): a link that carries one SDU per

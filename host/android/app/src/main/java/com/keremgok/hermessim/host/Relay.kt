@@ -308,8 +308,9 @@ object Relay {
     private fun frames(p: Peer, b: Envelope.Builder, whole: ByteArray, seq: Int): List<ByteArray> {
         if (whole.size <= Framing.MAX_FRAME) return listOf(whole)
         if ((protocols[p.id] ?: 1) < Chunks.MIN_PROTOCOL) return listOfNotNull(fitOneFrame(b, whole))
-        // A protocol 2 peer takes it whole: in chunks over Bluetooth, as one message over the internet (64 KB frames).
-        if (p !is Peer.Ble) return listOf(whole)
+        // A protocol 2 peer takes it whole: in chunks over Bluetooth; over the internet as one message while the
+        // relay's 64 KB message can hold it, else in chunks too (a larger message makes the relay close the socket).
+        if (Chunks.goesWhole(whole.size, p is Peer.Ble, Framing.MAX_FRAME)) return listOf(whole)
         val chunks = Chunks.split(whole, seq)
         Log.i(TAG, "${b.bodyCase} is ${whole.size} bytes: sent in ${chunks.size} chunks")
         return chunks.map { Envelope.newBuilder().setChunk(it).build().toByteArray() }
