@@ -1,0 +1,98 @@
+[
+ {
+  "name": "one small DATA frame on the normal stream",
+  "frames": [
+   {
+    "type": 0,
+    "more": false,
+    "stream": 1,
+    "body": "320708ac0212020839"
+   }
+  ],
+  "bytes": "0809320708ac0212020839"
+ },
+ {
+  "name": "a DATA frame that goes on, urgent stream",
+  "frames": [
+   {
+    "type": 0,
+    "more": true,
+    "stream": 0,
+    "body": "010203"
+   }
+  ],
+  "bytes": "2003010203"
+ },
+ {
+  "name": "a 300 byte body takes a two byte length",
+  "frames": [
+   {
+    "type": 0,
+    "more": false,
+    "stream": 2,
+    "body": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+   }
+  ],
+  "bytes": "10ac02000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+ },
+ {
+  "name": "an empty DATA frame",
+  "frames": [
+   {
+    "type": 0,
+    "more": false,
+    "stream": 1,
+    "body": ""
+   }
+  ],
+  "bytes": "0800"
+ },
+ {
+  "name": "CREDIT: 5 messages received, limit 20000",
+  "frames": [
+   {
+    "type": 1,
+    "more": false,
+    "stream": 0,
+    "body": "05a09c01"
+   }
+  ],
+  "bytes": "400405a09c01"
+ },
+ {
+  "name": "RESET with reason 2",
+  "frames": [
+   {
+    "type": 2,
+    "more": false,
+    "stream": 0,
+    "body": "02"
+   }
+  ],
+  "bytes": "800102"
+ },
+ {
+  "name": "three frames in one write",
+  "frames": [
+   {
+    "type": 0,
+    "more": false,
+    "stream": 0,
+    "body": "aa"
+   },
+   {
+    "type": 1,
+    "more": false,
+    "stream": 0,
+    "body": "018040"
+   },
+   {
+    "type": 0,
+    "more": false,
+    "stream": 1,
+    "body": "bbcc"
+   }
+  ],
+  "bytes": "0001aa40030180400802bbcc"
+ }
+]

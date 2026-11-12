@@ -1,0 +1,97 @@
+[
+ {
+  "name": "battery changed",
+  "text": "state { seq: 300 power { battery: 57 } }",
+  "bytes": "320708ac0212020839"
+ },
+ {
+  "name": "battery at 0 is sent, not left out",
+  "text": "state { seq: 1 power { battery: 0 charging: false } }",
+  "bytes": "32080801120408001000"
+ },
+ {
+  "name": "hello of a phone",
+  "text": "hello { min_version: 2 max_version: 2 features: 254 role: ROLE_PHONE install_id: \"0123456789abcdef\" app_version: \"1.0.0\" device_model: \"Pixel 8\" state_mark { epoch: 7 seq: 41 } text_cursor: 12 call_cursor: 3 }",
+  "bytes": "0a350802100218fe0120012a10303132333435363738396162636465663205312e302e303a07506978656c20384a0408071029500c5803"
+ },
+ {
+  "name": "hello that resumes",
+  "text": "hello { min_version: 2 max_version: 2 role: ROLE_PHONE install_id: \"0123456789abcdef\" resume { session_id: 9 received: 17 } }",
+  "bytes": "0a1e0802100220012a1030313233343536373839616263646566420408091011"
+ },
+ {
+  "name": "welcome",
+  "text": "welcome { version: 2 features: 126 session_id: 9 epoch: 7 audio_psm: 193 host { app_version: \"1.0.0\" device_model: \"Redmi Note 12\" hotspot { bands: HOTSPOT_BAND_2G bands: HOTSPOT_BAND_5G securities: HOTSPOT_SECURITY_WPA2 max_clients: 10 call_pause: true } max_blocked_numbers: 50 max_mac_peers: 4 } }",
+  "bytes": "12340802107e180930073a270a05312e302e30120d5265646d69204e6f7465203132220b0a020102120101180a30012832300440c101"
+ },
+ {
+  "name": "refused: not paired",
+  "text": "refuse { code: CODE_NOT_PAIRED }",
+  "bytes": "1a020803"
+ },
+ {
+  "name": "dial on the default line",
+  "text": "request { id: 4 age_ms: 120 dial { number: \"+905551112233\" client_ref: \"ref-ref-ref-ref-\" } }",
+  "bytes": "2227080410785a210a0d2b3930353535313131323233331a107265662d7265662d7265662d7265662d"
+ },
+ {
+  "name": "dial on line 0",
+  "text": "request { id: 5 dial { number: \"112\" line: 0 } }",
+  "bytes": "220b08055a070a033131321000"
+ },
+ {
+  "name": "the call started",
+  "text": "reply { id: 4 code: CODE_OK dial { call: 88 } }",
+  "bytes": "2a080804100152020858"
+ },
+ {
+  "name": "wrong PIN, two tries left",
+  "text": "reply { id: 6 code: CODE_WRONG_PIN args: 2 }",
+  "bytes": "2a07080610141a0104"
+ },
+ {
+  "name": "a negative argument",
+  "text": "reply { id: 7 code: CODE_FAILED args: -3 }",
+  "bytes": "2a070807100b1a0105"
+ },
+ {
+  "name": "turn roaming off on line 1",
+  "text": "request { id: 8 set_line { line: 1 roaming: false } }",
+  "bytes": "2209080882010408011800"
+ },
+ {
+  "name": "keypad tones",
+  "text": "request { id: 9 send_tones { call: 88 digits: \"1234#\" tone_ms: 120 gap_ms: 80 } }",
+  "bytes": "221108096a0d08581205313233342318782050"
+ },
+ {
+  "name": "a text came in",
+  "text": "event { seq: 13 text_in { from: \"+905551112233\" body: \"Kodunuz 482913 ş€\" line: 1 at_ms: 1794466000000 } }",
+  "bytes": "3a32080d1a2e0a0d2b39303535353131313232333312144b6f64756e757a2034383239313320c59fe282ac18012080d988f49c34"
+ },
+ {
+  "name": "a text was delivered",
+  "text": "event { seq: 14 text_status { text: 14 client_ref: \"ref-ref-ref-ref-\" phase: TEXT_PHASE_DELIVERED } }",
+  "bytes": "3a1a080e2216080e12107265662d7265662d7265662d7265662d1803"
+ },
+ {
+  "name": "an incoming call rings",
+  "text": "event { seq: 4 call { call: 89 phase: CALL_PHASE_RINGING incoming: true number: \"+905551112233\" line: 0 phase_since_ms: 1794466001000 } }",
+  "bytes": "3a200804121c085910011801220d2b39303535353131313232333330e8e088f49c34"
+ },
+ {
+  "name": "texts stored",
+  "text": "event_ack { texts_up_to: 14 }",
+  "bytes": "4202080e"
+ },
+ {
+  "name": "replay end with one live call",
+  "text": "replay_end { text_cursor: 14 call_cursor: 4 live_calls: 89 }",
+  "bytes": "4a07080e10041a0159"
+ },
+ {
+  "name": "signal bars of two lines",
+  "text": "state { seq: 301 signal { bars: 3 bars: 0 } }",
+  "bytes": "320908ad022a040a020300"
+ }
+]

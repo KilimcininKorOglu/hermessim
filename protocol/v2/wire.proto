@@ -1,0 +1,732 @@
+// HermesSIM wire protocol, version 2. Copyright (C) 2026 Kerem Gök.
+// SPDX-License-Identifier: GPL-3.0-or-later OR LicenseRef-HermesSIM-Proprietary
+// The rules that this schema cannot say (frames, credit, resume, pairing) are in SPEC.md.
+syntax = "proto3";
+
+package hermessim.v2;
+
+option java_package = "com.keremgok.hermessim.wire";
+option java_multiple_files = true;
+option swift_prefix = "HW";
+
+// One message of the control channel. A message travels in one or more frames (SPEC.md "Frames").
+message Packet {
+  oneof kind {
+    Hello hello = 1;
+    Welcome welcome = 2;
+    Refuse refuse = 3;
+    Request request = 4;
+    Reply reply = 5;
+    State state = 6;
+    Event event = 7;
+    EventAck event_ack = 8;
+    ReplayEnd replay_end = 9;
+    PairStart pair_start = 10;
+    PairOffer pair_offer = 11;
+    PairProof pair_proof = 12;
+  }
+}
+
+// ---------------------------------------------------------------- session
+
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_PHONE = 1;   // the paired phone: every request
+  ROLE_MAC = 2;     // a Mac the phone allowed: the requests its grants name
+}
+
+// Bits of Hello.features and Welcome.features. A side uses a feature only when both sides set its bit.
+enum Feature {
+  FEATURE_UNSPECIFIED = 0;
+  FEATURE_USSD = 1;
+  FEATURE_HOST_ACTIONS = 2;
+  FEATURE_CALL_RULES = 3;
+  FEATURE_NETWORK_MODE = 4;
+  FEATURE_HOTSPOT_CALL_PAUSE = 5;
+  FEATURE_AUTO_UPDATE = 6;
+  FEATURE_MAC_PEERS = 7;
+}
+
+// The first message of a link, from the side that connected.
+message Hello {
+  uint32 min_version = 1;         // the lowest and highest protocol version this side speaks
+  uint32 max_version = 2;
+  uint64 features = 3;            // bit n is set when this side has Feature n
+  Role role = 4;
+  bytes install_id = 5;           // 16 random bytes made at install: the identity the host pins
+  string app_version = 6;
+  string device_model = 7;
+  Resume resume = 8;              // absent on the first link of a session
+  StateMark state_mark = 9;       // the last State this side applied, absent when it has none
+  uint64 text_cursor = 10;        // the highest text seq this side stored, 0 for none
+  uint64 call_cursor = 11;        // the highest call seq this side applied, 0 for none
+}
+
+// Asks the host to go on with a session after the link came back (SPEC.md "Resume").
+message Resume {
+  uint32 session_id = 1;
+  uint32 received = 2;            // how many of the host's messages arrived whole
+}
+
+message StateMark {
+  uint32 epoch = 1;               // Welcome.epoch of the host run the seq belongs to
+  uint32 seq = 2;
+}
+
+// The host's answer to an accepted Hello.
+message Welcome {
+  uint32 version = 1;             // the version both sides speak from here on
+  uint64 features = 2;
+  uint32 session_id = 3;
+  bool resumed = 4;               // true: the counters of Resume go on; false: a new session
+  uint32 received = 5;            // with resumed: how many of this side's messages arrived whole
+  uint32 epoch = 6;               // changes each time the host app starts
+  HostInfo host = 7;              // what never changes while the host app runs
+  uint32 audio_psm = 8;           // the L2CAP channel of call audio, 0 over the internet
+}
+
+message HostInfo {
+  string app_version = 1;
+  string device_model = 2;
+  string firmware = 3;
+  HotspotLimits hotspot = 4;
+  uint32 max_blocked_numbers = 5;
+  uint32 max_mac_peers = 6;
+}
+
+// What this host's hotspot can do. A value of 0 or an empty list means the setting cannot be changed.
+message HotspotLimits {
+  repeated HotspotBand bands = 1;
+  repeated HotspotSecurity securities = 2;
+  uint32 max_clients = 3;
+  bool hidden_name = 4;
+  bool idle_timer = 5;
+  bool call_pause = 6;
+  bool block_clients = 7;
+}
+
+// The host's answer to a Hello it does not accept. The link stays up for a new Hello or for pairing.
+message Refuse {
+  Code code = 1;
+  uint32 min_version = 2;         // with CODE_VERSION: what the host speaks
+  uint32 max_version = 3;
+}
+
+// ---------------------------------------------------------------- pairing (SPEC.md "Pairing")
+
+message PairStart {
+  bytes public_key = 1;           // the phone's X25519 key for this attempt
+}
+
+message PairOffer {
+  bytes public_key = 1;           // the host's X25519 key for this attempt
+  bytes salt = 2;                 // 16 random bytes
+  uint32 tries_left = 3;
+}
+
+message PairProof {
+  bytes proof = 1;                // HMAC-SHA-256 over the transcript and the code the host shows
+}
+
+// ---------------------------------------------------------------- requests and replies
+
+// Every result of a request, a refused Hello and a refused pairing. Values are never reused.
+enum Code {
+  CODE_UNSPECIFIED = 0;
+  CODE_OK = 1;
+  CODE_VERSION = 2;               // no protocol version in common
+  CODE_NOT_PAIRED = 3;
+  CODE_PAIRING_CLOSED = 4;        // the host shows no pairing code now
+  CODE_PAIRING_WRONG = 5;         // wrong proof; args[0] = tries left
+  CODE_NOT_ALLOWED = 6;           // this role may not make the request
+  CODE_UNKNOWN_REQUEST = 7;       // the host does not know the request
+  CODE_BAD_VALUE = 8;             // args[0] = the field number of the value
+  CODE_TOO_OLD = 9;               // Request.age_ms is above what the request allows
+  CODE_BUSY = 10;                 // the same kind of request is still running
+  CODE_FAILED = 11;               // the phone system refused; args[0] = its error number when it gave one
+  CODE_IN_CALL = 12;              // not possible during a call
+  CODE_NO_SUCH_CALL = 13;
+  CODE_NO_SUCH_LINE = 14;
+  CODE_LINE_OFF = 15;
+  CODE_LINE_LOCKED = 16;
+  CODE_NO_SERVICE = 17;
+  CODE_CALL_TEST_NEEDED = 18;     // calls are not relayed until the call test passes
+  CODE_ESIM_STAYS_ON = 19;        // this eSIM cannot be turned off
+  CODE_WRONG_PIN = 20;            // args[0] = tries left
+  CODE_HOTSPOT_NEEDS_DATA = 21;
+  CODE_HOTSPOT_ON_WIFI = 22;      // the host itself uses Wi-Fi
+  CODE_LIMIT_REACHED = 23;        // a list is full; args[0] = its size
+  CODE_BLUETOOTH_ONLY = 24;       // the request carries a secret and came over the internet
+  CODE_UPDATE_NONE = 25;
+  CODE_UPDATE_FAILED = 26;
+  CODE_TEXT_TOO_LONG = 27;
+  CODE_TIMEOUT = 28;              // the network did not answer (USSD, call set-up)
+}
+
+message Request {
+  uint32 id = 1;                  // from 1, unique in the session; the Reply carries it
+  uint32 age_ms = 2;              // how long ago the user asked, set again on each send
+  oneof op {
+    GetState get_state = 10;
+    Dial dial = 11;
+    CallControl call_control = 12;
+    SendTones send_tones = 13;
+    SendText send_text = 14;
+    RunUssd run_ussd = 15;
+    SetLine set_line = 16;
+    UnlockLine unlock_line = 17;
+    SetDefaults set_defaults = 18;
+    SetHotspot set_hotspot = 19;
+    SetHotspotSetup set_hotspot_setup = 20;
+    SetHotspotClient set_hotspot_client = 21;
+    GetHotspotSecret get_hotspot_secret = 22;
+    SetMobileData set_mobile_data = 23;
+    SetHostWifi set_host_wifi = 24;
+    SaveWifi save_wifi = 25;
+    ForgetWifi forget_wifi = 26;
+    SetBox set_box = 27;
+    SetCallRules set_call_rules = 28;
+    HostAction host_action = 29;
+    UpdateControl update_control = 30;
+    GetLog get_log = 31;
+    SetRemote set_remote = 32;
+    OpenAudioPath open_audio_path = 33;
+    CallTest call_test = 34;
+    OpenPeerWindow open_peer_window = 35;
+    SetPeer set_peer = 36;
+  }
+}
+
+message Reply {
+  uint32 id = 1;
+  Code code = 2;
+  repeated sint64 args = 3;       // the numbers a Code names
+  oneof result {
+    DialResult dial = 10;
+    TextQueued text = 11;
+    UssdAnswer ussd = 12;
+    HotspotSecret hotspot_secret = 13;
+    LogPart log = 14;
+    AudioPath audio_path = 15;
+  }
+}
+
+// Asks for whole groups again. An empty list means every group.
+message GetState {
+  repeated uint32 groups = 1;     // field numbers of State
+}
+
+// ---------------------------------------------------------------- calls
+
+message Dial {
+  string number = 1;
+  optional uint32 line = 2;       // absent: the host's default line for calls
+  bytes client_ref = 3;           // 16 bytes the phone chose; the call's events repeat it
+}
+
+message DialResult {
+  uint64 call = 1;
+}
+
+enum CallVerb {
+  CALL_VERB_UNSPECIFIED = 0;
+  CALL_VERB_ANSWER = 1;
+  CALL_VERB_END = 2;              // rejects a ringing call, ends any other
+  CALL_VERB_HOLD = 3;
+  CALL_VERB_RESUME = 4;
+}
+
+message CallControl {
+  uint64 call = 1;
+  CallVerb verb = 2;
+}
+
+// Keypad tones, played in order on the call.
+message SendTones {
+  uint64 call = 1;
+  string digits = 2;              // 0-9, *, #, A-D
+  uint32 tone_ms = 3;             // 0: the host's default length
+  uint32 gap_ms = 4;
+}
+
+enum CallPhase {
+  CALL_PHASE_UNSPECIFIED = 0;
+  CALL_PHASE_RINGING = 1;         // incoming, not answered
+  CALL_PHASE_DIALING = 2;         // outgoing, not answered
+  CALL_PHASE_ACTIVE = 3;
+  CALL_PHASE_HELD = 4;
+  CALL_PHASE_ENDED = 5;
+}
+
+enum CallEnd {
+  CALL_END_UNSPECIFIED = 0;
+  CALL_END_LOCAL = 1;             // ended from this side
+  CALL_END_REMOTE = 2;
+  CALL_END_MISSED = 3;
+  CALL_END_REJECTED = 4;
+  CALL_END_BUSY = 5;
+  CALL_END_FAILED = 6;
+  CALL_END_BLOCKED = 7;           // a call rule refused it
+  CALL_END_NOT_RELAYED = 8;       // the call test has not passed
+}
+
+// The state of one call. A new CallState of the same call replaces the one before.
+message CallState {
+  uint64 call = 1;
+  CallPhase phase = 2;
+  bool incoming = 3;
+  string number = 4;              // empty for a hidden number
+  uint32 line = 5;
+  uint64 phase_since_ms = 6;      // host wall clock when the call entered this phase; kept in a replay
+  CallEnd end = 7;                // with CALL_PHASE_ENDED
+  bytes client_ref = 8;           // Dial.client_ref of an outgoing call
+}
+
+message CallTest {
+  bool run = 1;                   // true starts the test on a live call, false stops it
+  uint64 call = 2;
+}
+
+// ---------------------------------------------------------------- texts
+
+message SendText {
+  bytes client_ref = 1;           // 16 bytes the phone chose; a resent request with the same ref sends nothing twice
+  string to = 2;
+  string body = 3;
+  optional uint32 line = 4;       // absent: the host's default line for texts
+}
+
+message TextQueued {
+  uint64 text = 1;                // the seq under which TextStatus events follow
+}
+
+message TextIn {
+  string from = 1;
+  string body = 2;
+  uint32 line = 3;
+  uint64 at_ms = 4;               // host wall clock when the text arrived
+}
+
+enum TextPhase {
+  TEXT_PHASE_UNSPECIFIED = 0;
+  TEXT_PHASE_QUEUED = 1;
+  TEXT_PHASE_SENT = 2;            // the network took it
+  TEXT_PHASE_DELIVERED = 3;       // the network reported delivery
+  TEXT_PHASE_FAILED = 4;
+}
+
+// Phases only move forward, with one exception: DELIVERED may follow FAILED when the report comes late.
+message TextStatus {
+  uint64 text = 1;
+  bytes client_ref = 2;
+  TextPhase phase = 3;
+  sint32 error = 4;               // with TEXT_PHASE_FAILED: the phone system's number, 0 when it gave none
+}
+
+message RunUssd {
+  uint32 line = 1;
+  string code = 2;
+}
+
+message UssdAnswer {
+  string text = 1;
+}
+
+// ---------------------------------------------------------------- lines (SIMs)
+
+enum NetworkCeiling {
+  NETWORK_CEILING_UNSPECIFIED = 0;
+  NETWORK_CEILING_NONE = 1;       // every network the modem has
+  NETWORK_CEILING_4G = 2;
+  NETWORK_CEILING_3G = 3;
+}
+
+enum LineLock {
+  LINE_LOCK_UNSPECIFIED = 0;
+  LINE_LOCK_OPEN = 1;
+  LINE_LOCK_PIN = 2;
+  LINE_LOCK_PUK = 3;
+  LINE_LOCK_DEAD = 4;             // no tries left
+}
+
+// One setting of one line per request: the reply then says exactly what happened to it.
+message SetLine {
+  uint32 line = 1;
+  oneof setting {
+    bool enabled = 2;
+    bool roaming = 3;
+    NetworkCeiling ceiling = 4;
+  }
+}
+
+message UnlockLine {
+  uint32 line = 1;
+  string pin = 2;
+  string puk = 3;                 // with a PUK lock: pin is the new PIN
+}
+
+// Which line carries what when a request names none. An absent field stays as it is.
+message SetDefaults {
+  optional uint32 data_line = 1;
+  optional uint32 call_line = 2;
+  optional uint32 text_line = 3;
+}
+
+message Line {
+  uint32 line = 1;                // the id every other message uses; stable while the SIM stays in the host
+  uint32 slot = 2;
+  string carrier = 3;
+  string number = 4;
+  bool enabled = 5;
+  bool embedded = 6;              // an eSIM
+  LineLock lock = 7;
+  optional uint32 tries_left = 8; // absent: the modem does not say
+  bool roaming_allowed = 9;
+  bool roaming_now = 10;
+  bool volte = 11;
+  NetworkCeiling ceiling = 12;
+  repeated NetworkCeiling ceilings = 13;   // empty: this modem cannot set one
+  string country = 14;            // ISO 3166-1 alpha-2 of the SIM, lowercase
+}
+
+// ---------------------------------------------------------------- hotspot
+
+enum HotspotBand {
+  HOTSPOT_BAND_UNSPECIFIED = 0;
+  HOTSPOT_BAND_2G = 1;
+  HOTSPOT_BAND_5G = 2;
+  HOTSPOT_BAND_6G = 3;
+  HOTSPOT_BAND_ANY = 4;
+}
+
+enum HotspotSecurity {
+  HOTSPOT_SECURITY_UNSPECIFIED = 0;
+  HOTSPOT_SECURITY_WPA2 = 1;
+  HOTSPOT_SECURITY_WPA3 = 2;
+  HOTSPOT_SECURITY_WPA2_WPA3 = 3;
+  HOTSPOT_SECURITY_OPEN = 4;
+}
+
+enum HotspotPhase {
+  HOTSPOT_PHASE_UNSPECIFIED = 0;
+  HOTSPOT_PHASE_OFF = 1;
+  HOTSPOT_PHASE_STARTING = 2;
+  HOTSPOT_PHASE_ON = 3;
+  HOTSPOT_PHASE_PAUSED = 4;       // off for a call's audio, comes back after it
+  HOTSPOT_PHASE_FAILED = 5;       // the last start failed and nothing switched it since
+}
+
+message SetHotspot {
+  bool on = 1;
+  optional uint32 off_when_unused_s = 2;   // absent: as it is; 0: never
+}
+
+// The hotspot's settings. An absent field stays as it is.
+message SetHotspotSetup {
+  optional string name = 1;
+  optional string passphrase = 2;          // Bluetooth only
+  optional HotspotBand band = 3;
+  optional HotspotSecurity security = 4;
+  optional bool hidden = 5;
+  optional uint32 max_clients = 6;         // 0: no limit
+  optional uint64 month_limit_bytes = 7;   // 0: no limit
+  optional bool pause_in_calls = 8;
+}
+
+message SetHotspotClient {
+  bytes mac = 1;                  // 6 bytes
+  bool blocked = 2;
+}
+
+message GetHotspotSecret {}
+
+// Bluetooth only.
+message HotspotSecret {
+  string passphrase = 1;
+}
+
+message Hotspot {
+  HotspotPhase phase = 1;
+  string name = 2;
+  HotspotBand band = 3;
+  HotspotSecurity security = 4;
+  bool hidden = 5;
+  uint32 max_clients = 6;
+  uint32 off_when_unused_s = 7;
+  uint64 month_limit_bytes = 8;
+  uint64 month_used_bytes = 9;
+  bool pause_in_calls = 10;
+  uint32 frequency_mhz = 11;      // while on, 0 when the host does not know it
+}
+
+message HotspotClient {
+  bytes mac = 1;
+  string name = 2;
+  bool blocked = 3;
+  bool connected = 4;
+  uint64 used_bytes = 5;
+}
+
+message HotspotClients {
+  repeated HotspotClient clients = 1;
+}
+
+// ---------------------------------------------------------------- host settings
+
+message SetMobileData {
+  bool on = 1;
+}
+
+// The host joins a saved Wi-Fi network when the phone is away.
+message SetHostWifi {
+  bool use_when_away = 1;
+}
+
+// Bluetooth only.
+message SaveWifi {
+  string name = 1;
+  string passphrase = 2;
+}
+
+message ForgetWifi {
+  string name = 1;
+}
+
+message HostWifi {
+  bool use_when_away = 1;
+  string joined = 2;              // the network the host is on, empty for none
+  repeated string saved = 3;
+}
+
+// The box settings. An absent field stays as it is.
+message SetBox {
+  optional bool box_mode = 1;
+  optional uint32 charge_limit = 2;        // percent: 60, 80 or 100
+}
+
+message Power {
+  optional uint32 battery = 1;    // percent
+  optional bool charging = 2;
+  optional bool box_mode = 3;
+  optional uint32 charge_limit = 4;
+  optional bool limit_undone = 5; // the phone system keeps undoing the charge limit
+}
+
+enum Uplink {
+  UPLINK_UNSPECIFIED = 0;
+  UPLINK_NONE = 1;
+  UPLINK_MOBILE = 2;
+  UPLINK_WIFI = 3;
+}
+
+message Network {
+  bool mobile_data = 1;
+  Uplink uplink = 2;
+  uint32 data_line = 3;
+  uint32 call_line = 4;
+  uint32 text_line = 5;
+  bool in_call = 6;
+}
+
+// The bars of each line. It has a group of its own and is sent at most twice a minute (SPEC.md "State").
+message Signal {
+  repeated uint32 bars = 1;       // 0-4, in the order of Lines.lines
+}
+
+message Lines {
+  repeated Line lines = 1;
+}
+
+message SetCallRules {
+  CallRules rules = 1;
+}
+
+message CallRules {
+  repeated string blocked = 1;
+  bool block_hidden = 2;
+  string busy_reply = 3;          // empty: no reply text
+}
+
+enum HostVerb {
+  HOST_VERB_UNSPECIFIED = 0;
+  HOST_VERB_REGISTER_AGAIN = 1;   // airplane mode for 5 s
+  HOST_VERB_RESTART = 2;
+}
+
+message HostAction {
+  HostVerb verb = 1;
+}
+
+enum UpdateVerb {
+  UPDATE_VERB_UNSPECIFIED = 0;
+  UPDATE_VERB_CHECK = 1;
+  UPDATE_VERB_INSTALL = 2;
+  UPDATE_VERB_LATER = 3;
+  UPDATE_VERB_AUTO_ON = 4;
+  UPDATE_VERB_AUTO_OFF = 5;
+}
+
+message UpdateControl {
+  UpdateVerb verb = 1;
+}
+
+enum UpdatePhase {
+  UPDATE_PHASE_UNSPECIFIED = 0;
+  UPDATE_PHASE_NONE = 1;          // the host runs the newest version it knows
+  UPDATE_PHASE_AVAILABLE = 2;
+  UPDATE_PHASE_DOWNLOADING = 3;
+  UPDATE_PHASE_READY = 4;
+  UPDATE_PHASE_INSTALLING = 5;
+  UPDATE_PHASE_FAILED = 6;
+}
+
+message Update {
+  UpdatePhase phase = 1;
+  string version = 2;
+  string notes = 3;
+  bool automatic = 4;
+}
+
+// The host log, scrubbed. A long log comes as several replies to the one request, on the bulk stream.
+message GetLog {
+  uint32 max_bytes = 1;
+}
+
+message LogPart {
+  string text = 1;
+  bool last = 2;
+}
+
+enum VoiceTier {
+  VOICE_TIER_UNSPECIFIED = 0;
+  VOICE_TIER_UNKNOWN = 1;         // no call test yet
+  VOICE_TIER_WORKS = 2;
+  VOICE_TIER_ONE_WAY = 3;
+  VOICE_TIER_SILENT = 4;
+  VOICE_TIER_HOST_RINGS = 5;      // audio works but the host phone is not silent
+}
+
+message Voice {
+  VoiceTier tier = 1;
+  bool test_running = 2;
+  string profile = 3;             // the device profile the host uses for call audio
+}
+
+// ---------------------------------------------------------------- internet mode
+
+// Bluetooth only. Hands the host the keys of internet mode, or turns it off.
+message SetRemote {
+  bool on = 1;
+  bytes room_key = 2;             // 32 bytes
+  bytes push_key = 3;             // 32 bytes
+}
+
+message Remote {
+  bool on = 1;
+  bool host_online = 2;           // the host reaches the relay
+}
+
+// A call's audio over the internet: each side names where the other sends to.
+message OpenAudioPath {
+  uint64 call = 1;
+  bytes address = 2;              // 4 or 16 bytes
+  uint32 port = 3;
+}
+
+message AudioPath {
+  bytes address = 1;
+  uint32 port = 2;
+}
+
+// ---------------------------------------------------------------- Mac peers
+
+message OpenPeerWindow {
+  bool open = 1;                  // the host takes a new Mac for 120 s
+}
+
+message SetPeer {
+  bytes install_id = 1;
+  oneof change {
+    bool remove = 2;
+    PeerGrants grants = 3;
+  }
+}
+
+message PeerGrants {
+  bool texts = 1;                 // may show texts and codes
+  bool control = 2;               // may change host settings
+}
+
+message Peer {
+  bytes install_id = 1;
+  string name = 2;
+  PeerGrants grants = 3;
+  bool connected = 4;
+}
+
+message Peers {
+  repeated Peer peers = 1;
+  bool window_open = 2;
+}
+
+// ---------------------------------------------------------------- state
+
+// The groups that changed since the State before. A group that is present replaces the receiver's copy of it;
+// in Power, an absent field stays as it is. A receiver that sees a gap in seq asks with GetState.
+message State {
+  uint32 seq = 1;                 // from 1 in each epoch, one higher with every State
+  Power power = 2;
+  Network network = 3;
+  Lines lines = 4;
+  Signal signal = 5;
+  Hotspot hotspot = 6;
+  HotspotClients hotspot_clients = 7;
+  HostWifi wifi = 8;
+  Update update = 9;
+  CallRules rules = 10;
+  Voice voice = 11;
+  Remote remote = 12;
+  Peers peers = 13;
+}
+
+// ---------------------------------------------------------------- events
+
+enum NoticeKind {
+  NOTICE_KIND_UNSPECIFIED = 0;
+  NOTICE_KIND_BATTERY_LOW = 1;
+  NOTICE_KIND_BATTERY_CRITICAL = 2;
+  NOTICE_KIND_LINE_LOCKED = 3;
+  NOTICE_KIND_DATA_LIMIT_NEAR = 4;
+  NOTICE_KIND_DATA_LIMIT_REACHED = 5;
+  NOTICE_KIND_UPDATE_READY = 6;
+}
+
+message Notice {
+  NoticeKind kind = 1;
+  optional uint32 line = 2;
+  sint64 value = 3;               // the percent or the bytes the kind is about
+  uint64 at_ms = 4;
+}
+
+// Something that happened on the host. Texts and calls have seq numbers the host keeps on disk.
+message Event {
+  uint64 seq = 1;                 // texts and calls count apart; 0 for a notice
+  oneof what {
+    CallState call = 2;
+    TextIn text_in = 3;
+    TextStatus text_status = 4;
+    Notice notice = 5;
+  }
+}
+
+// "I stored every text up to this seq." The host then forgets them.
+message EventAck {
+  uint64 texts_up_to = 1;
+}
+
+// Ends the replay after a Welcome: every call that is live now and every text above the cursor was sent.
+message ReplayEnd {
+  uint64 text_cursor = 1;         // the highest text seq the host has
+  uint64 call_cursor = 2;
+  repeated uint64 live_calls = 3; // a call the receiver holds that is not here has ended
+}

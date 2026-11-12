@@ -1,0 +1,22 @@
+HermesSIM wire protocol: schema, specification and test vectors
+Copyright (C) 2026 Kerem Gök
+
+The files in this directory are dual-licensed.
+
+1. GNU General Public License, version 3 or (at your option) any later version
+
+   You may use, copy, change and distribute these files under the terms of the
+   GNU General Public License as published by the Free Software Foundation,
+   either version 3 of the License, or (at your option) any later version.
+   These files come WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+   Public License for more details: <https://www.gnu.org/licenses/gpl-3.0.html>.
+
+2. HermesSIM proprietary licence
+
+   Any use that does not follow the terms of licence 1 needs a separate written
+   licence from the copyright holder. The HermesSIM client apps are built and
+   distributed by the copyright holder under such a licence. All rights not
+   granted by licence 1 are reserved.
+
+SPDX-License-Identifier: GPL-3.0-or-later OR LicenseRef-HermesSIM-Proprietary
