@@ -1,0 +1,100 @@
+[
+ {
+  "name": "a phone joins room slot 0",
+  "type": 1,
+  "slot": 0,
+  "body": "02000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "bytes": "010002000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+ },
+ {
+  "name": "a host joins room slot 3",
+  "type": 1,
+  "slot": 3,
+  "body": "01000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "bytes": "010301000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+ },
+ {
+  "name": "joined, the other side is there",
+  "type": 2,
+  "slot": 0,
+  "body": "01",
+  "bytes": "020001"
+ },
+ {
+  "name": "joined, alone in the room",
+  "type": 2,
+  "slot": 1,
+  "body": "00",
+  "bytes": "020100"
+ },
+ {
+  "name": "the other side came",
+  "type": 3,
+  "slot": 0,
+  "body": "01",
+  "bytes": "030001"
+ },
+ {
+  "name": "the other side left",
+  "type": 3,
+  "slot": 2,
+  "body": "00",
+  "bytes": "030200"
+ },
+ {
+  "name": "leave room slot 1",
+  "type": 4,
+  "slot": 1,
+  "body": "",
+  "bytes": "0401"
+ },
+ {
+  "name": "data for the room in slot 0",
+  "type": 5,
+  "slot": 0,
+  "body": "0400000000000000000102030405060708090a0b0c0d0e0f10111213",
+  "bytes": "05000400000000000000000102030405060708090a0b0c0d0e0f10111213"
+ },
+ {
+  "name": "a text push",
+  "type": 6,
+  "slot": 0,
+  "body": "0007000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f02203566316330623865326137643463366239653366316132623363346435653666000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021222324252627",
+  "bytes": "06000007000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f02203566316330623865326137643463366239653366316132623363346435653666000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021222324252627"
+ },
+ {
+  "name": "a call push without a collapse id",
+  "type": 6,
+  "slot": 0,
+  "body": "0008000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d",
+  "bytes": "06000008000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d"
+ },
+ {
+  "name": "the push went out",
+  "type": 7,
+  "slot": 0,
+  "body": "000700",
+  "bytes": "0700000700"
+ },
+ {
+  "name": "no phone registered for the push",
+  "type": 7,
+  "slot": 0,
+  "body": "000801",
+  "bytes": "0700000801"
+ },
+ {
+  "name": "replaced by a newer socket of the same role",
+  "type": 8,
+  "slot": 0,
+  "body": "0001",
+  "bytes": "08000001"
+ },
+ {
+  "name": "a frame the server does not take",
+  "type": 9,
+  "slot": 0,
+  "body": "0001",
+  "bytes": "09000001"
+ }
+]

@@ -1,0 +1,111 @@
+[
+ {
+  "seal": [
+   {
+    "name": "a sealed push",
+    "push_key": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+    "nonce": "000102030405060708090a0b",
+    "plain": "0000000000000005000001a1ce822c803a0408011200",
+    "counter": 5,
+    "sent_ms": 1794466000000,
+    "packet": "3a0408011200",
+    "sealed": "000102030405060708090a0b79cc1674a92aecb203f20c0814e9c72ea4c1de65f0f952c7e34edd900cc0f4f6954adb1433f7"
+   }
+  ],
+  "collapse": [
+   {
+    "name": "collapse id of text-14",
+    "push_key": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+    "id": "text-14",
+    "collapse_id": "1ca38d22dec335011ddc9f286c0714ef"
+   },
+   {
+    "name": "collapse id of notice-3-1",
+    "push_key": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+    "id": "notice-3-1",
+    "collapse_id": "e81ebf6de3bb46b6cd3f677165cbe403"
+   },
+   {
+    "name": "collapse id of basic-89",
+    "push_key": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+    "id": "basic-89",
+    "collapse_id": "c7f2b065d58bffa99142f0e38b17cca5"
+   }
+  ],
+  "window": [
+   {
+    "name": "in order",
+    "counters": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "accepted": [
+     true,
+     true,
+     true,
+     true
+    ]
+   },
+   {
+    "name": "out of order within the window",
+    "counters": [
+     5,
+     3,
+     4,
+     2
+    ],
+    "accepted": [
+     true,
+     true,
+     true,
+     true
+    ]
+   },
+   {
+    "name": "a repeat is refused",
+    "counters": [
+     7,
+     7,
+     6,
+     6
+    ],
+    "accepted": [
+     true,
+     false,
+     true,
+     false
+    ]
+   },
+   {
+    "name": "64 below the top is too old",
+    "counters": [
+     100,
+     37,
+     36
+    ],
+    "accepted": [
+     true,
+     true,
+     false
+    ]
+   },
+   {
+    "name": "a big jump clears the window",
+    "counters": [
+     3,
+     200,
+     3,
+     199
+    ],
+    "accepted": [
+     true,
+     true,
+     false,
+     true
+    ]
+   }
+  ]
+ }
+]

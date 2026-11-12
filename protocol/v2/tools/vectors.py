@@ -187,6 +187,193 @@ def pairing_cases() -> list[dict]:
     }]
 
 
+# ---------------------------------------------------------------- internet path (protocol/README.md)
+
+SALT = b"hermes-remote-v1"
+JOIN, JOINED, PEER, LEAVE, RELAY_DATA, PUSH, PUSH_RESULT, KICKED, ERROR = range(1, 10)
+HS1, HS2, HS3, SEAL = 1, 2, 3, 4
+PUSH_KINDS = {"call": 1, "sms": 2, "note": 3, "notice": 4}
+
+
+def derive(key: bytes, info: str) -> bytes:
+    """The keys of a room or push key: HKDF-SHA-256, salt "hermes-remote-v1"."""
+    return hkdf(key, SALT, info.encode())
+
+
+def rotl(value: int, shift: int) -> int:
+    return ((value << shift) | (value >> (32 - shift))) & 0xFFFFFFFF
+
+
+def chacha_block(key: bytes, counter: int, nonce: bytes) -> bytes:
+    """One ChaCha20 block of RFC 8439."""
+    words = [0x61707865, 0x3320646E, 0x79622D32, 0x6B206574]
+    words += [int.from_bytes(key[i:i + 4], "little") for i in range(0, 32, 4)]
+    words += [counter] + [int.from_bytes(nonce[i:i + 4], "little") for i in range(0, 12, 4)]
+    state = list(words)
+
+    def quarter(a: int, b: int, c: int, d: int) -> None:
+        state[a] = (state[a] + state[b]) & 0xFFFFFFFF; state[d] = rotl(state[d] ^ state[a], 16)
+        state[c] = (state[c] + state[d]) & 0xFFFFFFFF; state[b] = rotl(state[b] ^ state[c], 12)
+        state[a] = (state[a] + state[b]) & 0xFFFFFFFF; state[d] = rotl(state[d] ^ state[a], 8)
+        state[c] = (state[c] + state[d]) & 0xFFFFFFFF; state[b] = rotl(state[b] ^ state[c], 7)
+
+    for _ in range(10):
+        for a, b, c, d in ((0, 4, 8, 12), (1, 5, 9, 13), (2, 6, 10, 14), (3, 7, 11, 15),
+                           (0, 5, 10, 15), (1, 6, 11, 12), (2, 7, 8, 13), (3, 4, 9, 14)):
+            quarter(a, b, c, d)
+    return b"".join(((s + w) & 0xFFFFFFFF).to_bytes(4, "little") for s, w in zip(state, words))
+
+
+def chacha(key: bytes, counter: int, nonce: bytes, data: bytes) -> bytes:
+    stream = b"".join(chacha_block(key, counter + i, nonce) for i in range((len(data) + 63) // 64))
+    return bytes(a ^ b for a, b in zip(data, stream))
+
+
+def poly1305(key: bytes, message: bytes) -> bytes:
+    r = int.from_bytes(key[:16], "little") & 0x0FFFFFFC0FFFFFFC0FFFFFFC0FFFFFFF
+    s = int.from_bytes(key[16:], "little")
+    prime, total = (1 << 130) - 5, 0
+    for i in range(0, len(message), 16):
+        block = message[i:i + 16] + b"\x01"
+        total = (total + int.from_bytes(block, "little")) * r % prime
+    return ((total + s) & ((1 << 128) - 1)).to_bytes(16, "little")
+
+
+def seal(key: bytes, nonce: bytes, plain: bytes, aad: bytes = b"") -> bytes:
+    """ChaCha20-Poly1305 of RFC 8439: ciphertext followed by the 16-byte tag."""
+    cipher = chacha(key, 1, nonce, plain)
+    pad = lambda data: data + bytes(-len(data) % 16)
+    mac_data = pad(aad) + pad(cipher) + len(aad).to_bytes(8, "little") + len(cipher).to_bytes(8, "little")
+    return cipher + poly1305(chacha_block(key, 0, nonce)[:32], mac_data)
+
+
+def relay(kind: int, slot: int, body: bytes) -> bytes:
+    return bytes([kind, slot]) + body
+
+
+def relay_cases() -> list[dict]:
+    token = bytes(range(32))
+    collapse = b"5f1c0b8e2a7d4c6b9e3f1a2b3c4d5e6f"
+    rows = [
+        ("a phone joins room slot 0", JOIN, 0, bytes([2]) + token),
+        ("a host joins room slot 3", JOIN, 3, bytes([1]) + token),
+        ("joined, the other side is there", JOINED, 0, b"\x01"),
+        ("joined, alone in the room", JOINED, 1, b"\x00"),
+        ("the other side came", PEER, 0, b"\x01"),
+        ("the other side left", PEER, 2, b"\x00"),
+        ("leave room slot 1", LEAVE, 1, b""),
+        ("data for the room in slot 0", RELAY_DATA, 0, bytes.fromhex("0400000000000000") + bytes(range(20))),
+        ("a text push", PUSH, 0, (7).to_bytes(2, "big") + token + bytes([PUSH_KINDS["sms"], len(collapse)]) + collapse + bytes(range(40))),
+        ("a call push without a collapse id", PUSH, 0, (8).to_bytes(2, "big") + token + bytes([PUSH_KINDS["call"], 0]) + bytes(range(30))),
+        ("the push went out", PUSH_RESULT, 0, (7).to_bytes(2, "big") + b"\x00"),
+        ("no phone registered for the push", PUSH_RESULT, 0, (8).to_bytes(2, "big") + b"\x01"),
+        ("replaced by a newer socket of the same role", KICKED, 0, (1).to_bytes(2, "big")),
+        ("a frame the server does not take", ERROR, 0, (1).to_bytes(2, "big")),
+    ]
+    return [{"name": name, "type": kind, "slot": slot, "body": body.hex(), "bytes": relay(kind, slot, body).hex()}
+            for name, kind, slot, body in rows]
+
+
+def roomkey_cases() -> list[dict]:
+    rows = []
+    for name, key in (("a room key", bytes(range(32))), ("another room key", bytes(range(100, 132)))):
+        token = derive(key, "room-token")
+        rows.append({"name": name, "key": key.hex(), "room_token": token.hex(),
+                     "room_id": hashlib.sha256(token).hexdigest(), "auth": derive(key, "auth").hex(),
+                     "audio": derive(key, "audio").hex(), "push": derive(key, "push").hex(),
+                     "collapse": derive(key, "collapse").hex()})
+    return rows
+
+
+def tunnel_keys(auth: bytes, shared: bytes) -> tuple[bytes, bytes]:
+    prk = hmac.new(auth, shared, hashlib.sha256).digest()
+    p2h = hmac.new(prk, b"p2h\x01", hashlib.sha256).digest()
+    h2p = hmac.new(prk, b"h2p\x01", hashlib.sha256).digest()
+    return p2h, h2p
+
+
+def sealed(key: bytes, counter: int, plain: bytes) -> bytes:
+    nonce = bytes(4) + counter.to_bytes(8, "big")
+    return bytes([SEAL]) + counter.to_bytes(8, "big") + seal(key, nonce, plain)
+
+
+def tunnel_cases() -> list[dict]:
+    room_key = bytes(range(32))
+    auth = derive(room_key, "auth")
+    base = (9).to_bytes(32, "little")
+    rows = []
+    for name, phone_secret, host_secret in (("a first tunnel", bytes(range(1, 33)), bytes(range(101, 133))),
+                                            ("a second tunnel of the same room", bytes(range(33, 65)), bytes(range(133, 165)))):
+        phone_key, host_key = x25519(phone_secret, base), x25519(host_secret, base)
+        shared = x25519(phone_secret, host_key)
+        assert shared == x25519(host_secret, phone_key)
+        p2h, h2p = tunnel_keys(auth, shared)
+        frames_p, frames_h = bytes.fromhex("0a03010203"), bytes.fromhex("0b0405060708")
+        rows.append({
+            "name": name, "room_key": room_key.hex(), "auth": auth.hex(),
+            "phone_secret": phone_secret.hex(), "host_secret": host_secret.hex(),
+            "hs1": (bytes([HS1]) + phone_key).hex(),
+            "hs2": (bytes([HS2]) + host_key + hmac.new(auth, b"H" + phone_key + host_key, hashlib.sha256).digest()).hex(),
+            "hs3": (bytes([HS3]) + hmac.new(auth, b"P" + phone_key + host_key, hashlib.sha256).digest()).hex(),
+            "shared": shared.hex(), "p2h": p2h.hex(), "h2p": h2p.hex(),
+            "phone_plain": frames_p.hex(), "host_plain": frames_h.hex(),
+            "phone_seal_0": sealed(p2h, 0, frames_p).hex(), "phone_seal_1": sealed(p2h, 1, frames_p).hex(),
+            "host_seal_0": sealed(h2p, 0, frames_h).hex(),
+        })
+    return rows
+
+
+def collapse_id(key: bytes, name: str) -> str:
+    return hmac.new(derive(key, "collapse"), name.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def window(steps: list[int]) -> list[bool]:
+    """The phone's push window: the highest counter seen and a bit for each of the 64 below it."""
+    top, bits, out = -1, 0, []
+    for counter in steps:
+        if counter > top:
+            shift = counter - top
+            bits = ((bits << shift) | 1) & ((1 << 64) - 1) if top >= 0 and shift < 64 else 1
+            top = counter
+            out.append(True)
+        elif top - counter < 64 and not bits >> (top - counter) & 1:
+            bits |= 1 << (top - counter)
+            out.append(True)
+        else:
+            out.append(False)
+    return out
+
+
+def push_cases() -> list[dict]:
+    push_key = bytes(range(64, 96))
+    plain = (5).to_bytes(8, "big") + (1794466000000).to_bytes(8, "big") + bytes.fromhex("3a0408011200")
+    nonce = bytes(range(12))
+    seals = [{"name": "a sealed push", "push_key": push_key.hex(), "nonce": nonce.hex(), "plain": plain.hex(),
+              "counter": 5, "sent_ms": 1794466000000, "packet": "3a0408011200",
+              "sealed": (nonce + seal(derive(push_key, "push"), nonce, plain, b"h2c")).hex()}]
+    collapses = [{"name": f"collapse id of {name}", "push_key": push_key.hex(), "id": name,
+                  "collapse_id": collapse_id(push_key, name)} for name in ("text-14", "notice-3-1", "basic-89")]
+    steps = [
+        ("in order", [0, 1, 2, 3]),
+        ("out of order within the window", [5, 3, 4, 2]),
+        ("a repeat is refused", [7, 7, 6, 6]),
+        ("64 below the top is too old", [100, 37, 36]),
+        ("a big jump clears the window", [3, 200, 3, 199]),
+    ]
+    windows = [{"name": name, "counters": counters, "accepted": window(counters)} for name, counters in steps]
+    return [{"seal": seals, "collapse": collapses, "window": windows}]
+
+
+def check_aead() -> None:
+    """RFC 8439 section 2.8.2."""
+    plain = (b"Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, "
+             b"sunscreen would be it.")
+    out = seal(bytes(range(0x80, 0xA0)), bytes.fromhex("070000004041424344454647"), plain,
+               bytes.fromhex("50515253c0c1c2c3c4c5c6c7"))
+    assert out[:16].hex() == "d31a8d34648e60db7b86afbc53ef7ec2", out[:16].hex()
+    assert out[-16:].hex() == "1ae10b594f09e26a7e902ecbd0600691", out[-16:].hex()
+
+
 def check_x25519() -> None:
     """RFC 7748 section 5.2, first vector."""
     got = x25519(bytes.fromhex("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4"),
@@ -196,9 +383,11 @@ def check_x25519() -> None:
 
 def main() -> None:
     check_x25519()
+    check_aead()
     OUT.mkdir(exist_ok=True)
     files = {"frames": frame_cases(), "messages": message_cases(), "interleave": interleave_cases(),
-             "packets": packet_cases(), "pairing": pairing_cases()}
+             "packets": packet_cases(), "pairing": pairing_cases(), "relay": relay_cases(),
+             "roomkey": roomkey_cases(), "tunnel": tunnel_cases(), "push": push_cases()}
     for name, cases in files.items():
         (OUT / f"{name}.json").write_text(json.dumps(cases, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
         print(f"{name}.json: {len(cases)} cases")
