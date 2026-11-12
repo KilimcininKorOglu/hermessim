@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.2.0",
+    "code": 65,
+    "en": "Scheduled texts: the host keeps a text you scheduled on your phone and sends it at its time, even while your phone is off or far away. Update the HermesSIM app on your phone to 1.2.0 to schedule texts.",
+    "tr": "Zamanlanmış mesajlar: telefonda zamanladığınız mesajı ana cihaz saklar ve zamanı gelince gönderir, telefonunuz kapalı veya uzaktayken de. Mesaj zamanlamak için telefondaki HermesSIM uygulamasını da 1.2.0 sürümüne güncelleyin."
+  },
+  {
     "version": "1.1.0",
     "code": 64,
     "en": "The host speaks a new protocol with the phone and the Mac: a link that drops picks up where it stopped, requests are answered one by one, and call audio over the internet goes straight between the two phones when it can, with a relay over TCP or TLS when a network blocks UDP. A Mac now pairs with a 6-digit code shown on the phone. The host's root service was rewritten. Update the HermesSIM app on your phone and Mac to 1.1.0 too: older apps can't connect to this host.",
