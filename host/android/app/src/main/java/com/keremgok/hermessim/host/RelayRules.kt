@@ -19,7 +19,7 @@ object RequestRules {
     /** Requests that change nothing, or that carry their own guard against a second run (SendText.client_ref). */
     private val ageless = setOf(
         Request.OpCase.SEND_TEXT, Request.OpCase.GET_STATE, Request.OpCase.GET_LOG, Request.OpCase.GET_HOTSPOT_SECRET,
-        Request.OpCase.SCAN_WIFI, Request.OpCase.CALL_TEST_CHECK,
+        Request.OpCase.SCAN_WIFI, Request.OpCase.CALL_TEST_CHECK, Request.OpCase.SCHEDULE_TEXT,
     )
 
     /** The requests a test rig's override of the phone's presence makes the host leave alone. */
@@ -68,6 +68,7 @@ object HelloRules {
     val FEATURES: Long = listOf(
         Feature.FEATURE_USSD, Feature.FEATURE_HOST_ACTIONS, Feature.FEATURE_CALL_RULES, Feature.FEATURE_NETWORK_MODE,
         Feature.FEATURE_HOTSPOT_CALL_PAUSE, Feature.FEATURE_AUTO_UPDATE, Feature.FEATURE_MAC_PEERS,
+        Feature.FEATURE_SCHEDULED_TEXTS,
     ).fold(0L) { bits, f -> bits or (1L shl f.number) }
 
     /** The install id as the host stores it. */

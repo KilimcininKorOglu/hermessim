@@ -197,6 +197,16 @@ object SmsSender {
         return Code.CODE_OK to seq
     }
 
+    /**
+     * A peer's text that will not go out (a scheduled text too late or refused at its time): it gets a seq and
+     * TEXT_PHASE_FAILED under the peer's [ref], so the peer marks it failed.
+     */
+    fun failQueued(ctx: Context, ref: String) {
+        val seq = Events.log(ctx).nextText()
+        synchronized(book) { book.queued(seq, ref) }
+        reached(seq, TextPhase.TEXT_PHASE_FAILED)
+    }
+
     private fun refusal(ctx: Context, to: String, body: String, slot: Int): Code? = when {
         to.isBlank() || body.isEmpty() -> Code.CODE_BAD_VALUE
         slot >= 0 && Sims.active(ctx).none { it.simSlotIndex == slot } -> Code.CODE_LINE_OFF

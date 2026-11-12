@@ -206,6 +206,7 @@ object Relay {
         Sims.watch(app, changed = { Sims.protectNewSims(app); Sims.volteOn(app); Sims.log(app); touch(*lines) },
             radioChanged = { touch(*lines) })
         Sims.attemptsKnown = { touch(StateBook.LINES) }
+        ScheduledTexts.init(app) { touch(StateBook.SCHEDULED, delayMs = 0) }
     }
 
     /** Battery level and charging reach the phone (app and widget) right away, not with the next other change. */

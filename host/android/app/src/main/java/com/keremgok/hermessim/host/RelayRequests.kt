@@ -38,6 +38,8 @@ object Requests {
         Request.OpCase.CALL_CONTROL to ::callControl,
         Request.OpCase.SEND_TONES to ::sendTones,
         Request.OpCase.SEND_TEXT to ::sendText,
+        Request.OpCase.SCHEDULE_TEXT to ::scheduleText,
+        Request.OpCase.CANCEL_SCHEDULED to ::cancelScheduled,
         Request.OpCase.RUN_USSD to ::runUssd,
         Request.OpCase.SET_LINE to ::setLine,
         Request.OpCase.UNLOCK_LINE to ::unlockLine,
@@ -109,6 +111,14 @@ object Requests {
         val (code, seq) = SmsSender.sendFromPeer(app, CallCore.refText(clientRef), to, body, if (hasLine()) line else -1)
         a.answer(code) { reply -> if (code == Code.CODE_OK) reply.setText(TextQueued.newBuilder().setText(seq)) }
     }
+
+    private fun scheduleText(a: Ask) {
+        val refusal = ScheduledTexts.add(a.req.scheduleText) ?: return a.ok()
+        if (refusal.arg != 0L) a.answer(refusal.code, refusal.arg) else a.answer(refusal.code)
+    }
+
+    /** An unknown ref is CODE_OK too: that text already went out. */
+    private fun cancelScheduled(a: Ask) = a.answer(ScheduledTexts.cancel(a.req.cancelScheduled))
 
     /** A Mac answers a text it was given: to its sender, on its line; the phone sees it as TextByHost. */
     private fun macText(a: Ask) = with(a.req.sendText) {

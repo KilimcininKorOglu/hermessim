@@ -115,8 +115,9 @@ class RelayRulesTest {
     }
 
     @Test fun `the host names each of its features with its own bit`() {
-        assertEquals(0xFEL, HelloRules.FEATURES)
+        assertEquals(0x1FEL, HelloRules.FEATURES)
         assertTrue(HelloRules.FEATURES and (1L shl Feature.FEATURE_MAC_PEERS.number) != 0L)
+        assertTrue(HelloRules.FEATURES and (1L shl Feature.FEATURE_SCHEDULED_TEXTS.number) != 0L)
     }
 
     @Test fun `signal bars go at once when a line loses its signal or gets it back`() {

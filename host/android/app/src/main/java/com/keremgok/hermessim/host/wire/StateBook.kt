@@ -116,5 +116,6 @@ class StateBook(val epoch: Int, private val byField: Set<Int> = setOf(POWER)) {
         const val PEERS = 13
         const val HOTSPOT_LIMITS = 14
         const val HOTSPOT_USAGE = 15
+        const val SCHEDULED = 16
     }
 }

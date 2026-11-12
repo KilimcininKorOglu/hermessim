@@ -56,7 +56,7 @@ object StateCore {
  * book; the relay then sends what changed. Main thread.
  */
 object HostState {
-    val ALL: Set<Int> = (StateBook.POWER..StateBook.HOTSPOT_USAGE).toSet()
+    val ALL: Set<Int> = (StateBook.POWER..StateBook.SCHEDULED).toSet()
 
     /** Changes each time the host app starts: a peer's copy of the state from another run is not built on. */
     val epoch: Int = generateSequence { java.security.SecureRandom().nextInt() }.first { it != 0 }
@@ -89,6 +89,7 @@ object HostState {
         StateBook.PEERS to { r -> r.peers().toByteArray() },
         StateBook.HOTSPOT_LIMITS to { r -> Hotspot.limits(r.ctx).toByteArray() },
         StateBook.HOTSPOT_USAGE to { r -> r.usage.toByteArray() },
+        StateBook.SCHEDULED to { _ -> ScheduledTexts.group().toByteArray() },
     )
 
     /**
