@@ -1,10 +1,10 @@
-# hermessimd-rs: HermesSIM host daemon in Rust
+# hermessimd: HermesSIM host daemon
 
-A from-scratch Rust implementation of the Android root daemon that owns the host side of the
+The Android root daemon, written in Rust, that owns the host side of the
 HermesSIM: ALSA call routing, Opus audio over the BLE/L2CAP or TURN bridge, box mode, battery
 care, network blocking, the key escape gesture and the persistent log capture.
 
-The wire behaviour is intentionally identical to the C daemon in `host/daemon/`:
+It replaced the earlier C daemon with the same behaviour:
 
 - control socket: abstract `@hermessimd`, one line per request, same commands and replies;
 - audio socket: abstract `@hermessimd-audio`, `SOCK_SEQPACKET`, `[u16 tick LE][opus]` (a tick is 10 ms);
@@ -12,8 +12,7 @@ The wire behaviour is intentionally identical to the C daemon in `host/daemon/`:
 - same `hermessimd` logcat tag and `DAEMON_UP` / `BOX_ESCAPE` broadcasts;
 - same safe-mode/crash-breadcrumb behaviour and exit codes (3 sound card gone, 10 update).
 
-Status: experimental. The host still ships the C daemon; this one has not run on a device yet.
-It must stay at parity with the C daemon before the host switches to it.
+The Magisk module carries this daemon (`build.sh` output in `out/<abi>/hermessimd`).
 
 ## Features
 
@@ -93,7 +92,7 @@ cargo build --release --target armv7-linux-androideabi
 ```
 
 The binaries are `target/<target>/release/hermessimd`. The Cargo config links with the NDK
-`*-linux-android29-clang` driver and requests 16 KB segment alignment, matching the C module.
+`*-linux-android29-clang` driver and requests 16 KB segment alignment, which Android 15 and later need on 16 KB-page kernels.
 `./build.sh` builds both ABIs and copies them to `out/arm64-v8a/hermessimd` and
 `out/armeabi-v7a/hermessimd`, verifying that every loadable segment is 16 KB-aligned.
 
@@ -115,5 +114,4 @@ outside tests a build error.
 
 ## Licence
 
-GPL-3.0-or-later. The original C daemon and this reimplementation are free software; see
-`LICENSE`. The vendored libopus is BSD-licensed, see `vendor/opus/COPYING`.
+GPL-3.0-or-later, see `LICENSE`. The vendored libopus is BSD-licensed, see `vendor/opus/COPYING`.

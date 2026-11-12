@@ -1,6 +1,0 @@
-/target
-/out
-*.o
-*.a
-*.so
-.DS_Store

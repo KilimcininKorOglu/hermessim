@@ -1,3 +1,6 @@
-out/
-build/
-third_party/
+/target
+/out
+*.o
+*.a
+*.so
+.DS_Store

@@ -194,7 +194,7 @@ Known limit: this stops a device that does not know the code. It does not stop a
 
 ## Test vectors
 
-Each `.json` file in `vectors/` is a JSON list of cases; `playout.txt` is a list of lines, so that the host's C daemon can read it too. `tools/vectors.py` writes them from this document's and `../README.md`'s rules and `protoc`; run it again after a change and commit the result.
+Each `.json` file in `vectors/` is a JSON list of cases; `playout.txt` is a list of lines, so that the host's daemon can read it without a JSON parser. `tools/vectors.py` writes them from this document's and `../README.md`'s rules and `protoc`; run it again after a change and commit the result.
 
 | File | Case fields | What a test does |
 |---|---|---|

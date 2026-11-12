@@ -13,7 +13,7 @@ import org.json.JSONObject
  */
 data class Profile(val id: String, val json: JSONObject, val source: String = "measured") {
     /**
-     * SET lines for hermessimd (see host/daemon/hermessimd.c). Every field is optional: a platform that doesn't use
+     * SET lines for hermessimd (see host/daemon/README.md). Every field is optional: a platform that doesn't use
      * Qualcomm's record config or device mutes leaves them out ("-" clears the daemon's Qualcomm defaults), and
      * "call_controls" describes any other platform's call routing as data: {"<control>": value | [values]}.
      */
