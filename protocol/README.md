@@ -45,7 +45,7 @@ Keep-alive is the WebSocket's own ping and pong. Vectors: `v2/vectors/relay.json
 | `LEAVE` 4 | to the server | empty |
 | `DATA` 5 | both | opaque, at most 16 448 bytes; forwarded unread to the other role of the room |
 | `PUSH` 6 | host to the server | `[u16 request][push room_token, 32 bytes][u8 kind: 1 call, 2 sms, 3 note, 4 notice][u8 collapse length][collapse id][sealed push]` |
-| `PUSH_RESULT` 7 | from the server | `[u16 request][u8 0 sent, 1 no registration, 2 not configured, 3 the push service refused]` |
+| `PUSH_RESULT` 7 | from the server | `[u16 request][u8 0 sent, 1 no registration, 2 not configured, 3 the push service refused, 4 server error, 5 malformed push]` |
 | `KICKED` 8 | from the server | `[u16 code: 1 replaced by a newer socket of the same role]` |
 | `ERROR` 9 | from the server | `[u16 code: 1 bad frame, 2 too many rooms, 3 not in that room, 4 too large]` |
 
