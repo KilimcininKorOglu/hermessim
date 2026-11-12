@@ -56,6 +56,7 @@ object Requests {
         Request.OpCase.SET_PUSH_KEY to ::setPushKey,
         Request.OpCase.OPEN_AUDIO_PATH to ::openAudioPath,
         Request.OpCase.CLOSE_AUDIO_PATH to ::closeAudioPath,
+        Request.OpCase.AUDIO_REPORT to ::audioReport,
         Request.OpCase.CALL_TEST_CHECK to ::callTestCheck,
         Request.OpCase.CALL_TEST_VERDICT to ::callTestVerdict,
         Request.OpCase.OPEN_PEER_WINDOW to ::openPeerWindow,
@@ -260,17 +261,23 @@ object Requests {
         Relay.touchLater(300, StateBook.REMOTE)
     }
 
-    private fun openAudioPath(a: Ask) = with(a.req.openAudioPath) {
-        val crypto = RemoteLink.crypto ?: return@with a.answer(Code.CODE_FAILED)
-        if (address.size() != 4 && address.size() != 16) return@with a.answer(Code.CODE_BAD_VALUE, 2)
-        RemoteCall.offer(app, crypto, address.toByteArray(), port,
+    private fun openAudioPath(a: Ask) {
+        val o = a.req.openAudioPath
+        AudioPathCore.refusal(o)?.let { (code, field) -> return a.answer(code, field.toLong()) }
+        InternetPath.open(app, o,
             opened = { code, path -> a.answer(code) { reply -> path?.let(reply::setAudioPath) } },
             closed = { Relay.audioPathClosed() })
     }
 
     private fun closeAudioPath(a: Ask) {
-        RemoteCall.close("the phone closed it")
+        InternetPath.close("the phone closed it")
         a.ok()
+    }
+
+    /** The phone's numbers set the daemon's expected loss; the answer is the host's numbers since the last report. */
+    private fun audioReport(a: Ask) {
+        AudioPathCore.loss(a.req.audioReport)?.let(Daemon::loss)
+        Daemon.query("AUDIO?") { reply -> a.answer(Code.CODE_OK) { it.setAudioReport(AudioRouter.report(reply)) } }
     }
 
     // ------------------------------------------------------------- the call test

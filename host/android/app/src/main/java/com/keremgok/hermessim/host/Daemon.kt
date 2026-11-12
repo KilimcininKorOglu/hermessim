@@ -146,6 +146,11 @@ object Daemon {
      */
     fun reconnect() = exec.execute { if (started) { if (profile == null) autoTried = false; close(); request("STATUS") } }
 
+    /** The caller's audio packets: 10 ms for Bluetooth, 20 ms for the internet path (AudioRouter). */
+    fun frame(ms: Int) = exec.execute { request("FRAME $ms") }
+    /** The encoder's expected loss in percent, from the phone's AudioReport. */
+    fun loss(percent: Int) = exec.execute { request("LOSS $percent") }
+
     fun screenOff() = exec.execute { request("SCREEN_OFF") }
     fun powerKey(block: Boolean) = exec.execute { request("POWERKEY ${if (block) 1 else 0}") }
     fun netblock(uid: Int, on: Boolean) = exec.execute { request("NETBLOCK $uid ${if (on) 1 else 0}") }

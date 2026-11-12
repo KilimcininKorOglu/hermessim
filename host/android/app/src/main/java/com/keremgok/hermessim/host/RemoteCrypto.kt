@@ -12,13 +12,13 @@ import javax.crypto.spec.SecretKeySpec
 
 /**
  * The keys derived from a room key or a push key (protocol/README.md "Room key", "Push"): HKDF-SHA256 with salt
- * "hermes-remote-v1". Audio and push seal with ChaCha20-Poly1305 as nonce12 || ct; the control path runs in [Tunnel].
+ * "hermes-remote-v1". A push seals with ChaCha20-Poly1305 as nonce12 || ct; the control path runs in [Tunnel], call audio
+ * under keys of its own path (wire/AudioPacket.kt).
  */
 class RemoteCrypto(key: ByteArray) {
     companion object {
         private val SALT = "hermes-remote-v1".toByteArray()
         val H2C = "h2c".toByteArray()
-        val C2H = "c2h".toByteArray()
         private val rng = SecureRandom()
         private const val COLLAPSE_HEX = 32
 
@@ -46,12 +46,8 @@ class RemoteCrypto(key: ByteArray) {
     val roomId: String = hex(MessageDigest.getInstance("SHA-256").digest(roomToken))
     /** Proves the room key in the tunnel handshake; it encrypts nothing. */
     val auth: ByteArray = hkdf(key, "auth")
-    private val audio = SecretKeySpec(hkdf(key, "audio"), "ChaCha20")
     private val push = SecretKeySpec(hkdf(key, "push"), "ChaCha20")
     private val collapse = hkdf(key, "collapse")
-
-    fun sealAudio(plain: ByteArray, len: Int = plain.size) = seal(audio, plain.copyOf(len), H2C)
-    fun openAudio(sealed: ByteArray, len: Int = sealed.size) = open(audio, sealed.copyOf(len), C2H)
 
     /** Push plaintext = [u64 BE counter][u64 BE unix ms][Packet], under its own key (a notification extension holds only it). */
     fun sealPush(counter: Long, sentMs: Long, packet: ByteArray, nonce: ByteArray = random12()): ByteArray =
@@ -67,16 +63,5 @@ class RemoteCrypto(key: ByteArray) {
         c.init(Cipher.ENCRYPT_MODE, k, IvParameterSpec(nonce))
         c.updateAAD(aad)
         return nonce + c.doFinal(plain)
-    }
-
-    /** null if it doesn't authenticate (wrong key, tampered, or our own direction reflected back). */
-    private fun open(k: SecretKeySpec, sealed: ByteArray, aad: ByteArray): ByteArray? {
-        if (sealed.size < 12 + 16) return null
-        return runCatching {
-            val c = Cipher.getInstance("ChaCha20-Poly1305")
-            c.init(Cipher.DECRYPT_MODE, k, IvParameterSpec(sealed, 0, 12))
-            c.updateAAD(aad)
-            c.doFinal(sealed, 12, sealed.size - 12)
-        }.getOrNull()
     }
 }

@@ -178,7 +178,7 @@ object HotspotPause {
     private fun evaluate(why: String) {
         if (!::app.isInitialized) return
         val offered = Hotspot.callPauseOffered(app)
-        val onBluetooth = bleNear() && !RemoteCall.active
+        val onBluetooth = bleNear() && !AudioRouter.overInternet
         if (core.paused && !core.inCall && SystemClock.elapsedRealtime() < graceUntil) return    // the restored call isn't back yet
         when (core.step(offered, onBluetooth, Hotspot.upOrStarting(app))) {
             PauseCore.Action.PAUSE -> pause(why)

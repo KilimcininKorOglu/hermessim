@@ -380,7 +380,7 @@ object Relay {
         runCatching { ble.setCallPriority(live) }
         Log.i(TAG, "call ${e.call} ${e.phase} incoming=${e.incoming} line=${if (e.hasLine()) e.line else -1} end=${e.end}")
         if (e.phase == CallPhase.CALL_PHASE_ENDED && !live) {
-            RemoteCall.close("call ended")
+            InternetPath.close("call ended")
             main.post { HostWifi.evaluate("call ended") }
         }
         val seq = Events.log(app).nextCall()
@@ -411,7 +411,7 @@ object Relay {
         if (broadcast(event { textStatus = status })) SmsSender.told(status.text)
     }
 
-    /** The host closed the internet audio path by itself (RemoteCall). */
+    /** The host closed the internet audio path by itself (InternetPath). */
     fun audioPathClosed() = Bg.onMain { broadcast(event { audioPathClosed = AudioPathClosed.getDefaultInstance() }) }
 
     /** A health notice: to the phone served now and, with none on Bluetooth, as a push too. */
@@ -561,8 +561,8 @@ object Relay {
     private fun roomChanged(present: Boolean) {
         if (present) { Link.Internet.channel.newLink(); return }
         Link.Internet.channel.close()
-        // A room blip mid-call doesn't touch the call's audio (TURN carries it); it ends with the call.
-        if (!CallRegistry.live()) RemoteCall.close("the phone left the room")
+        // A room blip mid-call doesn't touch the call's audio path (it has its own socket); it ends with the call.
+        if (!CallRegistry.live()) InternetPath.close("the phone left the room")
     }
 
     /** BLE values arrive on binder threads: handled on main, and never let one take the process down. */

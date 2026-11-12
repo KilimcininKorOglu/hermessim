@@ -204,6 +204,7 @@ message Request {
     SetPushKey set_push_key = 39;
     CloseAudioPath close_audio_path = 40;
     ForgetHost forget_host = 41;
+    AudioReport audio_report = 42;
   }
 }
 
@@ -220,6 +221,7 @@ message Reply {
     LineLockNow line_lock = 16;
     CallTestReading call_test = 17;
     WifiList wifi_list = 18;
+    AudioReport audio_report = 19;
   }
 }
 
@@ -836,15 +838,42 @@ message Remote {
   bytes push_key_mark = 3;        // the first 8 bytes of SHA-256 of the push key the host holds, empty for none
 }
 
-// A call's audio over the internet: each side names where the other sends to.
+// A call's audio over the internet (protocol/README.md "Call audio"): each side names the addresses the other may send to
+// and its fresh X25519 key; the path's audio keys come from the two keys and audio_id. The phone may open it while
+// Bluetooth still carries the call, so the path waits ready.
 message OpenAudioPath {
+  bytes audio_id = 1;             // 16 random bytes, new for every path
+  bytes key = 2;                  // the phone's fresh X25519 public key, 32 bytes
+  repeated Candidate candidates = 3;
+}
+
+message AudioPath {
+  bytes key = 1;                  // the host's fresh X25519 public key, 32 bytes
+  repeated Candidate candidates = 2;
+}
+
+// An address one side receives audio datagrams on.
+message Candidate {
+  CandidateKind kind = 1;
   bytes address = 2;              // 4 or 16 bytes
   uint32 port = 3;
 }
 
-message AudioPath {
-  bytes address = 1;
-  uint32 port = 2;
+enum CandidateKind {
+  CANDIDATE_KIND_UNSPECIFIED = 0;
+  CANDIDATE_KIND_DIRECT = 1;      // the side's own public address, as the TURN server's STUN answer saw it
+  CANDIDATE_KIND_RELAY = 2;       // the side's TURN allocation: at most one side of a path has one
+}
+
+// Every 5 s of a call, the phone's numbers for the last 5 s; the host answers with its own (Reply.audio_report).
+// Each side sets its encoder's expected loss from the other side's `lost` and `received`.
+message AudioReport {
+  uint32 received = 1;            // packets that arrived in time
+  uint32 lost = 2;                // ticks played with FEC or concealment
+  uint32 late = 3;                // packets that came after their tick was played
+  uint32 dropped_sent = 4;        // own packets dropped because the send queue was full
+  uint32 send_errors = 5;         // own sends the transport refused
+  uint32 skipped_bytes = 6;       // Bluetooth stream bytes skipped to find the next packet
 }
 
 message CloseAudioPath {}

@@ -112,9 +112,12 @@ class Tunnel(private val auth: ByteArray, private val random: (Int) -> ByteArray
         private val P2H = "p2h".toByteArray() + 1
         private val H2P = "h2p".toByteArray() + 1
 
-        fun hmac(key: ByteArray, vararg parts: ByteArray): ByteArray =
-            Mac.getInstance("HmacSHA256").apply {
-                init(SecretKeySpec(key, "HmacSHA256"))
+        fun hmac(key: ByteArray, vararg parts: ByteArray): ByteArray = mac("HmacSHA256", key, *parts)
+
+        /** The HMAC named [algorithm] of [parts] in a row. */
+        fun mac(algorithm: String, key: ByteArray, vararg parts: ByteArray): ByteArray =
+            Mac.getInstance(algorithm).apply {
+                init(SecretKeySpec(key, algorithm))
                 parts.forEach { update(it) }
             }.doFinal()
 
