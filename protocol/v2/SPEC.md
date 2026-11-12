@@ -74,6 +74,8 @@ When a link comes back, the peer puts the `session_id` and the number of the hos
 - The peer keeps a request until its message number is acknowledged by a CREDIT or a `Welcome`.
 - The host keeps the last 64 replies by request id. A request whose id it has answered gets the same reply again and is not run again.
 
+`Welcome.received` counts the `Hello` it answers. A peer sends one `Hello` on a link before the `Welcome`, so the host has `received` − 1 of the messages the peer sent on earlier links. The peer sends the requests above that number again and gives its next message the number `received` + 1. A peer that paired on the link sends its next `Hello` without `resume`: the host's count then also holds the pairing messages, and the peer could not tell them from lost requests.
+
 If the host does not hold the session it answers `resumed` = false with a new `session_id`. Counters and request ids start again; the peer reports each request that was not acknowledged as not delivered.
 
 ### Requests
