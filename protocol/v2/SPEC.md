@@ -91,7 +91,11 @@ The host's state is cut into the groups of `State` (fields 2 and up). After each
 - every group, when the mark is absent or its epoch is not the current one;
 - the groups that changed after `mark.seq`, in one `State`, otherwise.
 
-A peer that receives a `State` whose `seq` is not one above the last asks for every group with `GetState`.
+This first `State` after a `Welcome` carries the host's current `seq`, not a new one, and is the peer's new base. The same holds for the answer to `GetState`: the host sends the named groups whole in a `State` with its current `seq`, before the `Reply`.
+
+After its base, a peer that receives a `State` whose `seq` is not one above the last asks for every group with `GetState`.
+
+A group is sent whole. `Power` is the exception: the host sends only its fields that changed, and all of its fields in a `State` that is a base.
 
 `Signal` changes often. The host sends it at most once in 30 s, and only while the peer said it is in the foreground (the last `GetState` that named the group was at most 5 minutes ago).
 
