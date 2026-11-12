@@ -602,6 +602,93 @@ def playout_lines() -> list[str]:
     return lines
 
 
+# ---------------------------------------------------------------- STUN and TURN (RFC 8489, RFC 8656)
+
+STUN_MAGIC = 0x2112A442
+INTEGRITY = 0x0008
+RFC5769_REQUEST = (
+    "000100582112a442b7e7a701bc34d686fa87dfae802200105354554e207465737420636c69656e74002400046e0001ff8029"
+    "0008932ff9b151263b36000600096576746a3a68367659202020000800149aeaa70cbfd8cb56781ef2b5b2d3f249c1b571a2"
+    "80280004e57a3bcf")
+RFC5769_IPV4 = (
+    "0101003c2112a442b7e7a701bc34d686fa87dfae8022000b7465737420766563746f7220002000080001a147e112a6430008"
+    "00142b91f599fd9e90c38c7489f92af9ba53f06be7d780280004c07d4c96")
+RFC5769_IPV6 = (
+    "010100482112a442b7e7a701bc34d686fa87dfae8022000b7465737420766563746f7220002000140002a1470113a9faa5d3"
+    "f179bc25f4b5bed2b9d900080014a382954e4be67bf11784c97c8292c275bfe3ed4180280004c8fb0b4c")
+RFC5769_LONG_TERM = (
+    "000100602112a44278ad3433c6ad72c029da412e00060012e3839ee38388e383aae38383e382afe382b900000015001c662f"
+    "2f3439396b39353464364f4c33346f4c394653547679363473410014000b6578616d706c652e6f72670000080014f6702465"
+    "6dd64a3e02b8e0712e85c9a28ca89666")
+
+
+def stun_attrs(message: bytes) -> list[tuple[int, int, bytes]]:
+    """Each attribute: its offset, type and value."""
+    out, at = [], 20
+    while at + 4 <= len(message):
+        kind, length = int.from_bytes(message[at:at + 2], "big"), int.from_bytes(message[at + 2:at + 4], "big")
+        out.append((at, kind, message[at + 4:at + 4 + length]))
+        at += 4 + length + (-length % 4)
+    return out
+
+
+def stun_integrity_ok(message: bytes, key: bytes) -> bool:
+    """MESSAGE-INTEGRITY: HMAC-SHA1 over the message up to the attribute, with the length ending after it."""
+    for at, kind, value in stun_attrs(message):
+        if kind == INTEGRITY:
+            head = message[:2] + (at - 20 + 24).to_bytes(2, "big") + message[4:at]
+            return hmac.compare_digest(hmac.new(key, head, hashlib.sha1).digest(), value)
+    return False
+
+
+def xor_address(value: bytes, tid: bytes) -> tuple[bytes, int]:
+    """XOR-MAPPED-ADDRESS and its kin: family 1 (IPv4) or 2 (IPv6), the address bytes and the port."""
+    port = int.from_bytes(value[2:4], "big") ^ (STUN_MAGIC >> 16)
+    mask = STUN_MAGIC.to_bytes(4, "big") + tid
+    size = 4 if value[1] == 1 else 16
+    return bytes(a ^ b for a, b in zip(value[4:4 + size], mask)), port
+
+
+def xor_value(address: bytes, port: int, tid: bytes) -> bytes:
+    mask = STUN_MAGIC.to_bytes(4, "big") + tid
+    family = 1 if len(address) == 4 else 2
+    return bytes([0, family]) + (port ^ (STUN_MAGIC >> 16)).to_bytes(2, "big") + bytes(
+        a ^ b for a, b in zip(address, mask))
+
+
+def stun_cases() -> list[dict]:
+    short_key = b"VOkJxbRl1RmTxUk/WvJxBt"
+    long_key = hashlib.md5("マトリックス:example.org:TheMatrIX".encode()).digest()
+    messages = []
+    for name, text, key, mapped in (
+            ("RFC 5769 request", RFC5769_REQUEST, short_key, None),
+            ("RFC 5769 IPv4 response", RFC5769_IPV4, short_key, ("c0000201", 32853)),
+            ("RFC 5769 IPv6 response", RFC5769_IPV6, short_key, ("20010db8123456780011223344556677", 32853)),
+            ("RFC 5769 request with a long-term key", RFC5769_LONG_TERM, long_key, None)):
+        message = bytes.fromhex(text)
+        assert stun_integrity_ok(message, key), name
+        tid = message[8:20]
+        case = {"name": name, "bytes": text, "key": key.hex(), "type": int.from_bytes(message[:2], "big"),
+                "tid": tid.hex(), "integrity": True}
+        if mapped:
+            value = next(v for _, kind, v in stun_attrs(message) if kind == 0x0020)
+            address, port = xor_address(value, tid)
+            assert (address.hex(), port) == mapped, name
+            case["xor_mapped"] = {"address": mapped[0], "port": mapped[1]}
+        messages.append(case)
+        broken = bytearray(message)
+        broken[next(at for at, kind, _ in stun_attrs(message) if kind == INTEGRITY) + 4 + 19] ^= 1
+        messages.append({"name": name + ", one bit changed", "bytes": broken.hex(), "key": key.hex(),
+                         "type": case["type"], "tid": case["tid"], "integrity": stun_integrity_ok(bytes(broken), key)})
+    tid = bytes(range(1, 13))
+    addresses = [{"name": "IPv4 peer", "address": "c0000201", "port": 3478, "tid": tid.hex(),
+                  "value": xor_value(bytes.fromhex("c0000201"), 3478, tid).hex()},
+                 {"name": "IPv6 peer", "address": "20010db8000000000000000000000001", "port": 49152,
+                  "tid": tid.hex(),
+                  "value": xor_value(bytes.fromhex("20010db8000000000000000000000001"), 49152, tid).hex()}]
+    return [{"messages": messages, "addresses": addresses}]
+
+
 def check_aead() -> None:
     """RFC 8439 section 2.8.2."""
     plain = (b"Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, "
@@ -625,7 +712,7 @@ def main() -> None:
     OUT.mkdir(exist_ok=True)
     files = {"frames": frame_cases(), "messages": message_cases(), "interleave": interleave_cases(),
              "packets": packet_cases(), "pairing": pairing_cases(), "relay": relay_cases(),
-             "roomkey": roomkey_cases(), "tunnel": tunnel_cases(), "push": push_cases(), "audio": audio_cases()}
+             "roomkey": roomkey_cases(), "tunnel": tunnel_cases(), "push": push_cases(), "audio": audio_cases(), "stun": stun_cases()}
     for name, cases in files.items():
         (OUT / f"{name}.json").write_text(json.dumps(cases, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
         print(f"{name}.json: {len(cases)} cases")
