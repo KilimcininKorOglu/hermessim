@@ -63,12 +63,14 @@ message Envelope {
     HostActionResult host_action_result = 75;    // host -> client (reply)
     SetHotspotBlock set_hotspot_block = 76;      // client -> host: cut a hotspot device off the internet, or let it back
     SetMacControl set_mac_control = 77;          // client -> host: let a paired Mac change host settings (README "Mac")
+    Chunk chunk = 78;                            // both ways, protocol 2: one slice of an envelope too big for a frame
+    ReplayDone replay_done = 79;                 // host -> client, protocol 2: the replay after Hello is complete
   }
 }
 
 // First message from each side after the control channel is up.
 message Hello {
-  uint32 protocol_version = 1;   // 1
+  uint32 protocol_version = 1;   // 1; 2 = also understands Chunk and ReplayDone (README "Framing", "Session rules")
   string app_version = 2;
   string device_model = 3;
   string install_id = 4;         // client: stable random id, pinned by the host at pairing
@@ -684,4 +686,19 @@ message Diagnostics {
   string facts_json = 2;         // JSON: model, device, firmware, Android, tier, profile, daemon state, Magisk
   uint32 part = 3;
   uint32 parts = 4;
+}
+
+// One slice of a serialized Envelope that does not fit in one frame (README "Framing"). The envelope
+// carrying a Chunk has seq 0; transfer_id is the seq of the envelope being carried.
+message Chunk {
+  uint32 transfer_id = 1;
+  uint32 index = 2;              // 1..count
+  uint32 count = 3;
+  bytes data = 4;
+}
+
+// The host's replay after Hello is complete: every live call and every pending text was sent.
+message ReplayDone {
+  uint32 calls = 1;              // CallEvents in the replay
+  uint32 texts = 2;              // SmsReceived in the replay
 }

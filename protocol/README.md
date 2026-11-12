@@ -16,8 +16,17 @@ Host = BLE peripheral (advertises the service UUID), client = central.
 ## Framing
 Each direction of the control channel is an ordered, reliable byte stream (ATT notifications /
 write-with-response preserve order). Concatenate the payloads and split into frames:
-`[u16 little-endian length][Envelope protobuf bytes]`, max frame 4096 bytes. A frame may span several
+`[u16 little-endian length][Envelope protobuf bytes]`, max frame 4096 bytes (larger envelopes: see chunks below). A frame may span several
 notifications or writes (MTU is typically 185-517 on iOS, 517 on Android). Reset both stream buffers on reconnect.
+
+Protocol 2 (`Hello.protocol_version` = 2) adds chunked envelopes. When a serialized envelope does not fit in one
+frame and the other side said Hello with version 2 or higher, the sender splits its bytes into slices of at most
+4000 bytes and sends each as `Envelope{seq: 0, chunk: Chunk{transfer_id, index 1..count, count, data}}`, where
+`transfer_id` is the seq of the envelope being carried. The receiver joins the slices of one `transfer_id` in
+index order and handles the result as if it had arrived in one frame. A receiver keeps at most 4 open transfers,
+at most 64 slices (256 KB) per transfer, and drops a transfer not complete within 30 s. Towards a version 1 peer
+the old rules hold: a too-large `HostStatus` sheds its optional parts, anything else too large is dropped. Over
+the internet (frames up to 64 KB) the sender does not split.
 
 Call audio (L2CAP CoC on `AUDIO_PSM`) is a byte stream of `[u16 LE length][u16 seq LE][u8 flags][opus]` packets,
 10 ms each. A sender puts every packet waiting into one write (one L2CAP SDU on Android): a link that carries one SDU per
@@ -25,7 +34,10 @@ connection event can't take 100 single-packet writes a second. Receivers parse t
 
 ## Session rules
 - After subscribing to `CTRL_TX`, the client sends `Hello`; the host answers `Hello` + `HostStatus`,
-  then replays undelivered `SmsReceived` and the state of any ongoing call (`CallEvent`).
+  then replays undelivered `SmsReceived` and the state of any ongoing call (`CallEvent`). A protocol 2 host ends
+  the replay with `ReplayDone{calls, texts}`. A client ends a live call the replay did not mention when
+  `ReplayDone` arrives. A version 1 host sends none, so the client decides 4 s after the host's Hello; after a
+  version 2 Hello it waits at most 20 s for `ReplayDone` before it decides.
 - Host sends `KeepAlive` every 60 s while idle; the client answers with `KeepAlive` (same `n`).
 - `SmsReceived` is store-and-forward: the host keeps it until `SmsAck`, resending on each reconnect.
 - The host only serves the bonded client whose `install_id` it pinned at pairing; anything else gets
