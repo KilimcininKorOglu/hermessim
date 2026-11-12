@@ -1,5 +1,6 @@
-// HermesSIM host <-> client protocol, v1. MIT licensed (see LICENSE) so the GPL host and the
-// proprietary client can both compile it. Transport and framing: README.md in this folder.
+// HermesSIM Mac service messages, v1. MIT licensed (see LICENSE) so the GPL host and the
+// proprietary Mac app can both compile it. The phone clients speak protocol 2 (v2/); the Mac keeps
+// these messages on its own GATT service until it moves to protocol 2. Service layout: README.md.
 syntax = "proto3";
 
 package hermessim.v1;
@@ -8,382 +9,15 @@ option java_package = "com.keremgok.hermessim.protocol.v1";
 option java_multiple_files = true;
 option swift_prefix = "SR";
 
-message Envelope {
-  uint32 seq = 1;        // per-sender, per-connection, starts at 1
-  uint32 reply_to = 2;   // seq of the request this answers, 0 if none
-  oneof body {
-    Hello hello = 10;
-    HostStatus host_status = 11;
-    KeepAlive keep_alive = 12;
-    Error error = 13;
-
-    CallEvent call_event = 20;     // host -> client
-    CallAction call_action = 21;   // client -> host
-    Dial dial = 22;                // client -> host
-
-    SmsReceived sms_received = 30; // host -> client (store-and-forward until SmsAck)
-    SmsAck sms_ack = 31;           // client -> host
-    SmsSend sms_send = 32;         // client -> host
-    SmsSendResult sms_send_result = 33;
-
-    SetHotspot set_hotspot = 40;   // client -> host
-    SetHotspotConfig set_hotspot_config = 41; // client -> host
-    SetSim set_sim = 42;           // client -> host: per-SIM settings
-    UnlockSim unlock_sim = 43;     // client -> host: SIM PIN / PUK
-    UnlockSimResult unlock_sim_result = 44; // host -> client
-    SetBox set_box = 45;           // client -> host: box mode / charge limit
-    VoiceTestCheck voice_test_check = 46;          // client -> host: during the test call, how did audio flow?
-    VoiceTestHostResult voice_test_host_result = 47; // host -> client
-    VoiceTestVerdict voice_test_verdict = 48;      // client -> host: the user's answers; pass turns full voice on
-    AudioChannel audio_channel = 50; // M5: open/close the L2CAP audio channel
-    RemoteSetup remote_setup = 51;   // client -> host, over Bluetooth only: remote mode key, or off
-    RemoteAudio remote_audio = 52;   // both ways, remote mode: this call's TURN relay addresses
-    SetMobileData set_mobile_data = 53; // client -> host: the host's mobile data switch
-    UpdateAction update_action = 54;    // client -> host: check / install now / later
-    SetHostWifi set_host_wifi = 55;     // client -> host: "use Wi-Fi when I'm away" (from anywhere)
-    WifiScan wifi_scan = 56;            // client -> host, Bluetooth only: Wi-Fi networks around the host
-    WifiScanResult wifi_scan_result = 57; // host -> client (reply)
-    WifiAdd wifi_add = 58;              // client -> host, Bluetooth only: save a network and try it
-    WifiAddResult wifi_add_result = 59; // host -> client (reply)
-    WifiForget wifi_forget = 60;        // client -> host, Bluetooth only
-    DiagnosticsRequest diagnostics_request = 61; // client -> host: the host's side of a problem report
-    Diagnostics diagnostics = 62;                // host -> client (reply)
-    Unpair unpair = 63;                          // client -> host: "forget this host" on the phone (host -> client: its answer, or unasked: the host was removed)
-    PushSetup push_setup = 64;                   // client -> host, over Bluetooth only: the push wake-up key
-    SetHotspotCallPause set_hotspot_call_pause = 65; // client -> host: Hotspot.call_pause (only where capabilities.call_pause)
-    SetMacPairing set_mac_pairing = 66;          // client -> host: open or close the window in which a Mac may pair
-    RemoveMac remove_mac = 67;                   // client -> host: forget a paired Mac
-    HostNotice host_notice = 68;                 // host -> client: something the user should hear about (README "Push")
-    SetMacTexts set_mac_texts = 69;              // client -> host: let a paired Mac read the recent texts (README "Mac")
-    UssdRequest ussd_request = 70;               // client -> host: run a USSD code on a line (where HostStatus.ussd)
-    UssdResult ussd_result = 71;                 // host -> client (reply)
-    SetCallRules set_call_rules = 72;            // client -> host: blocked numbers and the busy reply (where HostStatus.call_rules)
-    HostSmsSent host_sms_sent = 73;              // host -> client: a text the host itself sent (busy reply, a Mac's reply)
-    HostAction host_action = 74;                 // client -> host: reconnect the network or restart (where HostStatus.host_actions)
-    HostActionResult host_action_result = 75;    // host -> client (reply)
-    SetHotspotBlock set_hotspot_block = 76;      // client -> host: cut a hotspot device off the internet, or let it back
-    SetMacControl set_mac_control = 77;          // client -> host: let a paired Mac change host settings (README "Mac")
-    Chunk chunk = 78;                            // both ways, protocol 2: one slice of an envelope too big for a frame
-    ReplayDone replay_done = 79;                 // host -> client, protocol 2: the replay after Hello is complete
-  }
-}
-
-// First message from each side after the control channel is up.
-message Hello {
-  uint32 protocol_version = 1;   // 1; 2 = also understands Chunk and ReplayDone (README "Framing", "Session rules")
-  string app_version = 2;
-  string device_model = 3;
-  string install_id = 4;         // client: stable random id, pinned by the host at pairing
-}
-
-message Sim {
-  int32 slot = 1;                // 0-based SIM slot index on the host
-  string number_e164 = 2;        // own number if the SIM exposes it, else empty
-  string operator_name = 3;
-  string country_iso = 4;        // e.g. "tr", "gb": lets the client normalise numbers for Contacts
-  bool enabled = 5;              // false = switched off from the client (no calls/SMS on this line)
-  int32 signal_level = 6;        // 0..4
-  bool volte = 7;                // voice over LTE/NR available (best effort)
-  bool roaming = 8;              // currently roaming
-  bool data_roaming = 9;         // data roaming allowed (off by default: cost protection)
-  bool default_data = 10;        // this SIM carries mobile data / the hotspot
-  string carrier_id = 11;        // stable per SIM card (MCC+MNC+ICCID hash): lets the client keep a nickname
-  Lock lock = 12;                // SIM PIN state
-  int32 attempts_left = 13;      // PIN (or PUK when lock = PUK_REQUIRED) attempts left; -1 = unknown
-  NetworkMode network_mode = 14; // the highest network generation the user allows on this line
-  repeated NetworkMode network_modes = 15;  // the choices this line's modem offers; empty = not settable here
-  enum Lock { UNLOCKED = 0; PIN_REQUIRED = 1; PUK_REQUIRED = 2; PERM_DISABLED = 3; OTHER_LOCK = 4; }
-  // A ceiling: the generations below it stay allowed, so the line falls back to them where the higher one is missing.
-  enum NetworkMode { AUTO = 0; UP_TO_4G = 1; UP_TO_3G = 2; }
-}
-
-// SIM PIN entry from the client. With a PUK, `pin` is the new PIN to set.
-message UnlockSim {
-  int32 slot = 1;
-  string pin = 2;
-  string puk = 3;
-}
-
-message UnlockSimResult {
-  int32 slot = 1;
-  bool ok = 2;
-  int32 attempts_left = 3;       // after this attempt; -1 = unknown
-  Sim.Lock lock = 4;             // state after this attempt
-}
-
-message HostStatus {
-  int32 battery_percent = 1;
-  bool charging = 2;
-  int32 signal_level = 3;        // 0..4
-  bool volte_registered = 4;
-  bool hotspot_on = 5;
-  VoiceTier voice_tier = 6;
-  repeated Sim sims = 7;
-  Hotspot hotspot = 8;           // supersedes hotspot_on when present
-  Box box = 9;
-  VoiceStatus voice = 10;
-  Remote remote = 11;
-  Update update = 13;            // the host app's own updates
-  bool mobile_data = 12;         // the host's mobile data switch (default-data SIM). The hotspot turns it on;
-                                 // only the user turns it off. Remote mode needs it.
-  HostWifi host_wifi = 14;       // the host's own Wi-Fi connection (not the hotspot)
-  Uplink uplink = 15;            // what the host's own internet runs on right now
-  bytes push_key_id = 16;        // first 8 bytes of sha256(PushSetup.key) the host holds; empty = none (README "Push")
-  MacAccess mac = 17;            // Macs that may ask this host for its hotspot (README "Mac")
-  bool ussd = 18;                // this host runs USSD codes (UssdRequest)
-  CallRules call_rules = 19;     // blocked numbers and the busy reply; set = this host has them (SetCallRules)
-  bool host_actions = 20;        // this host reconnects its network and restarts on request (HostAction)
-  enum VoiceTier { VOICE_TIER_UNSPECIFIED = 0; BASIC = 1; FULL_VOICE = 2; }
-}
-
-// Call audio on this host. Full voice (voice_tier FULL_VOICE) only after the guided call test passed on this phone
-// and firmware build, whatever the support tier (full voice only where it is measured).
-message VoiceStatus {
-  string support_tier = 1;       // verified / expected / experimental / unknown / unsupported (profiles/support.json)
-  string device_name = 2;
-  string profile_source = 3;     // measured / candidate / auto / "" (no way to relay audio on this phone yet)
-  string profile_id = 4;
-  bool can_test = 5;             // a profile exists, so the call test can run
-  bool passed = 6;               // test passed on this firmware build
-  int64 passed_ms = 7;
-  string firmware = 8;           // build fingerprint the result belongs to
-}
-
-message VoiceTestCheck {}
-
-// What the host measured since the test call's audio started.
-message VoiceTestHostResult {
-  bool in_call = 1;              // routes applied for the call
-  int32 silence_controls = 2;    // host amp/earpiece controls held silent (0 = none known for this phone)
-  int32 captured_frames = 3;     // 10 ms frames read from the call downlink
-  int32 voiced_frames = 4;       // ... with speech-level audio (the friend talking)
-  int32 sent_frames = 5;         // ... sent to the client phone
-  int32 played_frames = 6;       // client audio frames played into the call uplink
-  int32 peak = 7;                // loudest downlink sample
-  string profile_id = 8;
-  string profile_source = 9;
-}
-
-message VoiceTestVerdict {
-  bool heard_caller = 1;         // the client heard the friend (also measured)
-  bool caller_heard_us = 2;      // the friend heard the client user clearly
-  bool echo = 3;                 // the friend heard an echo / the host's surroundings
-  HostSound host_sound = 4;
-  bool passed = 5;
-  enum HostSound { HOST_SOUND_UNKNOWN = 0; SILENT = 1; MADE_SOUND = 2; }
-}
-
-// Box mode: the host as a silent, screen-off box (display kept off, no call screen, radio savings), plus the
-// charge limit. What this phone supports is reported so the client only offers what works.
-message Box {
-  bool on = 1;
-  bool suspended = 2;            // escape gesture used: screen usable until suspended_until_ms, then back on
-  int64 suspended_until_ms = 3;
-  int32 charge_limit = 4;        // target percent 50-100 in steps of 5; 100 = off. Band derived: 60 -> 57..62
-  bool charge_limit_supported = 5;
-  bool call_screen_hidden = 6;   // host app holds the dialer role (no OEM in-call screen)
-  int32 battery_health = 7;      // unused: kernels report design capacity as full capacity, so it was misleading
-  ChargeState charge_state = 8;  // what the charge limit does right now (status only)
-  enum ChargeState {
-    CHARGE_STATE_UNSPECIFIED = 0; // unknown, or an older host
-    NOT_LIMITING = 1;            // no limit, no control on this phone, or unplugged
-    CHARGING = 2;                // plugged in, below the limit: charging up to it
-    HELD = 3;                    // at the limit: charging stopped, the charger powers the phone
-    DRAINING = 4;                // above the limit: charging stopped until the battery comes down to it
-    STUCK = 5;                   // the phone keeps undoing the limit: the host left it alone for this hour
-  }
-}
-
-message SetBox {
-  optional bool on = 1;
-  optional int32 charge_limit = 2;  // target percent; 100 = off
-}
-
-// The host's Wi-Fi hotspot. The passphrase only travels over the bonded, encrypted BLE link,
-// so the client can join with one tap.
+// A device on the host's hotspot, as the Mac's status lists it.
 message Hotspot {
-  bool supported = 1;
-  bool on = 2;
-  string ssid = 3;
-  string passphrase = 4;
-  Band band = 5;
-  bool hidden = 6;               // privacy only: hidden networks still beacon, no battery saving
-  Security security = 7;
-  int32 max_clients = 8;         // 0 = no limit set
-  bool auto_off = 9;             // turn off when no device is connected (the real battery saver)
-  int32 auto_off_minutes = 10;
-  repeated Client clients = 11;  // currently connected devices (status only)
-  Capabilities capabilities = 12; // what this host phone can do (status only)
-  Usage usage = 13;              // data shared through the hotspot, counted on the host (status only)
-  bool starting = 14;            // turning on right now (status only): show "Starting", not off
-  string gateway = 15;           // the hotspot's own IPv4 address while on (status only): lets the client tell
-                                 // it's on this hotspot without reading Wi-Fi names (iOS hides them; Android needs location for them)
-  // Pause during calls (offered only where capabilities.call_pause): while a call's audio is on Bluetooth the host turns
-  // the hotspot off, and back on when the call ends. Set with SetHotspotCallPause, not SetHotspotConfig.
-  bool call_pause = 16;
-  bool paused_for_call = 17;     // off right now for a call, back on when it ends (status only). The user turning the
-                                 // hotspot on during the call wins: it stays on for the rest of that call.
-  // The hotspot's beacon carries Apple's Personal Hotspot element (offered only where capabilities.apple_marker), so a
-  // Mac treats it as a phone's hotspot: link icon, metered, left for a regular network. Takes effect at the next start.
-  // A phone whose Wi-Fi driver interface predates Android 13's may drop the element without telling the host.
-  bool apple_marker = 18;
-  int32 frequency_mhz = 19;      // the running hotspot's channel frequency (status only); 0 = off or unknown
-  // Monthly data limit (offered only where capabilities.monthly_limit), counted as Usage.month: at 80 % the host sends
-  // DATA_LIMIT_NEAR; at 100 % it turns a running hotspot off once and sends DATA_LIMIT_REACHED. The user may turn it on
-  // again: it is not cut a second time that month. 0 = no limit.
-  int64 monthly_limit_bytes = 20;
-  bool limit_reached = 21;       // this month's usage is at or above the limit (status only)
-  // Devices cut off the internet (SetHotspotBlock; offered only where capabilities.block_clients), connected or not.
-  // A blocked device stays on the hotspot but its traffic is dropped. At most 32. Status only.
-  repeated Client blocked = 22;
-
-  enum Band { BAND_UNSPECIFIED = 0; BAND_2GHZ = 1; BAND_5GHZ = 2; BAND_6GHZ = 3; BAND_AUTO = 4; BAND_DUAL_2_5 = 5; }
-  enum Security { SECURITY_UNSPECIFIED = 0; OPEN = 1; WPA2 = 2; WPA3_TRANSITION = 3; WPA3 = 4; }
   message Client {
     string name = 1;             // the device's own name where the host can read it, else empty
     string mac = 2;
-    string ip = 3;               // its IPv4 address on the hotspot; empty in Hotspot.blocked
-    int64 down = 4;              // bytes to the device since the hotspot came on (capabilities.client_usage)
+    string ip = 3;               // its IPv4 address on the hotspot; empty in MacStatus.blocked
+    int64 down = 4;              // bytes to the device since the hotspot came on, where the host counts them
     int64 up = 5;                // bytes from the device since the hotspot came on
   }
-  message Usage {
-    int64 session_down = 1;      // bytes to connected devices since the hotspot last turned on
-    int64 session_up = 2;        // bytes from connected devices
-    int64 today = 3;             // down + up, calendar day (host time zone)
-    int64 month = 4;             // down + up, calendar month
-  }
-  message Capabilities {
-    repeated Band bands = 1;
-    repeated Security securities = 2;
-    bool hidden_ssid = 3;
-    bool max_clients = 4;
-    bool auto_off = 5;
-    bool off_when_unused = 6;    // understands SetHotspot.off_when_unused_s
-    // Pause during calls is offered: this host relays call audio over Bluetooth and its hotspot can only use 2.4 GHz,
-    // Bluetooth's own band, so the two share one radio. A hotspot that can use 5 GHz keeps out of Bluetooth's way.
-    bool call_pause = 7;
-    bool apple_marker = 8;       // Hotspot.apple_marker can be set (Android 13 and later)
-    bool monthly_limit = 9;      // Hotspot.monthly_limit_bytes can be set
-    bool client_usage = 10;      // Client.down / up are counted
-    bool block_clients = 11;     // SetHotspotBlock works
-  }
-}
-
-// Fields of Hotspot that the client may change: ssid, passphrase, band, hidden, security, max_clients,
-// auto_off, auto_off_minutes, apple_marker, monthly_limit_bytes. The host applies them and restarts the hotspot if it
-// was on (a new monthly limit alone applies without a restart).
-message SetHotspotConfig { Hotspot config = 1; }
-
-message KeepAlive { uint32 n = 1; }
-
-message Error {
-  Code code = 1;
-  string detail = 2;
-  // HELLO_REQUIRED: the host doesn't know this link yet (its app restarted while the BLE link stayed up):
-  // the client re-subscribes and says Hello again. NOT_PAIRED is only for a Hello with an unknown install_id.
-  enum Code { CODE_UNSPECIFIED = 0; NOT_PAIRED = 1; BAD_REQUEST = 2; NO_SUCH_CALL = 3; NO_SERVICE = 4; INTERNAL = 5;
-              HELLO_REQUIRED = 6; }
-}
-
-message CallEvent {
-  string call_id = 1;            // host-assigned, stable for the call's lifetime
-  State state = 2;
-  bool incoming = 3;
-  string number_raw = 4;         // as the network gave it
-  string number_e164 = 5;        // normalised with the SIM's country; empty if not possible/withheld
-  bool number_withheld = 6;
-  int32 slot = 7;
-  int64 state_since_ms = 8;      // host wall clock
-  DisconnectCause cause = 9;     // set when state == ENDED
-  string client_call_uuid = 10;  // echoes Dial.client_call_uuid for calls the client started
-  // Outgoing calls, DIALING: the far end is ringing (the network alerted: 180 Ringing, or 183 with early media). A
-  // phone plays no ringback before that; then the network's own (early media) or, when it sends none, a local one.
-  bool alerting = 11;
-  bool alerting_known = 12;      // the host reports `alerting` for this call; false: ring back from the start of dialing
-  enum State { STATE_UNSPECIFIED = 0; RINGING = 1; DIALING = 2; ACTIVE = 3; HOLDING = 4; ENDED = 5; }
-  enum DisconnectCause { CAUSE_UNSPECIFIED = 0; LOCAL = 1; REMOTE = 2; REJECTED = 3; MISSED = 4; BUSY = 5; ERROR = 6; }
-}
-
-message CallAction {
-  string call_id = 1;
-  Action action = 2;
-  enum Action { ACTION_UNSPECIFIED = 0; ANSWER = 1; REJECT = 2; HANG_UP = 3; HOLD = 4; UNHOLD = 5; DTMF = 6; }
-  string dtmf = 3;               // for DTMF: one of 0-9 * # A-D
-}
-
-message Dial {
-  string number = 1;             // as dialled; host normalises
-  int32 slot = 2;                // -1 = host default
-  string client_call_uuid = 3;   // the client's call UUID (CallKit / Telecom), echoed in CallEvent
-  bool voice_test = 4;           // the guided call test: relay audio even though full voice isn't on yet
-}
-
-message SmsReceived {
-  string id = 1;                 // host-assigned; resent until acked
-  string from_raw = 2;
-  string from_e164 = 3;
-  string body = 4;
-  int64 received_ms = 5;
-  int32 slot = 6;
-}
-
-message SmsAck { string id = 1; }
-
-message SmsSend {
-  string client_msg_id = 1;
-  string to = 2;
-  string body = 3;
-  int32 slot = 4;                // -1 = host default
-}
-
-message SmsSendResult {
-  string client_msg_id = 1;
-  bool ok = 2;
-  string error = 3;              // "unconfirmed: ..." = the network never answered (may well be delivered), not a refusal
-}
-
-// on = false with off_when_unused_s > 0: the host turns its hotspot off itself once no device has used it for that
-// long (the phone moved to another Wi-Fi and may be asleep when that moment comes). Any later SetHotspot cancels it.
-// Only sent to hosts whose Hotspot.Capabilities.off_when_unused is set: older hosts would turn the hotspot off at once.
-message SetHotspot { bool on = 1; int32 off_when_unused_s = 2; }
-
-// Hotspot.call_pause on or off. Applies at once (a running hotspot isn't restarted, as SetHotspotConfig would).
-message SetHotspotCallPause { bool on = 1; }
-
-// Macs (README "Mac"). A Mac reaches the host on a GATT service of its own, apart from the client's, and may ask for
-// the hotspot; it reads the recent texts only where the client allowed it (PairedMac.texts). It pairs while the client
-// holds the window open; the host accepts no other pairing request.
-message MacAccess {
-  bool supported = 1;            // this host can serve Macs (its Bluetooth runs a second advertisement)
-  bool pairing = 2;              // the pairing window is open now
-  repeated PairedMac macs = 3;
-  bool texts = 4;                // this host can show texts on a Mac (PairedMac.texts, SetMacTexts)
-  bool control = 5;              // this host lets a Mac change its settings (PairedMac.control, SetMacControl)
-}
-
-message PairedMac {
-  string name = 1;
-  string address = 2;
-  bool connected = 3;
-  bool texts = 4;                // this Mac may read the recent texts (off for a newly paired Mac)
-  bool control = 5;              // this Mac may change the data line, reconnect, restart and block devices (off for a new Mac)
-}
-
-// on: open the pairing window for 120 s (again from the start if open); off: close it.
-message SetMacPairing { bool on = 1; }
-
-message RemoveMac { string address = 1; }
-
-// PairedMac.texts for the Mac at `address`.
-message SetMacTexts {
-  string address = 1;
-  bool on = 2;
-}
-
-// PairedMac.control for the Mac at `address`.
-message SetMacControl {
-  string address = 1;
-  bool on = 2;
 }
 
 // The Mac service's characteristics carry these, each value one serialised message.
@@ -400,16 +34,16 @@ message MacStatus {
   bool controllable = 8;         // the host can switch its hotspot now
   bool paused_for_call = 9;
   bool off_when_unused = 10;     // understands MacCommand.off_when_unused_s
-  bool limit_reached = 11;       // the monthly data limit is used up (Hotspot.limit_reached): don't ask for the hotspot
-  bool texts = 12;               // this Mac may read the texts characteristic (PairedMac.texts)
+  bool limit_reached = 11;       // the monthly data limit is used up: don't ask for the hotspot
+  bool texts = 12;               // this Mac may read the texts characteristic
   bool charging = 13;            // the host phone is charging
   int32 devices = 14;            // devices on the hotspot now
-  bool control = 15;             // this Mac may write MacControl (PairedMac.control)
-  bool host_actions = 16;        // the host reconnects and restarts on request (HostStatus.host_actions)
+  bool control = 15;             // this Mac may write MacControl
+  bool host_actions = 16;        // the host reconnects and restarts on request
   // Filled only for a Mac with control:
   repeated MacLine lines = 17;   // the host's SIMs, for the data line choice
-  repeated Hotspot.Client clients = 18;  // devices on the hotspot (as Hotspot.clients)
-  repeated Hotspot.Client blocked = 19;  // devices cut off the internet (as Hotspot.blocked)
+  repeated Hotspot.Client clients = 18;  // devices on the hotspot
+  repeated Hotspot.Client blocked = 19;  // devices cut off the internet
   enum State { OFF = 0; STARTING = 1; ON = 2; FAILED = 3; }
 }
 
@@ -420,18 +54,32 @@ message MacLine {
   bool default_data = 4;         // carries mobile data and the hotspot
 }
 
-// Control (write with response, only with PairedMac.control): one change, as the client's own commands. A Mac without
-// control gets GATT_INSUFFICIENT_AUTHORIZATION; a restart or reconnect during a call gets the application error 0x80;
-// anything else the host refuses gets GATT_FAILURE.
+// Control (write with response, only for a Mac with control): one change. A Mac without control gets
+// GATT_INSUFFICIENT_AUTHORIZATION; a restart or reconnect during a call gets the application error 0x80; anything else
+// the host refuses gets GATT_FAILURE.
 message MacControl {
   oneof what {
-    int32 data_slot = 1;         // as SetSim{slot, make_default_data}
+    int32 data_slot = 1;         // make this line the data line
     HostAction.Action host_action = 2;
     SetHotspotBlock block = 3;
   }
 }
 
-// Command (write): as SetHotspot.
+// Reconnect the host's network (airplane mode on for 5 s, then off) or restart the host phone. Refused during a call.
+message HostAction {
+  Action action = 1;
+  enum Action { ACTION_UNSPECIFIED = 0; RECONNECT_NETWORK = 1; REBOOT = 2; }
+}
+
+// Cut a device off the hotspot's internet (it stays connected) or let it back. Matched on the MAC address; at most 32
+// blocked devices. `name` is kept for the list (the device may not be connected later).
+message SetHotspotBlock {
+  string mac = 1;
+  bool blocked = 2;
+  string name = 3;
+}
+
+// Command (write): turn the hotspot on or off; off_when_unused_s > 0 turns it off when nothing used it that long.
 message MacCommand {
   bool on = 1;
   int32 off_when_unused_s = 2;
@@ -445,260 +93,16 @@ message MacSecret { string passphrase = 1; }
 message MacTexts { repeated MacText texts = 1; }
 
 message MacText {
-  string id = 1;                 // SmsReceived.id
-  string sender = 2;             // SmsReceived.from_e164, else from_raw
+  string id = 1;                 // the text's id on the host
+  string sender = 2;             // the sender's number in E.164 where the host could normalise it, else as received
   string body = 3;
-  int64 at_ms = 4;               // SmsReceived.received_ms
+  int64 at_ms = 4;               // when the host received it
 }
 
-// Reply (write, prepared write allowed): a Mac with PairedMac.texts answers a text it was shown. The host sends `body`
-// to that text's sender on the line the text came in on, as HostSmsSent{origin MAC}; a text no longer in the texts
-// value (older than 10 minutes), an empty body or one over 500 bytes is refused.
+// Reply (write, prepared write allowed): a Mac that may read the texts answers a text it was shown. The host sends
+// `body` to that text's sender on the line the text came in on; a text no longer in the texts value (older than 10
+// minutes), an empty body or one over 500 bytes is refused.
 message MacReply {
   string text_id = 1;            // MacText.id
   string body = 2;
-}
-
-// Per-SIM settings from the client. Only the fields that are present are changed.
-message SetSim {
-  int32 slot = 1;
-  optional bool enabled = 2;       // turn the line off/on (UICC applications)
-  optional bool data_roaming = 3;
-  bool make_default_data = 4;      // route mobile data (and the hotspot) through this SIM
-  optional Sim.NetworkMode network_mode = 5;  // one of Sim.network_modes; refused during a call
-}
-
-message AudioChannel { bool open = 1; }
-
-// Remote (internet) mode, see README.md "Remote mode". The key never leaves the two phones: the client makes it
-// and hands it over Bluetooth; everything on the internet path is sealed with keys derived from it.
-message RemoteSetup {
-  bool enabled = 1;
-  bytes key = 2;                 // 32 random bytes (enabled only)
-}
-
-// Each side's TURN relay address for the current call's audio. The client offers, the host answers;
-// close = true (either side) ends the remote audio.
-message RemoteAudio {
-  string relay_ip = 1;
-  uint32 relay_port = 2;
-  bool close = 3;
-}
-
-message Remote {
-  bool enabled = 1;              // the host holds a key
-  bool online = 2;               // the host is in the rendezvous room now
-}
-
-// The host's mobile data switch. Off is the user's choice (a LAN-only hotspot, or abroad); the hotspot turns it on.
-message SetMobileData { bool on = 1; }
-
-// Host app updates (README.md "Updates"): the host checks hermessim.keremgok.tr, downloads and verifies a newer APK and
-// tells the client. It installs on the user's word, or by itself at night once the client has been told; never
-// during a call. "Later" postpones a day.
-message Update {
-  string current_version = 1;
-  int32 current_code = 2;
-  string available_version = 3;  // empty: up to date
-  int32 available_code = 4;
-  State state = 5;
-  repeated Note notes = 6;       // every version newer than the running one, newest first
-  int64 deferred_until_ms = 7;   // "Later" pressed: no automatic install before this (unix ms)
-  int64 checked_ms = 8;          // last check (unix ms)
-  string error = 9;              // last failure, for the Updates screen
-  bool auto_update = 10;         // the host downloads and installs updates by itself (off: only on INSTALL_NOW)
-  // AVAILABLE: a newer version is known but not downloaded (auto_update off); INSTALL_NOW downloads and installs it.
-  enum State { IDLE = 0; CHECKING = 1; DOWNLOADING = 2; READY = 3; INSTALLING = 4; FAILED = 5; AVAILABLE = 6; }
-  message Note { string version = 1; string en = 2; string tr = 3; }
-}
-
-message UpdateAction {
-  Action action = 1;
-  enum Action { CHECK = 0; INSTALL_NOW = 1; LATER = 2; AUTO_ON = 3; AUTO_OFF = 4; }  // AUTO_*: sets Update.auto_update
-}
-
-// The host's own Wi-Fi connection (not its hotspot). One rule on every phone (18 Oct 2026), applied by the host
-// once paired: off while the hotspot is on (hotspot users always get mobile data) and while the client is on
-// Bluetooth; when the client has been away a while (2 min), on only if use_when_away (e.g. travelling: the host at home
-// shouldn't spend mobile data), joining a network saved on the host. Never switched during a call. Networks are added
-// and forgotten over Bluetooth only, so Wi-Fi passwords never take the internet path.
-message HostWifi {
-  bool use_when_away = 1;
-  bool on = 2;                   // Wi-Fi radio on right now
-  string connected_ssid = 3;     // empty: not connected
-  repeated Saved saved = 4;      // networks saved on the host (it may join any of them)
-  Reason reason = 5;             // why Wi-Fi is on or off right now
-  enum Reason {
-    REASON_UNSPECIFIED = 0;
-    SETTING_OFF = 1;             // client away, use_when_away off
-    BLUETOOTH = 2;               // client nearby on Bluetooth
-    HOTSPOT = 3;                 // the hotspot is on
-    AWAY = 4;                    // client away and use_when_away: on
-    IN_CALL = 5;                 // a change waits for the call to end
-    SETUP = 6;                   // on for a moment: scanning or trying a network for the client
-    NOT_PAIRED = 7;              // no client yet: Wi-Fi left as it is
-  }
-  message Saved { int32 id = 1; string ssid = 2; }
-}
-
-message SetHostWifi { bool use_when_away = 1; }
-
-message WifiScan {}
-
-message WifiScanResult {
-  repeated Network networks = 1; // strongest first, one entry per name
-  message Network {
-    string ssid = 1;
-    bool secure = 2;             // needs a password (WPA2/WPA3 personal); enterprise networks are left out
-    int32 level = 3;             // 0..4
-    bool saved = 4;
-  }
-}
-
-message WifiAdd {
-  string ssid = 1;
-  string passphrase = 2;         // empty: open network
-}
-
-message WifiAddResult {
-  string ssid = 1;
-  bool ok = 2;                   // joined (and kept saved); on failure the host forgets it again
-  Problem problem = 3;
-  enum Problem { NONE = 0; NOT_FOUND = 1; JOIN_FAILED = 2; BAD_INPUT = 3; HOTSPOT_ON = 4; }   // JOIN_FAILED: usually the password
-}
-
-message WifiForget { int32 id = 1; }
-
-// The host's current internet connection (its default network), for "Host internet: Wi-Fi · Home" on the client.
-message Uplink {
-  Kind kind = 1;
-  string name = 2;               // Wi-Fi: network name; mobile: the data line's operator
-  enum Kind { NONE = 0; WIFI = 1; MOBILE = 2; OTHER = 3; }
-}
-
-// A health notice the host sends once per event: to the clients it serves and, with no client on Bluetooth, as a
-// `notice` push. The client shows it as a notification.
-message HostNotice {
-  Kind kind = 1;
-  int32 value = 2;               // BATTERY_*: the battery percent; DATA_LIMIT_*: the percent of the monthly limit used;
-                                 // ROAMING: 1 when the SIM's data roaming is allowed, else 0
-  int32 slot = 3;                // SIM_LOCKED, ROAMING: the SIM slot; else 0
-  int64 at_ms = 4;               // when it happened (unix ms)
-  enum Kind {
-    KIND_UNSPECIFIED = 0;
-    BATTERY_LOW = 1;             // 15 % or less, not charging
-    BATTERY_CRITICAL = 2;        // 5 % or less, not charging
-    SIM_LOCKED = 3;              // a SIM now asks for its PIN or PUK
-    DATA_LIMIT_NEAR = 4;         // the hotspot used 80 % of its monthly limit
-    DATA_LIMIT_REACHED = 5;      // the monthly limit is used up: the host turned the hotspot off
-    ROAMING = 6;                 // a SIM started roaming; the host changes nothing (Sim.data_roaming says whether data runs)
-    CHARGE_CONTROL_STUCK = 7;    // the phone keeps undoing the charge limit (Box.charge_state STUCK)
-  }
-}
-
-// A USSD code (balance, packages: "*123#") run once on a line; the network's answer comes back as text. Menus that wait
-// for a reply cannot be answered: Android's API runs one request only.
-message UssdRequest {
-  int32 slot = 1;                // the SIM slot; -1 = the host's default line
-  string code = 2;               // starts with * or #, ends with #, only 0-9 * #, at most 32 characters
-}
-
-message UssdResult {
-  bool ok = 1;
-  string text = 2;               // the network's answer when ok
-  Failure failure = 3;
-  enum Failure {
-    NONE = 0;
-    BAD_CODE = 1;                // not a USSD code (the host checks it as above)
-    NO_SERVICE = 2;              // the line is off, locked or has no network
-    NETWORK = 3;                 // the network refused it, or another code is still running
-    TIMEOUT = 4;                 // no answer within 30 s
-  }
-}
-
-// Calls and texts the host keeps away from the user, and its busy reply. A blocked call is rejected (the caller hears
-// busy) and reaches no client; a blocked text stays in the host's own inbox and reaches no client, push or Mac. Numbers
-// match on their last 10 digits. While busy, a text gets busy_text back on the line it came in on, once an hour per
-// number at most; short codes (6 digits or fewer), senders with letters, hidden and blocked numbers never get one.
-message CallRules {
-  repeated string blocked = 1;   // at most 50 numbers
-  bool block_hidden = 2;         // reject calls without caller ID
-  bool busy = 3;
-  string busy_text = 4;          // at most 300 bytes; empty = no reply
-}
-
-message SetCallRules { CallRules rules = 1; }
-
-// A text the host sent by itself. The send's outcome follows as SmsSendResult with client_msg_id = id. Sent to the
-// clients on the link (or the internet room) only, never as a push.
-message HostSmsSent {
-  string id = 1;
-  string to = 2;
-  string body = 3;
-  int32 slot = 4;
-  int64 at_ms = 5;
-  Origin origin = 6;
-  enum Origin { AUTO_REPLY = 0; MAC = 1; }
-}
-
-// Reconnect the host's network (airplane mode on for 5 s, then off: the host's links drop and come back by themselves;
-// a hotspot that was on comes back on) or restart the host phone. Refused during a call.
-message HostAction {
-  Action action = 1;
-  enum Action { ACTION_UNSPECIFIED = 0; RECONNECT_NETWORK = 1; REBOOT = 2; }
-}
-
-// Sent when the host starts the action (a restart follows a second later), or refuses it.
-message HostActionResult {
-  bool ok = 1;
-  Failure failure = 2;
-  enum Failure {
-    NONE = 0;
-    IN_CALL = 1;                 // a call is up: try again after it
-    FAILED = 2;                  // the host couldn't start it
-  }
-}
-
-// Cut a device off the hotspot's internet (it stays connected) or let it back. Matched on the MAC address; at most 32
-// blocked devices. `name` is kept for the list (the device may not be connected later).
-message SetHotspotBlock {
-  string mac = 1;
-  bool blocked = 2;
-  string name = 3;
-}
-
-// Problem reports (anonymous): the host's recent log, scrubbed on the host before it leaves (no phone numbers,
-// hardware addresses, network names, ids or message text), plus the facts that identify the phone model and setup.
-// The phone forgets this host: the host forgets the phone too (its pin and its Bluetooth bond), so both sides
-// start clean and another phone can pair.
-message Unpair {}
-
-// The key for push wake-ups, apart from remote mode's: pushes work with Internet mode off. Empty = forget it.
-message PushSetup { bytes key = 1; }           // 32 random bytes
-
-message DiagnosticsRequest {
-  uint32 max_bytes = 1;          // 0 = the host's default (16 KB)
-}
-
-// Sent in parts (the client's frames are at most 4 KB): part 1..parts, facts_json in part 1 only.
-message Diagnostics {
-  string log = 1;                // a slice of the host's recent log, scrubbed
-  string facts_json = 2;         // JSON: model, device, firmware, Android, tier, profile, daemon state, Magisk
-  uint32 part = 3;
-  uint32 parts = 4;
-}
-
-// One slice of a serialized Envelope that does not fit in one frame (README "Framing"). The envelope
-// carrying a Chunk has seq 0; transfer_id is the seq of the envelope being carried.
-message Chunk {
-  uint32 transfer_id = 1;
-  uint32 index = 2;              // 1..count
-  uint32 count = 3;
-  bytes data = 4;
-}
-
-// The host's replay after Hello is complete: every live call and every pending text was sent.
-message ReplayDone {
-  uint32 calls = 1;              // CallEvents in the replay
-  uint32 texts = 2;              // SmsReceived in the replay
 }
