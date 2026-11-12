@@ -50,6 +50,16 @@ class ChunksTest {
     }
 
     @Test
+    fun aTransferRestartedWithAnotherCountDoesNotPushOutAnother() {
+        val joiner = ChunkJoiner(now = { 0L }, maxOpen = 2)
+        val kept = Chunks.split(longText, transferId = 1)
+        assertNull(joiner.add(kept.first()))
+        assertNull(joiner.add(Chunks.split(longText, transferId = 2).first()))
+        assertNull(joiner.add(Chunks.split(longText, transferId = 2, slice = 1_000).first()))
+        assertArrayEquals(longText, kept.drop(1).mapNotNull { joiner.add(it) }.single())
+    }
+
+    @Test
     fun aDuplicatedPieceDoesNotCompleteATransferEarly() {
         val joiner = ChunkJoiner(now = { 0L })
         val chunks = Chunks.split(longText, transferId = 9)

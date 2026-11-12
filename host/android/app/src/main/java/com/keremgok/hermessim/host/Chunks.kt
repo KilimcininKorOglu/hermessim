@@ -71,6 +71,8 @@ class ChunkJoiner(
         }
         val known = open[chunk.transferId]
         if (known != null && known.count == chunk.count) return known
+        // One that restarted with another count goes first, so it does not push out another transfer.
+        open.remove(chunk.transferId)
         while (open.size >= maxOpen) open.remove(open.keys.first())
         return Transfer(chunk.count, now()).also { open[chunk.transferId] = it }
     }
