@@ -2,11 +2,9 @@
 
 | Link | Specification | Schema | Licence |
 | --- | --- | --- | --- |
-| Host and phone (Bluetooth LE, and the internet path below) | [`v2/SPEC.md`](v2/SPEC.md), protocol 2 | `v2/wire.proto` | see `v2/LICENSE` |
-| Host and Mac (Bluetooth LE) | "Mac" below | `hermessim.proto` (Mac messages only) | MIT, `LICENSE` |
+| Host and its peers, the phone and up to 4 Macs (Bluetooth LE, and the phone's internet path below) | [`v2/SPEC.md`](v2/SPEC.md), protocol 2 | `v2/wire.proto` | see `v2/LICENSE` |
 
-The phone clients speak only protocol 2. The Mac keeps its own GATT service and the messages in `hermessim.proto` until
-it moves to protocol 2. Test vectors for protocol 2 are in `v2/vectors/`.
+The phones and the Macs speak only protocol 2. Test vectors are in `v2/vectors/`.
 
 ## Call audio
 
@@ -170,40 +168,13 @@ An Android app the user force-stopped gets no push until it is opened again (And
 
 ## Mac
 
-A Mac asks the host for its hotspot on a GATT service of its own, and reads the recent texts where the phone allowed
-it. Its connections never count as the phone's link. Every characteristic needs an encrypted link, and the host
-answers only Macs in `State.peers`; any other central gets `GATT_INSUFFICIENT_AUTHORIZATION`. The texts characteristic
-and its notifications answer only a Mac whose `Peer.grants.texts` is on; another gets the same error.
+A Mac is a protocol 2 peer with `ROLE_MAC` on the same Bluetooth service, frames and session as the phone (SPEC.md "Macs"). It never uses the internet path. The host keeps a second advertising set for the Macs, so a Mac finds the host while the phone is connected: it names the Mac pairing UUID `7d5f00f1-3c1a-4b6e-9e42-5a1c0de51a00` while the host takes a new Mac and the service otherwise. A host whose Bluetooth can't run two advertising sets reports `Peers.available = false`.
 
-| UUID | Role | Properties / security |
-| --- | --- | --- |
-| `0e9c0011-0971-48af-ba0b-2c5c254faec0` | Mac service | advertised in a second advertising set, apart from the phone's |
-| `0e9c0012-0971-48af-ba0b-2c5c254faec0` | status: `MacStatus` | read, notify (no value when too long for the link: read again), encrypted |
-| `0e9c0013-0971-48af-ba0b-2c5c254faec0` | command: `MacCommand` | write with response, encrypted |
-| `0e9c0014-0971-48af-ba0b-2c5c254faec0` | secret: `MacSecret` | read, encrypted |
-| `0e9c0015-0971-48af-ba0b-2c5c254faec0` | Mac pairing | advertised in place of the Mac service while the pairing window is open |
-| `0e9c0016-0971-48af-ba0b-2c5c254faec0` | texts: `MacTexts` | read, notify (no value: read again), encrypted, only with the texts grant |
-| `0e9c0017-0971-48af-ba0b-2c5c254faec0` | reply: `MacReply` | write with response (prepared write allowed), encrypted, only with the texts grant |
-| `0e9c0018-0971-48af-ba0b-2c5c254faec0` | control: `MacControl` | write with response, encrypted, only with the control grant |
+**Pairing.** The phone sends `OpenPeerWindow{open}`. For 120 s the host takes a new Mac: it confirms the Bluetooth pairing request, and `Peers.code` carries a fresh 6-digit code that the phone shows. The Mac says `Hello`, gets `Refuse{CODE_NOT_PAIRED}`, and pairs with that code exactly as a phone pairs with the code on the host's screen. The host then lists the Mac in `Peers` by its `install_id`, named by its `Hello.device_model`. `SetPeer{id, remove}` takes a Mac off the list, ends its link and drops its bond.
 
-Each value is one serialised message; a long read continues at its offset. **Pairing.** The phone sends
-`OpenPeerWindow{open}`; for 120 s the host advertises the pairing UUID and confirms the one Bluetooth pairing request
-that arrives, then adds that Mac to `State.peers`. The Mac starts the pairing by reading an encrypted characteristic.
-`SetPeer{id, remove}` takes a Mac off the list and drops its bond. A host whose Bluetooth can't run two advertising sets
-reports `Peers.available = false`. **Texts.** `SetPeer{id, grants}` with `texts` lets one Mac read the texts (off for a
-new Mac); `MacStatus.texts` tells the Mac. On each new text the host notifies the subscribed Macs, and each reads
-`MacTexts`. **Reply.** A Mac answers a text it was shown by writing `MacReply` to the reply characteristic. The host
-answers only a text still in `MacTexts` (so a Mac can't text any number), on the line it came in on, and the phones see
-the reply as the event `TextByHost{origin TEXT_ORIGIN_MAC}`. A refused write gets `GATT_FAILURE`; a host without the
-characteristic has no replies. The write is acknowledged when the host starts sending: its outcome reaches the phones,
-not the Mac. **Control.** `SetPeer{id, grants}` with `control` lets one Mac change host settings (off for a new Mac);
-`MacStatus.control` tells the Mac, and only such a Mac gets the lines, the hotspot's devices and the blocked list in
-`MacStatus`. It writes `MacControl` to the control characteristic: the data line (`data_slot`), a host action, or a
-device block, as the phone's own requests. A write without the grant gets `GATT_INSUFFICIENT_AUTHORIZATION`, a host
-action during a call the application error `0x80`, any other refusal `GATT_FAILURE`. **Hotspot check.** `MacStatus`
-carries the phone's hotspot check settings (`watch`, `watch_every_s`, `watch_address`, `watch_misses`). A Mac on the
-hotspot pings through it as a phone does (protocol 2 SPEC, "The hotspot check") and reports a failure by writing
-`MacControl{hotspot_no_internet}`, which the host takes from every paired Mac, with or without the control grant.
+**Grants.** `SetPeer{id, grants}` sets what one Mac may do; both grants are off for a new Mac. Every Mac may switch the hotspot (`SetHotspot`, with `off_when_unused_s`), read its passphrase (`GetHotspotSecret`) and report a failed hotspot check (`HostAction{HOST_VERB_HOTSPOT_NO_INTERNET}`). With `control` it may also set the data line, block hotspot devices and run the other host actions, and its view of the state holds the lines and the hotspot's devices. With `texts` it gets each text that comes in and, after its `Welcome`, those of the last 10 minutes; it may answer one of them with `SendText`, only to its sender and on its line. The phones see such a reply as `TextByHost{origin TEXT_ORIGIN_MAC}`. Any other request of a Mac gets `CODE_NOT_ALLOWED`, and every request gets its own `Reply`.
+
+**State.** A Mac gets each `State` with the phone's `seq`, holding only the groups it may see, and `peers` with only its own entry, so it learns its grants there. `Hotspot.devices` counts the devices on the hotspot for a Mac without `control`. A Mac on the hotspot runs the hotspot check as a phone does (SPEC.md "The hotspot check").
 
 ## Updates
 
