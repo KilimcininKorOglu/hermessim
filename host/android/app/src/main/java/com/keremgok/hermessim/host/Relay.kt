@@ -25,6 +25,7 @@ import com.keremgok.hermessim.protocol.v1.KeepAlive
 import com.keremgok.hermessim.protocol.v1.MacCommand
 import com.keremgok.hermessim.protocol.v1.MacStatus
 import com.keremgok.hermessim.protocol.v1.Remote
+import com.keremgok.hermessim.protocol.v1.ReplayDone
 import com.keremgok.hermessim.protocol.v1.SmsReceived
 import com.keremgok.hermessim.protocol.v1.SmsSendResult
 import java.util.concurrent.ConcurrentHashMap
@@ -542,12 +543,16 @@ object Relay {
         replay(d)
     }
 
-    /** All a client may have missed: the status, live calls, texts it hasn't stored yet. */
+    /** All a client may have missed: the status, live calls, texts it hasn't stored yet; then ReplayDone. */
     private fun replay(d: Peer) {
         send(d, Envelope.newBuilder().setHostStatus(status()))
         Updater.informed()
-        CallRegistry.snapshot().forEach { send(d, Envelope.newBuilder().setCallEvent(it)) }
-        SmsStore.pending(app).forEach { send(d, Envelope.newBuilder().setSmsReceived(it)) }
+        val calls = CallRegistry.snapshot()
+        calls.forEach { send(d, Envelope.newBuilder().setCallEvent(it)) }
+        val texts = SmsStore.pending(app)
+        texts.forEach { send(d, Envelope.newBuilder().setSmsReceived(it)) }
+        // The client ends the calls this replay did not name now, instead of guessing the end with a timer.
+        if ((protocols[d.id] ?: 1) >= Chunks.MIN_PROTOCOL) send(d, Envelope.newBuilder().setReplayDone(ReplayDone.newBuilder().setCalls(calls.size).setTexts(texts.size)))
     }
 
     /**
