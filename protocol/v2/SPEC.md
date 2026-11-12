@@ -46,14 +46,14 @@ length = unsigned LEB128, at most 1024
 
 **Which stream.** Urgent: `Hello`, `Welcome`, `Refuse`, the pairing messages, `Request` and `Reply` for calls, and every `Event` that carries a `CallState`. Bulk: a `Reply` that carries a `LogPart`, and any message above 4096 bytes. Normal: all other messages. A sender with frames waiting on several streams sends urgent first, then normal, then bulk, and never holds an urgent frame behind more than one frame of another stream.
 
-**Message numbers.** Each direction counts its messages from 1 in the order in which their last frames are sent. The receiver counts the same way.
+**Message numbers.** Each direction counts its messages from 1 in the order in which their last frames are sent. The receiver counts the same way. In a new session the `Hello` that opened it is the peer's message 1 and its `Welcome` is the host's message 1; in a resumed session both take the next numbers.
 
 **CREDIT.** The body is two unsigned LEB128 numbers:
 
 1. `received`: the number of the last message that arrived whole.
-2. `limit`: the total of DATA body bytes the sender of this frame accepts in the session. The other side must not send a DATA frame that takes its total above `limit`.
+2. `limit`: the total of DATA body bytes the sender of this frame accepts on this link. The other side must not send a DATA frame that takes its total above `limit`. Both byte totals start again at 0 on every new link, also when the session is resumed, because the bytes of a lost link may have been counted by one side only.
 
-Before the first CREDIT the limit is 4096. A receiver sends CREDIT when half of its last grant is used, when a message arrived and it sent none for 200 ms, and at least once in 60 s while the link is idle. A side that hears no frame for 150 s treats the link as dead. There is no other keep-alive.
+Before the first CREDIT of a link the limit is 4096. A receiver sends CREDIT when half of its last grant is used, when a message arrived and it sent none for 200 ms, and at least once in 60 s while the link is idle. A side that hears no frame for 150 s treats the link as dead. There is no other keep-alive.
 
 **RESET.** The body is one unsigned LEB128 reason (1 bad header, 2 bad length, 3 bad packet, 4 limit passed, 5 no session). Both sides drop the messages in progress. The peer then sends `Hello` with `resume`. A host sends reason 5 on a link that is up while it holds no session for it, for example after the host app started again.
 

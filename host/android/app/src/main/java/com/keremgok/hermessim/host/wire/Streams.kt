@@ -31,6 +31,9 @@ class Assembler {
         parts.fill(null)
         if (recount) received = 0
     }
+
+    /** A new session began with the message that just arrived: that Hello is its message 1. */
+    fun newSession() { received = 1 }
 }
 
 /**
@@ -89,10 +92,16 @@ class Outbox(private val maxBody: Int = Wire.MAX_BODY) {
 
     /** Drops everything waiting (the session ended); the counters start again. */
     fun clear() {
+        newLink()
+        sentMessages = 0
+    }
+
+    /** A new link: what waited for the old one is dropped and the byte totals start again; the message count goes on. */
+    fun newLink() {
         queues.forEach { it.clear() }
         control.clear()
         pending = ByteArray(0); pendingAt = 0
-        limit = Wire.FIRST_LIMIT; sentBytes = 0; sentMessages = 0
+        limit = Wire.FIRST_LIMIT; sentBytes = 0
     }
 
     private fun load(): Boolean {

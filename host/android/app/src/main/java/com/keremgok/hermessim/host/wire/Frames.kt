@@ -15,11 +15,12 @@ object Wire {
     const val MAX_MESSAGE = 262_144
     const val FIRST_LIMIT = 4096L
     const val BULK_FROM = 4096
+    const val DEAD_MS = 150_000L
 }
 
 /** Why a link is reset; [code] is the reason a RESET frame carries. */
 enum class WireFault(val code: Int) {
-    BAD_HEADER(1), BAD_LENGTH(2), BAD_PACKET(3), LIMIT_PASSED(4);
+    BAD_HEADER(1), BAD_LENGTH(2), BAD_PACKET(3), LIMIT_PASSED(4), NO_SESSION(5);
 
     /** The RESET frame that tells the other side of this fault. */
     val frame: Frame get() = Frame(Wire.RESET, byteArrayOf(code.toByte()))
