@@ -1,21 +1,26 @@
 // HermesSIM host. Copyright (C) 2026 SIM Relay authors. GPL-3.0-or-later.
 package com.keremgok.hermessim.host
 
-import com.keremgok.hermessim.protocol.v1.Box
-import com.keremgok.hermessim.protocol.v1.Box.ChargeState
-import com.keremgok.hermessim.protocol.v1.HostNotice.Kind
-import com.keremgok.hermessim.protocol.v1.HostStatus
-import com.keremgok.hermessim.protocol.v1.Sim
+import com.keremgok.hermessim.wire.ChargeState
+import com.keremgok.hermessim.wire.LineLock
+import com.keremgok.hermessim.wire.Notice
+import com.keremgok.hermessim.wire.NoticeKind
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /** Health notices fire once per event: the battery on its way down, a SIM that newly asks for its PIN or PUK, a charge
  *  limit the phone keeps undoing. */
 class HealthCoreTest {
+    private val low = NoticeKind.NOTICE_KIND_BATTERY_LOW
+    private val critical = NoticeKind.NOTICE_KIND_BATTERY_CRITICAL
+
+    /** Kind, value, line (null when the notice names none) and time of each notice. */
+    private fun List<Notice>.rows() = map { listOf(it.kind, it.value, if (it.hasLine()) it.line else null, it.atMs) }
+
     @Test fun theBatteryWarnsOnceAtEachStepOnItsWayDown() {
         val c = HealthCore()
         val heard = listOf(40, 16, 15, 14, 9, 5, 4, 3).map { c.battery(it, charging = false) }
-        assertEquals(listOf(null, null, Kind.BATTERY_LOW, null, null, Kind.BATTERY_CRITICAL, null, null), heard)
+        assertEquals(listOf(null, null, low, null, null, critical, null, null), heard)
     }
 
     @Test fun chargingOrPassingThirtyArmsItAgainAndABriefRiseDoesNot() {
@@ -26,8 +31,7 @@ class HealthCoreTest {
             30 to false, 12 to false,                // passed 30 %: armed again
             -1 to false, 4 to false,                 // an unknown level changes nothing
         ).map { (percent, charging) -> c.battery(percent, charging) }
-        assertEquals(listOf(Kind.BATTERY_LOW, null, null, null, Kind.BATTERY_LOW, null, Kind.BATTERY_LOW, null,
-            Kind.BATTERY_CRITICAL), heard)
+        assertEquals(listOf(low, null, null, null, low, null, low, null, critical), heard)
     }
 
     @Test fun aSimWarnsWhenItNewlyLocksAndAgainAfterAnUnlock() {
@@ -36,11 +40,11 @@ class HealthCoreTest {
         assertEquals(listOf(listOf(0), emptyList(), emptyList(), listOf(0)), heard)
     }
 
-    /** "slot:value" of each ROAMING notice; the pairs are the roaming SIMs (slot to data roaming allowed). */
+    /** "line:value" of each roaming notice; the pairs are the roaming SIMs (slot to data roaming allowed). */
     private fun HealthCore.roaming(vararg sims: Pair<Int, Boolean>): List<String> {
-        val status = HostStatus.newBuilder().setBatteryPercent(80)
-        sims.forEach { (slot, data) -> status.addSims(Sim.newBuilder().setSlot(slot).setRoaming(true).setDataRoaming(data)) }
-        return notices(status.build(), now = 1).filter { it.kind == Kind.ROAMING }.map { "${it.slot}:${it.value}" }
+        val lines = sims.map { (slot, data) -> SimLine(slot, roaming = true, dataRoaming = data) }
+        return notices(HealthView(80, charging = false, lines = lines), now = 1)
+            .filter { it.kind == NoticeKind.NOTICE_KIND_ROAMING }.map { "${it.line}:${it.value}" }
     }
 
     @Test fun aSimTellsWhenItStartsRoamingWithItsDataRoamingAndAgainAfterItStops() {
@@ -55,26 +59,22 @@ class HealthCoreTest {
         assertEquals(listOf(emptyList(), listOf("1:1"), emptyList(), emptyList(), listOf("0:0")), heard)
     }
 
-    @Test fun aStatusGivesTheNoticesWithTheirValueSlotAndTime() {
-        val sim = { slot: Int, lock: Sim.Lock -> Sim.newBuilder().setSlot(slot).setLock(lock).build() }
-        val s = HostStatus.newBuilder().setBatteryPercent(4).setCharging(false)
-            .addSims(sim(0, Sim.Lock.UNLOCKED)).addSims(sim(1, Sim.Lock.PUK_REQUIRED)).build()
-        val got = HealthCore().notices(s, now = 42).map { listOf(it.kind, it.value, it.slot, it.atMs) }
-        assertEquals(listOf(listOf(Kind.BATTERY_CRITICAL, 4, 0, 42L), listOf(Kind.SIM_LOCKED, 0, 1, 42L)), got)
+    @Test fun theStateGivesTheNoticesWithTheirValueLineAndTime() {
+        val lines = listOf(SimLine(0), SimLine(1, lock = LineLock.LINE_LOCK_PUK))
+        val got = HealthCore().notices(HealthView(4, charging = false, lines = lines), now = 42).rows()
+        assertEquals(listOf(listOf(critical, 4L, null, 42L), listOf(NoticeKind.NOTICE_KIND_LINE_LOCKED, 0L, 1, 42L)), got)
     }
 
     @Test fun aStuckChargeLimitTellsOnceAndAgainOnlyAfterItHeld() {
         val c = HealthCore()
-        val heard = listOf(ChargeState.HELD, ChargeState.STUCK, ChargeState.STUCK,
-            ChargeState.CHARGE_STATE_UNSPECIFIED, ChargeState.STUCK,   // an unknown state changes nothing
-            ChargeState.DRAINING, ChargeState.STUCK).map { c.newlyStuck(it) }
+        val heard = listOf(ChargeState.CHARGE_STATE_HELD, ChargeState.CHARGE_STATE_STUCK, ChargeState.CHARGE_STATE_STUCK,
+            ChargeState.CHARGE_STATE_UNSPECIFIED, ChargeState.CHARGE_STATE_STUCK,   // an unknown state changes nothing
+            ChargeState.CHARGE_STATE_DRAINING, ChargeState.CHARGE_STATE_STUCK).map { c.newlyStuck(it) }
         assertEquals(listOf(false, true, false, false, false, false, true), heard)
     }
 
     @Test fun theStuckNoticeCarriesTheLimit() {
-        val box = Box.newBuilder().setChargeLimit(70).setChargeState(ChargeState.STUCK)
-        val s = HostStatus.newBuilder().setBatteryPercent(90).setCharging(true).setBox(box).build()
-        val got = HealthCore().notices(s, now = 7).map { listOf(it.kind, it.value, it.slot, it.atMs) }
-        assertEquals(listOf(listOf(Kind.CHARGE_CONTROL_STUCK, 70, 0, 7L)), got)
+        val view = HealthView(90, charging = true, chargeState = ChargeState.CHARGE_STATE_STUCK, chargeLimit = 70)
+        assertEquals(listOf(listOf(NoticeKind.NOTICE_KIND_CHARGE_STUCK, 70L, null, 7L)), HealthCore().notices(view, now = 7).rows())
     }
 }

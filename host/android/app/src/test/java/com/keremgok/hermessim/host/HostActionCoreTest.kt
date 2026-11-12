@@ -1,34 +1,21 @@
 package com.keremgok.hermessim.host
 
-import com.keremgok.hermessim.protocol.v1.HostAction
-import com.keremgok.hermessim.protocol.v1.HostActionResult
+import com.keremgok.hermessim.wire.Code
+import com.keremgok.hermessim.wire.HostVerb
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HostActionCoreTest {
-    @Test fun aCallUpRefusesBothActions() {
-        for (a in listOf(HostAction.Action.RECONNECT_NETWORK, HostAction.Action.REBOOT))
-            assertEquals(HostActionResult.Failure.IN_CALL, HostActionCore.refusal(a, inCall = true))
+    @Test fun aCallUpRefusesBothActionsAndWithoutACallBothRun() {
+        val both = listOf(HostVerb.HOST_VERB_REGISTER_AGAIN, HostVerb.HOST_VERB_RESTART)
+        assertEquals(listOf(Code.CODE_IN_CALL, Code.CODE_IN_CALL), both.map { HostActionCore.refusal(it, inCall = true) })
+        assertEquals(listOf(null, null), both.map { HostActionCore.refusal(it, inCall = false) })
     }
 
-    @Test fun withoutACallBothRun() {
-        assertNull(HostActionCore.refusal(HostAction.Action.RECONNECT_NETWORK, inCall = false))
-        assertNull(HostActionCore.refusal(HostAction.Action.REBOOT, inCall = false))
-    }
-
-    @Test fun anUnknownActionFailsEvenWithoutACall() {
-        assertEquals(HostActionResult.Failure.FAILED, HostActionCore.refusal(HostAction.Action.ACTION_UNSPECIFIED, inCall = false))
-    }
-
-    @Test fun theResultSaysOkOnlyWithoutAFailure() {
-        assertTrue(HostActionCore.result(null).ok)
-        with(HostActionCore.result(HostActionResult.Failure.IN_CALL)) {
-            assertFalse(ok)
-            assertEquals(HostActionResult.Failure.IN_CALL, failure)
-        }
+    @Test fun anUnknownActionIsABadValueEvenDuringACall() {
+        assertEquals(Code.CODE_BAD_VALUE, HostActionCore.refusal(HostVerb.HOST_VERB_UNSPECIFIED, inCall = false))
+        assertEquals(Code.CODE_BAD_VALUE, HostActionCore.refusal(HostVerb.UNRECOGNIZED, inCall = true))
     }
 
     @Test fun theHotspotIsAskedBackAfterTheCycleIsOver() {

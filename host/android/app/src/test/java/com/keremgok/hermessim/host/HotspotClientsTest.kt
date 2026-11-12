@@ -14,6 +14,14 @@ class HotspotClientsTest {
             listOf("de:ad:be:ef:00:01", "192.168.43.11", "")), got)
     }
 
+    @Test fun aMacGoesOnTheWireAsSixBytesAndComesBackAsLowercaseText() {
+        val bytes = ApClient("de:ad:be:ef:00:01").macBytes()
+        assertEquals(listOf(0xde, 0xad, 0xbe, 0xef, 0x00, 0x01), bytes.map { it.toInt() and 0xFF })
+        assertEquals("de:ad:be:ef:00:01", ApClient.text(bytes))
+        assertEquals(listOf(0, 0, 0), listOf("not a mac", "de:ad:be:ef:00", "de:ad:be:ef:00:zz").map { ApClient.bytes(it).size })
+        assertEquals("", ApClient.text(ByteArray(5)))
+    }
+
     @Test fun noDevicesIsAnEmptyListAndAFailedAnswerIsNull() {
         assertEquals(0, HotspotClients.parse("OK 0", emptyMap())!!.size)
         assertNull(HotspotClients.parse("ERR no iface", emptyMap()))

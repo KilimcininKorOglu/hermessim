@@ -28,6 +28,11 @@ object Bg {
         override fun dispatchMessage(msg: Message) { guard(name) { super.dispatchMessage(msg) } }
     }
 
+    private val main = Handler(Looper.getMainLooper())
+
+    /** Runs [task] on the main thread: now when called there, else as soon as the main thread is free. */
+    fun onMain(task: () -> Unit) { if (Looper.myLooper() == Looper.getMainLooper()) task() else main.post(task) }
+
     inline fun guard(place: String, block: () -> Unit) {
         try { block() } catch (t: Throwable) { failed(place, t) }
     }

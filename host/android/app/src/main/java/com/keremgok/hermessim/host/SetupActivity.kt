@@ -29,7 +29,7 @@ import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
-import com.keremgok.hermessim.protocol.v1.Sim
+import com.keremgok.hermessim.wire.LineLock
 import java.util.concurrent.Executors
 
 /**
@@ -272,7 +272,7 @@ class SetupActivity : Activity() {
                 when { paired == null -> getString(R.string.client_none); Relay.clientConnected() -> getString(R.string.client_connected, paired)
                     else -> getString(R.string.client_away, paired) }),
             // A switched-off SIM isn't fine either (it showed as OK; audit, 20 Oct 2026)
-            Check(getString(R.string.c_sim), when { sims.isEmpty() -> Mark.FAIL; sims.any { it.lock != Sim.Lock.UNLOCKED || !it.enabled } -> Mark.WARN; else -> Mark.OK },
+            Check(getString(R.string.c_sim), when { sims.isEmpty() -> Mark.FAIL; sims.any { it.lock != LineLock.LINE_LOCK_OPEN || !it.enabled } -> Mark.WARN; else -> Mark.OK },
                 if (sims.isEmpty()) getString(R.string.sim_none) else sims.joinToString("\n") { simLine(it) }),
             Check(getString(R.string.c_audio), if (VoiceGate.fullVoice) Mark.OK else Mark.WARN,
                 getString(when { VoiceGate.fullVoice -> R.string.audio_full; Daemon.hasProfile() -> R.string.audio_untested; else -> R.string.audio_basic })),
@@ -315,13 +315,13 @@ class SetupActivity : Activity() {
                 Btn(getString(R.string.btn_lock_settings), Act.LOCK_SETTINGS)))
             paired == null -> at(5, Card(getString(R.string.pair_title), getString(R.string.pair_body, btName(bt)), Mark.WARN, countdown = true))
             sims.isEmpty() -> at(6, Card(getString(R.string.sim_title), getString(R.string.sim_body), Mark.FAIL))
-            sims.any { it.lock != Sim.Lock.UNLOCKED } -> sims.first { it.lock != Sim.Lock.UNLOCKED }.let { s ->
+            sims.any { it.lock != LineLock.LINE_LOCK_OPEN } -> sims.first { it.lock != LineLock.LINE_LOCK_OPEN }.let { s ->
                 // What unlocks it: a PIN or the PUK on the iPhone; a carrier lock or a dead SIM only the operator
                 // (every lock said "enter its PIN"; audit, 20 Oct 2026)
                 at(6, Card(getString(R.string.sim_locked_title), getString(when (s.lock) {
-                    Sim.Lock.PIN_REQUIRED -> R.string.sim_locked
-                    Sim.Lock.PUK_REQUIRED -> R.string.sim_locked_puk
-                    Sim.Lock.PERM_DISABLED -> R.string.sim_locked_perm
+                    LineLock.LINE_LOCK_PIN -> R.string.sim_locked
+                    LineLock.LINE_LOCK_PUK -> R.string.sim_locked_puk
+                    LineLock.LINE_LOCK_DEAD -> R.string.sim_locked_perm
                     else -> R.string.sim_locked_carrier
                 }, s.slot + 1), Mark.WARN)) }
             sims.none { it.enabled } -> at(6, Card(getString(R.string.sim_off_title), getString(R.string.sim_switched_off), Mark.WARN))
@@ -434,13 +434,13 @@ class SetupActivity : Activity() {
         Onboarding.Root.DENIED -> R.string.root_denied; Onboarding.Root.UNKNOWN -> R.string.root_unknown
     })
 
-    private fun simLine(s: Sim) = getString(R.string.sim_line, s.slot + 1, when {
-        s.lock == Sim.Lock.PIN_REQUIRED -> getString(R.string.sim_pin)
-        s.lock == Sim.Lock.PUK_REQUIRED -> getString(R.string.sim_puk)
-        s.lock == Sim.Lock.PERM_DISABLED -> getString(R.string.sim_perm_disabled)
-        s.lock != Sim.Lock.UNLOCKED -> getString(R.string.sim_network_lock)
+    private fun simLine(s: SimLine) = getString(R.string.sim_line, s.slot + 1, when {
+        s.lock == LineLock.LINE_LOCK_PIN -> getString(R.string.sim_pin)
+        s.lock == LineLock.LINE_LOCK_PUK -> getString(R.string.sim_puk)
+        s.lock == LineLock.LINE_LOCK_DEAD -> getString(R.string.sim_perm_disabled)
+        s.lock != LineLock.LINE_LOCK_OPEN -> getString(R.string.sim_network_lock)
         !s.enabled -> getString(R.string.sim_off)
-        else -> getString(R.string.sim_ok, s.operatorName, s.signalLevel, getString(if (s.volte) R.string.yes else R.string.no))
+        else -> getString(R.string.sim_ok, s.carrier, s.signal, getString(if (s.volte) R.string.yes else R.string.no))
     })
 
     // ------------------------------------------------------------------ actions
@@ -607,12 +607,15 @@ class SetupActivity : Activity() {
         val left = Relay.pairingSecondsLeft()
         // With TalkBack on, whole minutes: a live region that changes every 2 s would talk over everything else
         val spoken = getSystemService(android.view.accessibility.AccessibilityManager::class.java)?.isTouchExplorationEnabled == true
-        val s = when {
-            Relay.pairedClient() == null -> getString(R.string.pair_ready)
+        // The code is on this screen only: a phone pairs by typing it. Without a paired phone it stays until one pairs.
+        val code = Relay.pairingCode()
+        val open = when {
+            code == null -> getString(R.string.pair_closed)
             left > 0 && spoken -> getString(R.string.pair_open_minutes, (left + 59) / 60)
             left > 0 -> getString(R.string.pair_open_left, "%d:%02d".format(left / 60, left % 60))
-            else -> getString(R.string.pair_closed)
+            else -> ""
         }
+        val s = listOfNotNull(code?.let { getString(R.string.pair_code, it) }, open.ifEmpty { null }).joinToString("\n")
         if (t.text.toString() != s) t.text = s
     }
 

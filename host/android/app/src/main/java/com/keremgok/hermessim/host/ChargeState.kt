@@ -1,9 +1,9 @@
 // HermesSIM host. Copyright (C) 2026 SIM Relay authors. GPL-3.0-or-later.
 package com.keremgok.hermessim.host
 
-import com.keremgok.hermessim.protocol.v1.Box.ChargeState
+import com.keremgok.hermessim.wire.ChargeState
 
-/** What the charge limit does now (protocol Box.charge_state), from hermessimd's CHARGE? answer and the battery. Pure. */
+/** What the charge limit does now (Power.charge_state), from hermessimd's CHARGE? answer and the battery. Pure. */
 object ChargeStateCore {
     /** CHARGE? answers "OK <node> target=.. resume=.. drain=.. cutting=.. held=0|1 stuck=0|1": its key=value pairs. */
     fun fields(reply: String?): Map<String, String>? {
@@ -16,15 +16,15 @@ object ChargeStateCore {
      * no limit or no charger is NOT_LIMITING; an unreadable answer is UNSPECIFIED.
      */
     fun state(reply: String?, limit: Int, supported: Boolean, plugged: Boolean, level: Int): ChargeState {
-        if (!supported || limit >= 100) return ChargeState.NOT_LIMITING
+        if (!supported || limit >= 100) return ChargeState.CHARGE_STATE_NOT_LIMITING
         val f = fields(reply) ?: return ChargeState.CHARGE_STATE_UNSPECIFIED
         val held = f["held"] == "1"
         return when {
-            f["stuck"] == "1" -> ChargeState.STUCK
-            !plugged -> ChargeState.NOT_LIMITING
-            held && level > limit -> ChargeState.DRAINING
-            held || level >= limit -> ChargeState.HELD
-            else -> ChargeState.CHARGING
+            f["stuck"] == "1" -> ChargeState.CHARGE_STATE_STUCK
+            !plugged -> ChargeState.CHARGE_STATE_NOT_LIMITING
+            held && level > limit -> ChargeState.CHARGE_STATE_DRAINING
+            held || level >= limit -> ChargeState.CHARGE_STATE_HELD
+            else -> ChargeState.CHARGE_STATE_CHARGING
         }
     }
 }

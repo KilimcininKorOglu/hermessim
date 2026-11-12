@@ -14,7 +14,7 @@ import android.provider.Settings
 import android.telecom.TelecomManager
 import android.telephony.TelephonyManager
 import android.util.Log
-import com.keremgok.hermessim.protocol.v1.Box.ChargeState
+import com.keremgok.hermessim.wire.ChargeState
 import org.json.JSONObject
 
 /**
@@ -97,7 +97,7 @@ object Box {
         askChargeState()                                    // a new limit changes the state now, not at the next ask
     }
 
-    /** What the charge limit does now (protocol Box.charge_state), from the daemon's CHARGE? and the battery. */
+    /** What the charge limit does now (Power.charge_state), from the daemon's CHARGE? and the battery. */
     @Volatile var chargeState = ChargeState.CHARGE_STATE_UNSPECIFIED; private set
     private const val CHARGE_ASK_MS = 30_000L
     private var chargeAskedAt = 0L

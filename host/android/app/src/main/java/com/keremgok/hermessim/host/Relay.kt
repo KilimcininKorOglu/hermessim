@@ -4,6 +4,7 @@ package com.keremgok.hermessim.host
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.content.Context
+import android.content.Intent
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
@@ -11,77 +12,132 @@ import android.os.Looper
 import android.os.SystemClock
 import android.telephony.TelephonyManager
 import android.util.Log
-import com.keremgok.hermessim.protocol.v1.CallEvent
-import com.keremgok.hermessim.protocol.v1.Envelope
-import com.keremgok.hermessim.protocol.v1.Error
-import com.keremgok.hermessim.protocol.v1.Hello
-import com.keremgok.hermessim.protocol.v1.Unpair
-import com.keremgok.hermessim.protocol.v1.HostNotice
-import com.keremgok.hermessim.protocol.v1.HostSmsSent
-import com.keremgok.hermessim.protocol.v1.HostStatus
-import com.keremgok.hermessim.protocol.v1.Sim
-import com.keremgok.hermessim.protocol.v1.Uplink
-import com.keremgok.hermessim.protocol.v1.KeepAlive
+import com.google.protobuf.ByteString
+import com.keremgok.hermessim.host.wire.Channel
+import com.keremgok.hermessim.host.wire.Fields
+import com.keremgok.hermessim.host.wire.PairResult
+import com.keremgok.hermessim.host.wire.PairingDesk
+import com.keremgok.hermessim.host.wire.StateBook
+import com.keremgok.hermessim.host.wire.StreamChoice
+import com.keremgok.hermessim.host.wire.Wire
+import com.keremgok.hermessim.host.wire.WireException
+import com.keremgok.hermessim.host.wire.WireFault
 import com.keremgok.hermessim.protocol.v1.MacCommand
 import com.keremgok.hermessim.protocol.v1.MacStatus
-import com.keremgok.hermessim.protocol.v1.Remote
-import com.keremgok.hermessim.protocol.v1.ReplayDone
-import com.keremgok.hermessim.protocol.v1.SmsReceived
-import com.keremgok.hermessim.protocol.v1.SmsSendResult
+import com.keremgok.hermessim.wire.Bye
+import com.keremgok.hermessim.wire.ByeReason
+import com.keremgok.hermessim.wire.CallPhase
+import com.keremgok.hermessim.wire.CallState
+import com.keremgok.hermessim.wire.Code
+import com.keremgok.hermessim.wire.Event
+import com.keremgok.hermessim.wire.AudioPathClosed
+import com.keremgok.hermessim.wire.Hello
+import com.keremgok.hermessim.wire.HostInfo
+import com.keremgok.hermessim.wire.Notice
+import com.keremgok.hermessim.wire.Packet
+import com.keremgok.hermessim.wire.PairOffer
+import com.keremgok.hermessim.wire.PairProof
+import com.keremgok.hermessim.wire.PairStart
+import com.keremgok.hermessim.wire.Refuse
+import com.keremgok.hermessim.wire.ReplayEnd
+import com.keremgok.hermessim.wire.Reply
+import com.keremgok.hermessim.wire.Request
+import com.keremgok.hermessim.wire.StateMark
+import com.keremgok.hermessim.wire.TextIn
+import com.keremgok.hermessim.wire.TextStatus
+import com.keremgok.hermessim.wire.Welcome
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicInteger
 
-/** One client connection: a Bluetooth link, or the remote (internet) room. */
-sealed class Peer(val id: String) {
-    abstract fun send(bytes: ByteArray)
+/** One transport to the phone and the session on it. Main thread, except [Channel.serving]. */
+sealed class Link(val id: String) {
+    val channel = Channel(SystemClock::elapsedRealtime) { java.security.SecureRandom().nextInt() }
+
+    /** The install id of the Hello this link was refused for: a pairing proof covers it. */
+    var claimed: ByteArray? = null
+
+    /** The ids of the requests that still run: one that comes again meanwhile is not run again. */
+    val running = HashSet<Int>()
+
+    /** The seq of the last `State` this link was sent, and the highest text seq. */
+    var stateSeq = 0
+    var textSeq = 0L
+
+    /** Sends the CREDIT that is due once the peer has been quiet for a moment. */
+    val creditTick = Runnable { kick() }
+
+    abstract val bluetooth: Boolean
+
+    /** The channel has something to send. */
+    abstract fun kick()
     abstract fun drop()
-    class Ble(val device: BluetoothDevice, private val ble: BleLink) : Peer(device.address) {
-        override fun send(bytes: ByteArray) = ble.send(device, bytes)
+
+    class Ble(val device: BluetoothDevice, private val ble: BleLink) : Link(device.address) {
+        override val bluetooth = true
+        override fun kick() = ble.kick(device)
         override fun drop() = ble.disconnect(device)
     }
-    object Internet : Peer("remote") {
-        override fun send(bytes: ByteArray) { RemoteLink.send(bytes) }
+
+    /** The internet room: a link lasts while the host and the phone are both in it. */
+    object Internet : Link("remote") {
+        private const val MESSAGE_BYTES = 16_000        // the relay takes 64 KB a message, sealed and in base64
+        override val bluetooth = false
+        override fun kick() {
+            while (true) {
+                val bytes = channel.next(MESSAGE_BYTES)
+                if (bytes.isEmpty()) return
+                RemoteLink.send(bytes)
+            }
+        }
         override fun drop() {}
     }
 }
 
+/** One request of a peer and the way to answer it. The answer may come later and from any thread. */
+class Ask(val link: Link, val req: Request, val session: Int) {
+    fun answer(code: Code, vararg args: Long, fill: (Reply.Builder) -> Unit = {}) = Relay.reply(this, code, args, fill)
+    fun ok() = answer(Code.CODE_OK)
+}
+
 /**
- * Protocol v1 session (protocol/README.md) on top of BleLink, and of RemoteLink in remote mode (Bluetooth wins
- * when both are up; pairing and the remote key only ever happen over Bluetooth).
- * Pairing: the first client to say Hello inside the pairing window has its install_id pinned; after
- * that only that install_id is served. The window is open for 10 min after the host starts while no
- * client is pinned, or for 5 min after `am start-foreground-service ... -a PAIR` (re-pairing).
+ * The host's side of protocol version 2 (protocol/v2/SPEC.md) on top of BleLink, and of RemoteLink in internet mode.
+ * Bluetooth wins when both serve; pairing and the keys only ever travel over Bluetooth. A phone pairs with the code
+ * the host shows; after that only its install id is served.
  */
 object Relay {
     private const val TAG = "HermesSimHost"
-    private const val PROTOCOL_VERSION = 2
-    private const val KEEPALIVE_MS = 60_000L
-    private const val FIRST_PAIRING_WINDOW_MS = 10 * 60_000L
+    private const val TICK_MS = 60_000L
     private const val PAIRING_WINDOW_MS = 5 * 60_000L
+    /** How long a phone that was told it is not paired may stay on the link to pair. */
+    private const val PAIR_GRACE_MS = 60_000L
+    private const val HEARTBEAT_IDLE_MS = 3 * 60_000L
 
     private lateinit var app: Context
     private lateinit var ble: BleLink
     private lateinit var macLink: MacLink
-    /** The last start failed and nothing has switched the hotspot since: a Mac sees FAILED, not OFF. */
-    @Volatile private var hotspotFailed = false
     private var audio: AudioBridge? = null
     private val main = Handler(Looper.getMainLooper())
-    /** Our seq per peer and session (protocol: per-sender, per-connection, from 1); a Hello starts it again. */
-    private val seqs = ConcurrentHashMap<String, AtomicInteger>()
-    /** The protocol version each peer's Hello named: 2 and up take chunked envelopes and ReplayDone. */
-    private val protocols = ConcurrentHashMap<String, Int>()
-    /** Each peer's chunked envelopes being joined (protocol/README.md "Framing"). */
-    private val joiners = ConcurrentHashMap<String, ChunkJoiner>()
-    private val trusted = ConcurrentHashMap.newKeySet<String>()   // peer ids that passed Hello
-    private val rejected = ConcurrentHashMap.newKeySet<String>()  // links told NOT_PAIRED since they connected
+    private val links = ConcurrentHashMap<String, Link.Ble>()
+    private val rejected = ConcurrentHashMap.newKeySet<String>()      // links told NOT_PAIRED since they connected
     private val droppedOnce = ConcurrentHashMap.newKeySet<String>()   // links already dropped for a missing Hello
-    @Volatile private var pairingUntil = 0L
-    private var kaN = 0
+    private val desk = PairingDesk { n -> ByteArray(n).also(java.security.SecureRandom()::nextBytes) }
+    @Volatile private var shownCode: String? = null
+    @Volatile private var pairingUntil = 0L                           // 0: open until a phone pairs
+    private val pairExec = Bg.single("pairing")
+    private val dirty = HashSet<Int>()
     private var lastHotspotOn = false
     private var lastHotspotRadio = false
-    private val pairExec = Bg.single("pairing")
-
     private var relayStarted = false
+
+    internal val mac: MacLink get() = macLink
+
+    private fun prefs() = app.getSharedPreferences("relay", Context.MODE_PRIVATE)
+
+    private fun event(fill: Event.Builder.() -> Unit): Packet {
+        val event = Event.newBuilder().apply(fill)
+        return Packet.newBuilder().setEvent(event).build()
+    }
+
+    // ------------------------------------------------------------- start
 
     /** Once per process: a second start (the service recreated in a live process) would build a second GATT server,
      *  advertising set and audio bridge. */
@@ -92,563 +148,614 @@ object Relay {
         CallRegistry.init(app)
         VoiceGate.init(app)
         Api.refreshSupportTable(app)          // newest phone tiers from hermessim.keremgok.tr (bundled copy as fallback)
-        if (pinned() == null) openPairing(FIRST_PAIRING_WINDOW_MS)
-        macLink = MacLink(app, ::macStatus, { Hotspot.info(app).passphrase }, ::macCommand,
-            changed = { main.removeCallbacks(pushStatus); main.postDelayed(pushStatus, 250) },
-            unbond = { address -> pairExec.execute { RootBt.unbond(app, address) } },
-            control = { address, value -> MacControlRunner.run(app, main, address, value) })
-        ble = BleLink(app, ::onFrame, ::onLink, ::pairable, macLink)
-        ble.onServiceReady = { askForHello() }
-        ble.start()
-        val adapter = (app.getSystemService(android.content.Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager).adapter
-        audio = AudioBridge(adapter, ble).also { it.start() }
+        startLinks()
         Push.start(app)
         Health.init(app)
         DataLimit.init(app)
-        RemoteLink.start(app, { bytes -> main.post { runCatching { receive(Peer.Internet, bytes) }.onFailure { Log.e(TAG, "remote frame failed: $it") } } }) { present, wasThere ->
-            main.post {
-                // A room blip mid-call doesn't touch the call's audio (TURN carries it); it ends with the call.
-                if (!present) { trusted.remove(Peer.Internet.id); if (CallRegistry.snapshot().none { it.state != CallEvent.State.ENDED }) RemoteCall.close("the phone left the room") }
-                // The iPhone was already in the room when we (re)joined: it said Hello to an earlier us. A joining
-                // iPhone says Hello by itself, so no request then (that doubled every Hello, 17 Oct).
-                else if (wasThere && Peer.Internet.id !in trusted && pinned() != null) error(Peer.Internet, 0, Error.Code.HELLO_REQUIRED, "host restarted")
-            }
-        }
-        MobileData.watch(app) { main.removeCallbacks(pushStatus); main.postDelayed(pushStatus, 800) }
-        Updater.start(app) { main.removeCallbacks(pushStatus); main.postDelayed(pushStatus, 500) }
-
-        // Hotspot on/off, connected clients and data usage -> push status to the client (debounced). Box mode and the
-        // Wi-Fi rule see a hotspot paused for a call as on: no network-mode or Wi-Fi change in the middle of the call.
-        val statusChanged = {
-            val radio = Hotspot.isOn(app)
-            if (radio != lastHotspotRadio) { lastHotspotRadio = radio; HotspotPause.hotspotChanged(radio) }
-            val hsOn = radio || HotspotPause.paused
-            if (hsOn != lastHotspotOn) { lastHotspotOn = hsOn; Box.hotspotChanged(hsOn); HostWifi.evaluate("hotspot ${if (hsOn) "on" else "off"}") }
-            main.removeCallbacks(pushStatus); main.postDelayed(pushStatus, 250); Unit   // widgets: as fast as it's sane
-        }
-        HotspotPause.init(app, ::bleNear) { main.removeCallbacks(pushStatus); main.postDelayed(pushStatus, 250) }
-        Box.start(app, statusChanged)
-        // Battery level / charging changes reach the iPhone (app and widget) right away, not with the next other update.
-        var lastBattery = -1 to false
-        app.registerReceiver(object : android.content.BroadcastReceiver() {
-            override fun onReceive(c: Context, i: android.content.Intent) {
-                val level = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-                val plugged = i.getIntExtra(BatteryManager.EXTRA_STATUS, -1) == BatteryManager.BATTERY_STATUS_CHARGING
-                if ((level to plugged) != lastBattery) { lastBattery = level to plugged; statusChanged() }
-                // A held limit stops charging with the charger still in: the charge state needs "plugged", not "charging"
-                Box.batteryChanged(level, i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0)
-            }
-        }, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
-        DataUsage.init(app, statusChanged)
-        HotspotGuard.init(app, statusChanged)
-        Hotspot.watch(app, statusChanged)
-        HostWifi.start(app, near = ::bleNear, inCall = { CallRegistry.snapshot().any { it.state != CallEvent.State.ENDED } },
-            paired = { pinned() != null }, hotspotOn = { Hotspot.isOnOrStarting(app) }, changed = statusChanged)
-        // Pairing window open: accept Bluetooth pairing by ourselves (headless hosts can't tap "Pair"). Also the paired
-        // iPhone pairing again after iOS dropped its keys (accessory removed, network settings reset): with no screen,
-        // nobody could tap "Pair" and the iPhone hung at "Connecting" (19 Oct). The Hello pin still decides who is
-        // served; other requests outside the window are left to Android.
-        app.registerReceiver(object : android.content.BroadcastReceiver() {
-            override fun onReceive(c: Context, i: android.content.Intent) {
-                i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)?.let(::pairingRequest)
-            }
-        }, android.content.IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST).apply { priority = 1000 })
+        watchParts()
+        watchPairingRequests()
         CallRuleStore.init(app)
         Sims.protectNewSims(app)
         Sims.volteOn(app)
         Sims.log(app)
-        Sims.watch(app, changed = { Sims.protectNewSims(app); Sims.volteOn(app); Sims.log(app); statusChanged() }, radioChanged = statusChanged)
-        Sims.attemptsKnown = { main.post { statusChanged() } }
-        main.postDelayed(keepAlive, KEEPALIVE_MS)
+        if (pinned() == null) openPairing(0)
+        main.postDelayed(tick, TICK_MS)
         scheduleHeartbeat()
         main.postDelayed({ guardSmsRole(); guardDialerRole() }, 20_000)   // after the daemon is up (service.sh claims SMS 90 s after boot too)
-        // This process may have been started by the call or the text itself (the host app had died): they reached Relay
-        // before start(), when Push couldn't send yet, and the iPhone away never heard of them (audit, 1 Nov 2026).
-        main.post {
-            if (!bleNear()) CallRegistry.snapshot().filter { it.incoming && it.state == CallEvent.State.RINGING }.forEach(Push::call)
-            val recent = System.currentTimeMillis() - 120_000
-            SmsStore.pending(app).filter { it.receivedMs > recent }.forEach(Push::sms)
-        }
-        Log.i(TAG, "relay up; pinned client=${pinned() ?: "none"}")
+        main.post { pushMissed() }
+        touch(*HostState.ALL.toIntArray())
+        Log.i(TAG, "relay up; pinned client=${pinned()?.take(8) ?: "none"}")
     }
 
-    /** A Bluetooth pairing request (the receiver in [start]): confirmed as root when it is one of ours. */
+    private fun startLinks() {
+        macLink = MacLink(app, ::macStatus, { Hotspot.info(app).passphrase }, ::macCommand,
+            changed = { touch(StateBook.PEERS) },
+            unbond = { address -> pairExec.execute { RootBt.unbond(app, address) } },
+            control = { address, value -> MacControlRunner.run(app, main, address, value) })
+        ble = BleLink(app, ::onBytes, ::onLink, { device, max -> links[device.address]?.channel?.next(max) ?: ByteArray(0) },
+            ::pairable, macLink)
+        ble.onServiceReady = { askForHello() }
+        ble.start()
+        val adapter = (app.getSystemService(Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager).adapter
+        audio = AudioBridge(adapter, ble).also { it.start() }
+        RemoteLink.start(app, { bytes -> main.post { receive(Link.Internet, bytes) } }) { present, _ -> main.post { roomChanged(present) } }
+    }
+
+    /** The parts whose changes the peers hear: each names the state groups it moves. */
+    private fun watchParts() {
+        val hotspot = intArrayOf(StateBook.HOTSPOT, StateBook.HOTSPOT_CLIENTS, StateBook.HOTSPOT_LIMITS, StateBook.WIFI, StateBook.NETWORK)
+        val lines = intArrayOf(StateBook.LINES, StateBook.SIGNAL, StateBook.NETWORK)
+        MobileData.watch(app) { touch(StateBook.NETWORK, delayMs = 800) }
+        Updater.start(app) { touch(StateBook.UPDATE, delayMs = 500) }
+        HotspotPause.init(app, ::bleNear) { touch(StateBook.HOTSPOT, StateBook.HOTSPOT_LIMITS) }
+        Box.start(app) { hotspotMoved(); touch(StateBook.POWER, *lines) }
+        watchBattery()
+        DataUsage.init(app) { touch(StateBook.HOTSPOT_USAGE, StateBook.HOTSPOT) }
+        HotspotGuard.init(app) { touch(StateBook.HOTSPOT_CLIENTS) }
+        Hotspot.watch(app) { hotspotMoved(); touch(*hotspot) }
+        HostWifi.start(app, near = ::bleNear, inCall = CallRegistry::live, paired = { pinned() != null },
+            hotspotOn = { Hotspot.isOnOrStarting(app) }, changed = { touch(StateBook.WIFI, StateBook.NETWORK) })
+        Sims.watch(app, changed = { Sims.protectNewSims(app); Sims.volteOn(app); Sims.log(app); touch(*lines) },
+            radioChanged = { touch(*lines) })
+        Sims.attemptsKnown = { touch(StateBook.LINES) }
+    }
+
+    /** Battery level and charging reach the phone (app and widget) right away, not with the next other change. */
+    private fun watchBattery() {
+        var last = -1 to false
+        app.registerReceiver(object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                val level = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+                val charging = i.getIntExtra(BatteryManager.EXTRA_STATUS, -1) == BatteryManager.BATTERY_STATUS_CHARGING
+                if ((level to charging) != last) { last = level to charging; touch(StateBook.POWER) }
+                // A held limit stops charging with the charger still in: the charge state needs "plugged", not "charging"
+                Box.batteryChanged(level, i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0)
+            }
+        }, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+    }
+
+    /**
+     * Hotspot on or off: the call pause, box mode and the host Wi-Fi rule follow it. Box mode and the Wi-Fi rule see a
+     * hotspot paused for a call as on: no network-mode or Wi-Fi change in the middle of the call.
+     */
+    private fun hotspotMoved() {
+        val radio = Hotspot.isOn(app)
+        if (radio != lastHotspotRadio) { lastHotspotRadio = radio; HotspotPause.hotspotChanged(radio) }
+        val on = radio || HotspotPause.paused
+        if (on == lastHotspotOn) return
+        lastHotspotOn = on
+        Box.hotspotChanged(on)
+        HostWifi.evaluate("hotspot ${if (on) "on" else "off"}")
+    }
+
+    /**
+     * This process may have been started by the call or the text itself (the host app had died): they reached the relay
+     * before [start], when nothing could be pushed, and a phone that is away never heard of them (audit, 1 Nov 2026).
+     */
+    private fun pushMissed() {
+        val log = Events.log(app)
+        if (!bleNear()) CallRegistry.snapshot().filter { it.incoming && it.phase == CallPhase.CALL_PHASE_RINGING }
+            .forEach { Push.call(log.callCursor, it) }
+        val recent = System.currentTimeMillis() - 120_000
+        log.textsAfter(0).forEach { (seq, bytes) ->
+            val event = runCatching { Event.parseFrom(bytes) }.getOrNull()
+            if (event != null && event.hasTextIn() && event.textIn.atMs > recent) Push.text(seq, bytes)
+        }
+    }
+
+    // ------------------------------------------------------------- what other parts ask
+
+    /** For the setup screen: paired client model (null = not paired), connected now, pairing code shown. */
+    fun pairedClient(): String? = pinned()?.let { prefs().getString("client_model", null) ?: "your phone" }
+
+    /** For the setup screen: Android's last answer to our advertising ([BleLink.advStatus]; null: none yet). */
+    fun advertisingStatus(): Int? = if (::ble.isInitialized) ble.advStatus else null
+
+    /** The paired phone is here on Bluetooth (it said Hello on a subscribed link). */
+    private fun bleNear(): Boolean = ::ble.isInitialized && ble.subscribers().any { links[it.address]?.channel?.serving == true }
+
+    fun clientConnected(): Boolean = bleNear() || (RemoteLink.peerPresent && Link.Internet.channel.serving)
+
+    /** [start] ran in this process (Retire can run from a host whose service never came up). */
+    fun started(): Boolean = ::app.isInitialized
+
+    /** The internet link went up or down: the phone's Host tab shows it. */
+    fun remoteChanged() { if (started()) touch(StateBook.REMOTE) }
+
+    /** A call-audio profile appeared (built after a daemon restart): the phone can offer the call test. */
+    fun voiceChanged() { if (started()) touch(StateBook.VOICE, StateBook.HOTSPOT_LIMITS) }
+
+    // The setup screen can ask before the service has started (fresh install: crashed on the Redmi, 18 Oct).
+    private fun pinned(): String? = if (!::app.isInitialized) null else prefs().getString("pinned_install_id", null)
+
+    // ------------------------------------------------------------- pairing
+
+    /** The code a phone needs to pair now, or null while the host takes no new phone. */
+    fun pairingCode(): String? = shownCode
+
+    fun pairingOpen(): Boolean = shownCode != null
+
+    /** Seconds until the code goes; 0 when it stays until a phone pairs, or when none is shown. */
+    fun pairingSecondsLeft(): Int = if (pairingUntil == 0L) 0 else secondsLeft(pairingUntil, SystemClock.elapsedRealtime())
+
+    /** A phone may pair now: hosts say so in their advertisement, and a phone's "Add host" sheet lists only those. */
+    fun pairable(): Boolean = pairingOpen()
+
+    /**
+     * Shows a new pairing code for [ms], or with 0 until a phone pairs (a host without a phone always shows one). The
+     * host's own screen comes up with it: the code is nowhere else.
+     */
+    fun openPairing(ms: Long = PAIRING_WINDOW_MS) = Bg.onMain {
+        desk.open()
+        pairingUntil = if (ms > 0) SystemClock.elapsedRealtime() + ms else 0
+        Log.i(TAG, "pairing code shown${if (ms > 0) " for ${ms / 1000} s" else ""}")
+        pairingChanged()
+        if (ms > 0) {
+            main.postDelayed({ closePairingWhenDue() }, ms + 500)
+            runCatching { app.startActivity(Intent(app, SetupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("pairing", true)) }
+                .onFailure { Log.w(TAG, "pairing screen: $it") }
+        }
+    }
+
+    private fun closePairingWhenDue() {
+        if (pairingUntil == 0L || SystemClock.elapsedRealtime() < pairingUntil) return
+        if (pinned() == null) { pairingUntil = 0; return }        // nobody paired: the code stays
+        desk.close()
+        pairingUntil = 0
+        Log.i(TAG, "pairing code gone")
+        pairingChanged()
+    }
+
+    private fun pairingChanged() {
+        shownCode = desk.code
+        if (::ble.isInitialized) ble.refreshAdvertising()
+    }
+
+    /**
+     * Bluetooth pairing requests are confirmed as root while the host shows a code (headless hosts can't tap "Pair").
+     * Also the paired phone pairing again after its system dropped the keys (accessory removed, network settings
+     * reset): with no screen, nobody could tap "Pair" and the phone hung at "Connecting" (19 Oct). The pairing code
+     * and the pinned install id still decide who is served; other requests are left to Android.
+     */
+    private fun watchPairingRequests() {
+        app.registerReceiver(object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)?.let(::pairingRequest)
+            }
+        }, android.content.IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST).apply { priority = 1000 })
+    }
+
     private fun pairingRequest(dev: BluetoothDevice) {
         val address = dev.address
-        val known = pinned() != null && address == app.getSharedPreferences("relay", Context.MODE_PRIVATE).getString("client_mac", null)
-        val forMac = macLink.windowOpen()       // a Mac pairs while the client holds its window open
+        val known = pinned() != null && address == prefs().getString("client_mac", null)
+        val forMac = macLink.windowOpen()       // a Mac pairs while the phone holds its window open
         if (!pairable() && !known && !forMac) return
         if (known && !pairable()) Log.i(TAG, "pairing request from the paired phone (its keys were reset): accepting")
         if (forMac) Log.i(TAG, "pairing request inside the Mac window: accepting")
         pairExec.execute { RootBt.confirm(app, address) }
     }
 
-    /** For the setup screen: paired client model (null = not paired), connected now, pairing window open. */
-    fun pairedClient(): String? = pinned()?.let {
-        app.getSharedPreferences("relay", Context.MODE_PRIVATE).getString("client_model", null) ?: "your phone"
-    }
-    /** For the setup screen: Android's last answer to our advertising ([BleLink.advStatus]; null: none yet). */
-    fun advertisingStatus(): Int? = if (::ble.isInitialized) ble.advStatus else null
-
-    /** The paired client is here on Bluetooth (said Hello on a subscribed link). */
-    private fun bleNear(): Boolean = ::ble.isInitialized && ble.subscribers().any { it.address in trusted }
-
-    fun clientConnected(): Boolean = ::ble.isInitialized && ble.subscribers().any { it.address in trusted } ||
-        (RemoteLink.peerPresent && Peer.Internet.id in trusted)
-
-    /** Remote link up/down: the client's Host tab shows it. */
-    fun remoteChanged() = main.post(pushStatus)
-    /** A call-audio profile appeared (built after a daemon restart): the client can offer the call test. Before
-     *  [start] there is no one to tell: the Hello's status carries it. */
-    fun voiceChanged() { if (started()) main.post(pushStatus) }
-    fun pairingOpen(): Boolean = SystemClock.elapsedRealtime() < pairingUntil
-    fun pairingSecondsLeft(): Int = secondsLeft(pairingUntil, SystemClock.elapsedRealtime())
-
-    /**
-     * An iPhone may pair now: the window is open, or no iPhone is paired (a new host, or one its iPhone forgot: no
-     * pairing button to find on a phone without a screen). Hosts say so in their advertisement, and the iPhone's
-     * "Add host" sheet lists only those, so a host paired to someone else never shows up there (19 Oct).
-     */
-    fun pairable(): Boolean = pinned() == null || pairingOpen()
-
-    fun openPairing(ms: Long = PAIRING_WINDOW_MS) {
-        pairingUntil = SystemClock.elapsedRealtime() + ms
-        Log.i(TAG, "pairing window open for ${ms / 1000} s")
-        pairableChanged()
-        main.postDelayed({ pairableChanged() }, ms + 500)       // the window closes by itself
+    private fun pairStart(link: Link, m: PairStart) {
+        if (!link.bluetooth) return refuse(link, Code.CODE_NOT_ALLOWED)
+        val (hostKey, salt) = desk.offer(m.publicKey.toByteArray()) ?: return refuse(link, Code.CODE_PAIRING_CLOSED)
+        sendNow(link, Packet.newBuilder().setPairOffer(PairOffer.newBuilder().setPublicKey(ByteString.copyFrom(hostKey))
+            .setSalt(ByteString.copyFrom(salt)).setTriesLeft(desk.triesLeft)).build())
     }
 
-    private fun pairableChanged() { if (::ble.isInitialized) ble.refreshAdvertising() }
-
-    // ------------------------------------------------------------- host -> client
-
-    fun callEvent(e: CallEvent) {
-        // Fast BLE link while any call is ringing/dialing/active (alert latency + audio), relaxed when idle.
-        if (::ble.isInitialized) {
-            val othersLive = CallRegistry.snapshot().any { it.callId != e.callId && it.state != CallEvent.State.ENDED }
-            runCatching { ble.setCallPriority(e.state != CallEvent.State.ENDED || othersLive) }
+    private fun pairProof(link: Link, m: PairProof) {
+        val claimed = link.claimed
+        if (!link.bluetooth || claimed == null) return refuse(link, Code.CODE_NOT_PAIRED)
+        when (desk.check(m.proof.toByteArray(), claimed)) {
+            PairResult.PAIRED -> paired(link, claimed)
+            PairResult.CLOSED -> refuse(link, Code.CODE_PAIRING_CLOSED)
+            PairResult.WRONG -> {
+                Log.w(TAG, "pairing: wrong proof from ${link.id}, ${desk.triesLeft} tries left")
+                pairingChanged()                                  // the third wrong proof made a new code
+                sendNow(link, Packet.newBuilder().setRefuse(Refuse.newBuilder().setCode(Code.CODE_PAIRING_WRONG)
+                    .setTriesLeft(desk.triesLeft)).build())
+            }
         }
-        Log.i(TAG, "call ${e.callId.take(8)} ${e.state} incoming=${e.incoming} slot=${e.slot} cause=${e.cause}")
-        if (e.state == CallEvent.State.ENDED && CallRegistry.snapshot().none { it.callId != e.callId && it.state != CallEvent.State.ENDED }) {
+    }
+
+    /** The proof was right: this install id is the phone from now on. A phone before it loses its keys. */
+    private fun paired(link: Link, installId: ByteArray) {
+        val id = installId.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        if (pinned() != null && pinned() != id) forgetKeys()
+        prefs().edit().putString("pinned_install_id", id).apply()
+        pairingUntil = 0
+        rejected.remove(link.id)
+        pairingChanged()
+        Log.i(TAG, "PAIRED with install_id=${id.take(8)}")
+    }
+
+    // ------------------------------------------------------------- host -> phone
+
+    fun callEvent(e: CallState) = Bg.onMain {
+        if (!started()) return@onMain
+        val live = CallRegistry.live()
+        // Fast BLE link while any call is ringing/dialing/active (alert latency + audio), relaxed when idle.
+        runCatching { ble.setCallPriority(live) }
+        Log.i(TAG, "call ${e.call} ${e.phase} incoming=${e.incoming} line=${if (e.hasLine()) e.line else -1} end=${e.end}")
+        if (e.phase == CallPhase.CALL_PHASE_ENDED && !live) {
             RemoteCall.close("call ended")
             main.post { HostWifi.evaluate("call ended") }
         }
-        broadcast(Envelope.newBuilder().setCallEvent(e))
-        // No iPhone on Bluetooth: the app may be closed, iOS only starts it for a push. One in the room gets the event
-        // above as well; it rings the same call once.
-        if (e.incoming && e.state == CallEvent.State.RINGING && !bleNear()) Push.call(e)
+        val seq = Events.log(app).nextCall()
+        broadcast(event { setSeq(seq); call = e })
+        // No phone on Bluetooth: the app may be closed, and its system only starts it for a push. One in the room gets
+        // the event above as well; it rings the same call once.
+        if (e.incoming && e.phase == CallPhase.CALL_PHASE_RINGING && !bleNear()) Push.call(seq, e)
     }
 
-    fun smsReceived(m: SmsReceived) {
-        broadcast(Envelope.newBuilder().setSmsReceived(m))
-        Push.sms(m)
-        if (::macLink.isInitialized) macLink.textArrived(m)
+    /** A text came in ([event]: its stored `Event` bytes): to the phone now, as a push if it does not store it, and to the Macs. */
+    fun textIn(seq: Long, text: TextIn, event: ByteArray) = Bg.onMain {
+        if (!started()) return@onMain
+        textEvent(event)
+        Push.text(seq, event)
+        macLink.textArrived(seq, text)
     }
 
-    fun smsSendResult(r: SmsSendResult) = broadcast(Envelope.newBuilder().setSmsSendResult(r))
-
-    /** A text the host sent by itself: to the clients served now, never as a push. */
-    fun hostSmsSent(m: HostSmsSent) = broadcast(Envelope.newBuilder().setHostSmsSent(m))
-
-    /** SetHotspotConfig: a change of the monthly limit alone applies without restarting a running hotspot. */
-    private fun hotspotConfig(d: Peer, seq: Int, c: com.keremgok.hermessim.protocol.v1.Hotspot) {
-        val limitChanged = DataLimit.set(c.monthlyLimitBytes)
-        if (limitChanged && DataLimitCore.onlyLimit(c, Hotspot.info(app))) {
-            Log.i(TAG, "hotspot monthly limit ${c.monthlyLimitBytes / 1_000_000} MB")
-            main.post(pushStatus)
-            return
-        }
-        Hotspot.configure(app, c) { ok, detail ->
-            if (!ok) error(d, seq, Error.Code.BAD_REQUEST, "hotspot: $detail")
-            main.postDelayed({ broadcast(Envelope.newBuilder().setHostStatus(status())) }, 1500)
-        }
+    /** A stored text event to the phone served now. It stays stored until an EventAck names it. */
+    fun textEvent(event: ByteArray) = Bg.onMain {
+        if (!started()) return@onMain
+        val seq = runCatching { Event.parseFrom(event).seq }.getOrDefault(0)
+        targets().forEach { link -> link.textSeq = maxOf(link.textSeq, seq); sendBytes(link, Fields.bytes(Packet.EVENT_FIELD_NUMBER, event)) }
     }
 
-    /** This month's hotspot usage against its limit (DataLimit): a notice, and at the limit the hotspot off once. */
-    private fun dataLimit(h: com.keremgok.hermessim.protocol.v1.Hotspot) {
-        val out = DataLimit.check(h)
-        val kind = out.notice ?: return
-        hostNotice(HostNotice.newBuilder().setKind(kind).setValue(out.percent).setAtMs(System.currentTimeMillis()).build())
-        if (!out.cutOff) return
-        Log.i(TAG, "monthly data limit used up: hotspot off")
-        switchHotspot(false, 0) { _, detail -> Log.w(TAG, "data limit: hotspot not turned off: $detail") }
+    /** What became of a text the host sent. A status no phone was there to hear is kept (SmsSender.untold). */
+    fun textStatus(status: TextStatus) = Bg.onMain {
+        if (!started()) return@onMain
+        if (broadcast(event { textStatus = status })) SmsSender.told(status.text)
     }
 
-    /** A health notice (Health): to the clients served now and, with none on Bluetooth, as a push too. */
-    private fun hostNotice(n: HostNotice) {
-        Log.i(TAG, "notice ${n.kind} value=${n.value} slot=${n.slot}")
-        broadcast(Envelope.newBuilder().setHostNotice(n))
+    /** The host closed the internet audio path by itself (RemoteCall). */
+    fun audioPathClosed() = Bg.onMain { broadcast(event { audioPathClosed = AudioPathClosed.getDefaultInstance() }) }
+
+    /** A health notice: to the phone served now and, with none on Bluetooth, as a push too. */
+    private fun notice(n: Notice) {
+        Log.i(TAG, "notice ${n.kind} value=${n.value} line=${if (n.hasLine()) n.line else -1}")
+        broadcast(event { notice = n })
         if (!bleNear()) Push.notice(n)
     }
 
-    /** Bluetooth clients when any is serving, else the remote room. */
-    private fun targets(): List<Peer> {
+    /** Bluetooth links when any serves, else the internet room. */
+    private fun targets(): List<Link> {
         if (!::ble.isInitialized) return emptyList()
-        val viaBle = ble.subscribers().filter { it.address in trusted }.map { Peer.Ble(it, ble) }
+        val viaBle = ble.subscribers().mapNotNull { links[it.address] }.filter { it.channel.serving }
         if (viaBle.isNotEmpty()) return viaBle
-        return if (RemoteLink.peerPresent && Peer.Internet.id in trusted) listOf(Peer.Internet) else emptyList()
+        return if (RemoteLink.peerPresent && Link.Internet.channel.serving) listOf(Link.Internet) else emptyList()
     }
 
-    private fun broadcast(b: Envelope.Builder) {
-        val targets = targets()
-        if (b.bodyCase == Envelope.BodyCase.HOST_STATUS && targets.isNotEmpty()) Updater.informed()
-        if (targets.isEmpty()) Log.i(TAG, "no client connected; ${b.bodyCase} not sent (SMS stay queued)")
-        targets.forEach { send(it, b) }
+    /** True when a phone was there to hear it. */
+    private fun broadcast(packet: Packet): Boolean {
+        val to = targets()
+        if (to.isEmpty()) Log.i(TAG, "no phone connected; ${packet.kindCase} not sent")
+        to.forEach { send(it, packet) }
+        return to.isNotEmpty()
     }
 
-    private fun send(p: Peer, b: Envelope.Builder, replyTo: Int = 0) {
-        val next = seqs.getOrPut(p.id) { AtomicInteger() }.incrementAndGet()
-        val whole = b.setSeq(next).setReplyTo(replyTo).build().toByteArray()
-        frames(p, b, whole, next).forEach { bytes ->
-            runCatching { p.send(bytes) }.onFailure { Log.e(TAG, "send ${b.bodyCase} to ${p.id} failed: $it") }
+    private fun send(link: Link, packet: Packet, answers: Request.OpCase? = null) {
+        val bytes = packet.toByteArray()
+        sendBytes(link, bytes, StreamChoice.of(packet, bytes.size, answers))
+    }
+
+    /** A serialized `Packet` to a link that is served; it leaves when the link's credit allows. */
+    private fun sendBytes(link: Link, packet: ByteArray, stream: Int = if (packet.size > Wire.BULK_FROM) Wire.BULK else Wire.NORMAL): Int {
+        if (!link.channel.serving) return stream
+        link.channel.send(packet, stream)
+        link.kick()
+        return stream
+    }
+
+    /** To a link before its Hello was accepted: the answers of the session's start and of pairing. */
+    private fun sendNow(link: Link, packet: Packet) = with(link) {
+        channel.send(packet.toByteArray(), Wire.URGENT)
+        kick()
+    }
+
+    /** A request's reply (Ask.answer, any thread). The last reply of a request is kept for a peer that asks again. */
+    internal fun reply(ask: Ask, code: Code, args: LongArray, fill: (Reply.Builder) -> Unit) = Bg.onMain {
+        val channel = ask.link.channel
+        if (channel.sessionId != ask.session) return@onMain            // the session ended: its ids mean nothing now
+        val reply = Reply.newBuilder().setId(ask.req.id).setCode(code).addAllArgs(args.toList()).also(fill).build()
+        val packet = Packet.newBuilder().setReply(reply).build()
+        val bytes = packet.toByteArray()
+        if (!reply.hasLog() || reply.log.last) ask.link.running.remove(ask.req.id)
+        if (!reply.hasLog()) channel.replies.keep(ask.req.id, bytes)
+        if (code != Code.CODE_OK) Log.w(TAG, "${ask.req.opCase} from ${ask.link.id}: $code ${args.toList()}")
+        sendBytes(ask.link, bytes, StreamChoice.of(packet, bytes.size, ask.req.opCase))
+    }
+
+    /** The kept reply of a request that came again. */
+    internal fun resend(link: Link, reply: ByteArray, op: Request.OpCase) {
+        sendBytes(link, reply, StreamChoice.of(Packet.getDefaultInstance(), reply.size, op))
+    }
+
+    // ------------------------------------------------------------- state
+
+    /** The parts behind [groups] changed: they are read again shortly and what differs goes to the phone. Any thread. */
+    internal fun touch(vararg groups: Int, delayMs: Long = 250) = Bg.onMain {
+        dirty.addAll(groups.toList())
+        main.removeCallbacks(flush)
+        main.postDelayed(flush, delayMs)
+    }
+
+    /** As [touch], after the phone system had time to settle. */
+    internal fun touchLater(afterMs: Long, vararg groups: Int) { main.postDelayed({ touch(*groups) }, afterMs) }
+
+    // Runs on the main thread after every change: a failure here must cost one update, not the process.
+    private val flush = Runnable {
+        Bg.guard("state") {
+            val groups = dirty.toSet()
+            dirty.clear()
+            val (reading, signalWait) = HostState.refresh(app, groups, macLink::peers)
+            signalWait?.let { touchLater(it + 50, StateBook.SIGNAL) }
+            sendChanges()
+            if (StateBook.POWER in groups || StateBook.LINES in groups)
+                Health.notices(HealthView(reading.battery, reading.charging, reading.sims, Box.chargeState, Box.chargeLimit)).forEach(::notice)
+            if (StateBook.HOTSPOT_USAGE in groups) dataLimit(reading)
         }
+        if (::macLink.isInitialized) macLink.statusChanged()            // the Macs hear the same changes
     }
 
-    /** The frames that carry an envelope to [p]: one, its chunks, or none when it can't go at all. */
-    private fun frames(p: Peer, b: Envelope.Builder, whole: ByteArray, seq: Int): List<ByteArray> {
-        if (whole.size <= Framing.MAX_FRAME) return listOf(whole)
-        if ((protocols[p.id] ?: 1) < Chunks.MIN_PROTOCOL) return listOfNotNull(fitOneFrame(b, whole))
-        // A protocol 2 peer takes it whole: in chunks over Bluetooth; over the internet as one message while the
-        // relay's 64 KB message can hold it, else in chunks too (a larger message makes the relay close the socket).
-        if (Chunks.goesWhole(whole.size, p is Peer.Ble, Framing.MAX_FRAME)) return listOf(whole)
-        val chunks = Chunks.split(whole, seq)
-        Log.i(TAG, "${b.bodyCase} is ${whole.size} bytes: sent in ${chunks.size} chunks")
-        return chunks.map { Envelope.newBuilder().setChunk(it).build().toByteArray() }
+    /** The `State` with what changed since the last one, to the links served now; [except] gets a base instead. */
+    private fun sendChanges(except: Link? = null) {
+        val state = HostState.book.next() ?: return
+        val to = targets().filter { it !== except }
+        to.forEach { link -> link.stateSeq = HostState.book.seq; sendBytes(link, Fields.bytes(Packet.STATE_FIELD_NUMBER, state)) }
+        if (to.isNotEmpty()) Updater.informed()
     }
 
-    /** A version 1 peer: a status sheds its optional parts to fit one frame; anything else too big is dropped. */
-    private fun fitOneFrame(b: Envelope.Builder, whole: ByteArray): ByteArray? {
-        var bytes = whole
-        // A status that outgrew one frame (release notes, many saved networks or hotspot clients) is never dropped:
-        // the iPhone would hear nothing from this host again. Shed the optional parts until it fits (audit, 19 Oct).
-        if (b.bodyCase == Envelope.BodyCase.HOST_STATUS) {
-            val s = b.hostStatus.toBuilder()
-            val steps = listOf<() -> Unit>(
-                { s.setUpdate(s.update.toBuilder().clearNotes()) },
-                { s.setHotspot(s.hotspot.toBuilder().clearClients()) },
-                { s.setHostWifi(s.hostWifi.toBuilder().clearSaved()) },
-            )
-            for (step in steps) {
-                step(); b.setHostStatus(s)
-                bytes = b.build().toByteArray()
-                if (bytes.size <= Framing.MAX_FRAME) break
-            }
-            Log.w(TAG, "status trimmed to ${bytes.size} bytes")
+    /** GetState: the named groups read again and sent whole, with the book's current seq. */
+    internal fun sendState(link: Link, groups: List<Int>) {
+        val wanted = if (groups.isEmpty()) HostState.ALL else groups.toSet()
+        val (reading, _) = HostState.refresh(app, wanted - StateBook.SIGNAL, macLink::peers)
+        if (StateBook.SIGNAL in wanted) {
+            HostState.signal.asked(SystemClock.elapsedRealtime())
+            HostState.signal(reading, force = true)
         }
-        if (bytes.size > Framing.MAX_FRAME) { Log.e(TAG, "${b.bodyCase} is ${bytes.size} bytes: too big to send, dropped"); return null }
-        return bytes
+        sendChanges()                         // what the reading changed goes to every link first, with its own seq
+        link.stateSeq = HostState.book.seq
+        sendBytes(link, Fields.bytes(Packet.STATE_FIELD_NUMBER, HostState.book.whole(groups)))
     }
 
-    // ------------------------------------------------------------- client -> host
+    /** This month's hotspot usage against its limit (DataLimit): a notice, and at the limit the hotspot off once. */
+    private fun dataLimit(reading: HostState.Reading) {
+        val out = DataLimit.check(reading.usage.month, reading.hotspot.on)
+        val kind = out.notice ?: return
+        notice(Notice.newBuilder().setKind(kind).setValue(out.percent.toLong()).setAtMs(System.currentTimeMillis()).build())
+        if (!out.cutOff) return
+        Log.i(TAG, "monthly data limit used up: hotspot off")
+        switchHotspot(false, 0) { code -> if (code != Code.CODE_OK) Log.w(TAG, "data limit: hotspot not turned off: $code") }
+    }
 
-    private fun onLink(d: BluetoothDevice, up: Boolean) {
+    // ------------------------------------------------------------- phone -> host
+
+    private fun onLink(d: BluetoothDevice, up: Boolean) = main.post {
         rejected.remove(d.address)
-        if (!up) {
-            val wasServed = trusted.remove(d.address)
-            protocols.remove(d.address)
-            joiners.remove(d.address)
-            Log.i(TAG, "client ${d.address} gone")
-            main.post {
-                HostWifi.evaluate("Bluetooth gone")
-                HotspotPause.transportChanged("Bluetooth gone")
-                // The internet room serves now. What Bluetooth still had queued, or would have carried meanwhile, went with
-                // the link, and the iPhone, already in the room, says no new Hello there: a call's end or a text was lost
-                // until the next one (audit, 1 Nov 2026).
-                if (wasServed && targets().singleOrNull() === Peer.Internet) {
-                    Log.i(TAG, "Bluetooth gone, the internet room serves: sending it the state")
-                    replay(Peer.Internet)
-                }
-            }
-        } else Log.i(TAG, "client ${d.address} subscribed; waiting for Hello")
-    }
-
-    /** BLE frames arrive on binder threads: handle them on main, and never let one take the process down. */
-    private fun onFrame(dev: BluetoothDevice, bytes: ByteArray) {
-        main.post { runCatching { receive(Peer.Ble(dev, ble), bytes) }.onFailure { Log.e(TAG, "frame from ${dev.address} failed: $it") } }
-    }
-
-    /**
-     * One frame from a peer: a chunk waits for the rest of its envelope, anything else is handled now. Only a
-     * peer past Hello may make the host hold chunks; any other gets the usual untrusted answer.
-     */
-    private fun receive(d: Peer, bytes: ByteArray) {
-        val env = runCatching { Envelope.parseFrom(bytes) }.getOrElse { Log.w(TAG, "bad frame: $it"); return }
-        if (!env.hasChunk() || d.id !in trusted) return onPeerFrame(d, env)
-        val joiner = joiners.getOrPut(d.id) { ChunkJoiner(SystemClock::elapsedRealtime) }
-        val whole = joiner.add(env.chunk)
-        joiner.refused?.let { Log.w(TAG, "chunk from ${d.id} dropped: $it") }
-        if (whole != null) receive(d, whole)
-    }
-
-    private fun onPeerFrame(d: Peer, env: Envelope) {
-        if (env.bodyCase == Envelope.BodyCase.HELLO) return hello(d, env)
-        if (d.id !in trusted) {
-            // A paired host whose app restarted while the link stayed up: ask for a fresh Hello instead of
-            // rejecting (the client would otherwise sit on "not paired" until restarted, seen 16 Oct).
-            if (pinned() != null) return error(d, env.seq, Error.Code.HELLO_REQUIRED, "say hello first")
-            return reject(d, env.seq)
+        val link = links.getOrPut(d.address) { Link.Ble(d, ble) }
+        if (up) {
+            link.channel.newLink()
+            Log.i(TAG, "client ${d.address} subscribed; waiting for Hello")
+            return@post
         }
-        // Test rig running (adb override): the real client's switches would fight the scenario.
-        if (HostWifi.clientOverride != null && env.bodyCase in setOf(Envelope.BodyCase.SET_HOTSPOT,
-                Envelope.BodyCase.SET_HOST_WIFI, Envelope.BodyCase.SET_MOBILE_DATA))
-            return Log.i(TAG, "rig running: ${env.bodyCase} from the client ignored").let { }
-        when (env.bodyCase) {
-            Envelope.BodyCase.KEEP_ALIVE -> Log.i(TAG, "keep-alive ack n=${env.keepAlive.n}")
-            // Basic mode (no measured call audio yet): HermesSIM stays out of calls, except the guided call test.
-            // A call answered without relayed audio would play through the host itself (18 Oct).
-            Envelope.BodyCase.CALL_ACTION ->
-                if (env.callAction.action == com.keremgok.hermessim.protocol.v1.CallAction.Action.ANSWER && !VoiceGate.fullVoice)
-                    error(d, env.seq, Error.Code.BAD_REQUEST, "no call audio on this host yet: run the call test")
-                else CallRegistry.action(env.callAction)?.let { error(d, env.seq, Error.Code.NO_SUCH_CALL, it) }
-            Envelope.BodyCase.DIAL ->
-                if (!VoiceGate.fullVoice && !env.dial.voiceTest)
-                    error(d, env.seq, Error.Code.BAD_REQUEST, "no call audio on this host yet: run the call test")
-                else if (env.dial.voiceTest && !Daemon.hasProfile())   // no audio routes: a test call would unsilence the host
-                    error(d, env.seq, Error.Code.BAD_REQUEST, "this host has no audio profile: the call test can't run")
-                else CallRegistry.dial(env.dial)?.let { error(d, env.seq, Error.Code.BAD_REQUEST, it) }
-            Envelope.BodyCase.SMS_ACK -> { SmsStore.ack(app, env.smsAck.id); Log.i(TAG, "SMS ${env.smsAck.id.take(8)} acked") }
-            Envelope.BodyCase.SMS_SEND -> SmsSender.send(app, env.smsSend)
-            Envelope.BodyCase.SET_HOTSPOT_CONFIG -> hotspotConfig(d, env.seq, env.setHotspotConfig.config)
-            Envelope.BodyCase.SET_SIM -> {
-                Sims.apply(app, env.setSim, CallRegistry.anyCall())?.let { error(d, env.seq, Error.Code.BAD_REQUEST, "SIM: $it") }
-                // Switching a SIM on/off or moving data takes a few seconds to settle.
-                main.postDelayed(pushStatus, 1500); main.postDelayed(pushStatus, 6000)
-            }
-            Envelope.BodyCase.SET_BOX -> {
-                if (env.setBox.hasChargeLimit()) Box.setChargeLimit(env.setBox.chargeLimit)
-                if (env.setBox.hasOn()) Box.set(env.setBox.on)
-                main.postDelayed(pushStatus, 1500)
-            }
-            Envelope.BodyCase.UNLOCK_SIM -> Sims.unlock(app, env.unlockSim) { r ->
-                main.post {
-                    send(d, Envelope.newBuilder().setUnlockSimResult(r), env.seq)
-                    main.postDelayed(pushStatus, 2000); main.postDelayed(pushStatus, 8000)   // SIM loads, then registers
-                }
-            }
-            Envelope.BodyCase.VOICE_TEST_CHECK -> VoiceGate.check { r ->
-                main.post { send(d, Envelope.newBuilder().setVoiceTestHostResult(r), env.seq) }
-            }
-            Envelope.BodyCase.VOICE_TEST_VERDICT -> {
-                val refusal = VoiceGate.verdict(env.voiceTestVerdict)
-                refusal?.let { error(d, env.seq, Error.Code.BAD_REQUEST, "call test: $it") }
-                VoiceGate.report(env.voiceTestVerdict, refusal)
-                main.post(pushStatus)
-            }
-            Envelope.BodyCase.DIAGNOSTICS_REQUEST -> sendDiagnostics(d, env.diagnosticsRequest.maxBytes)
-            Envelope.BodyCase.UNPAIR -> unpair(d, env.seq)
-            Envelope.BodyCase.SET_HOTSPOT -> switchHotspot(env.setHotspot.on, env.setHotspot.offWhenUnusedS) { code, detail ->
-                error(d, env.seq, code, detail)
-            }
-            Envelope.BodyCase.SET_HOTSPOT_CALL_PAUSE -> setCallPause(d, env.seq, env.setHotspotCallPause.on)
-            Envelope.BodyCase.SET_HOTSPOT_BLOCK -> with(env.setHotspotBlock) {
-                if (!HotspotGuard.set(mac, blocked, name)) error(d, env.seq, Error.Code.BAD_REQUEST, "hotspot block: list full or bad MAC")
-            }
-            Envelope.BodyCase.SET_MAC_PAIRING -> macLink.setPairing(env.setMacPairing.on)
-            Envelope.BodyCase.REMOVE_MAC -> macLink.remove(env.removeMac.address)
-            Envelope.BodyCase.SET_MAC_TEXTS -> macLink.setTexts(env.setMacTexts.address, env.setMacTexts.on)
-            Envelope.BodyCase.SET_MAC_CONTROL -> macLink.setControl(env.setMacControl.address, env.setMacControl.on)
-            Envelope.BodyCase.USSD_REQUEST -> Ussd.run(app, env.ussdRequest, main) { r ->
-                send(d, Envelope.newBuilder().setUssdResult(r), env.seq)
-            }
-            Envelope.BodyCase.SET_CALL_RULES -> { CallRuleStore.set(env.setCallRules.rules); main.post(pushStatus) }
-            Envelope.BodyCase.HOST_ACTION -> HostActions.run(app, env.hostAction.action, main) { r ->
-                send(d, Envelope.newBuilder().setHostActionResult(r), env.seq)
-            }
-            Envelope.BodyCase.SET_HOST_WIFI -> HostWifi.setUseWhenAway(env.setHostWifi.useWhenAway, remote = d !is Peer.Ble)
-            // Network names and passwords travel over Bluetooth only (18 Oct).
-            Envelope.BodyCase.WIFI_SCAN, Envelope.BodyCase.WIFI_ADD, Envelope.BodyCase.WIFI_FORGET -> {
-                if (d !is Peer.Ble) return error(d, env.seq, Error.Code.BAD_REQUEST, "Wi-Fi networks: over Bluetooth only")
-                when (env.bodyCase) {
-                    Envelope.BodyCase.WIFI_SCAN -> HostWifi.scan { r, why ->
-                        if (r != null) send(d, Envelope.newBuilder().setWifiScanResult(r), env.seq)
-                        else error(d, env.seq, Error.Code.BAD_REQUEST, "Wi-Fi scan: $why")
-                    }
-                    Envelope.BodyCase.WIFI_ADD -> HostWifi.add(env.wifiAdd.ssid, env.wifiAdd.passphrase) { r ->
-                        send(d, Envelope.newBuilder().setWifiAddResult(r), env.seq); main.post(pushStatus)
-                    }
-                    else -> HostWifi.forget(env.wifiForget.id) { main.post(pushStatus) }
-                }
-            }
-            Envelope.BodyCase.REMOTE_SETUP -> {
-                // The key only ever travels over Bluetooth (the encrypted, bonded link next to the host); turning
-                // remote mode off is fine from anywhere.
-                if (d !is Peer.Ble && env.remoteSetup.enabled) return error(d, env.seq, Error.Code.BAD_REQUEST, "remote setup over Bluetooth only")
-                RemoteLink.configure(env.remoteSetup.enabled, env.remoteSetup.key.toByteArray())
-                main.postDelayed(pushStatus, 500)
-            }
-            Envelope.BodyCase.PUSH_SETUP -> {
-                // Like remote mode's key: it only ever travels over Bluetooth. Forgetting it is fine from anywhere.
-                val k = env.pushSetup.key.toByteArray()
-                if (d !is Peer.Ble && k.isNotEmpty()) return error(d, env.seq, Error.Code.BAD_REQUEST, "push setup over Bluetooth only")
-                Push.setKey(k)
-                main.postDelayed(pushStatus, 300)
-            }
-            Envelope.BodyCase.UPDATE_ACTION -> Updater.action(env.updateAction.action) { why ->
-                main.post {
-                    if (why != null) error(d, env.seq, Error.Code.BAD_REQUEST, "update: $why")
-                    pushStatus.run()
-                }
-            }
-            Envelope.BodyCase.SET_MOBILE_DATA -> {
-                // Off over the internet would cut this very link (remote mode runs on the host's mobile data).
-                if (!env.setMobileData.on && d is Peer.Internet) return error(d, env.seq, Error.Code.BAD_REQUEST,
-                    "mobile data can only be turned off over Bluetooth: it carries this connection")
-                if (!MobileData.set(app, env.setMobileData.on)) error(d, env.seq, Error.Code.INTERNAL, "could not change mobile data")
-                main.postDelayed(pushStatus, 1500)
-            }
-            Envelope.BodyCase.REMOTE_AUDIO -> {
-                val ra = env.remoteAudio
-                val c = RemoteLink.crypto
-                if (ra.close || c == null) RemoteCall.close("client closed")
-                else RemoteCall.offer(app, c, ra.relayIp, ra.relayPort) { answer ->
-                    main.post { send(d, Envelope.newBuilder().setRemoteAudio(answer), env.seq) }
-                }
-            }
-            else -> error(d, env.seq, Error.Code.BAD_REQUEST, "unexpected ${env.bodyCase}")
+        val wasServed = link.channel.serving
+        link.channel.close()
+        link.claimed = null
+        Log.i(TAG, "client ${d.address} gone")
+        HostWifi.evaluate("Bluetooth gone")
+        HotspotPause.transportChanged("Bluetooth gone")
+        scheduleHeartbeat()
+        // The internet room serves now. It heard nothing while Bluetooth served: a call's end or a text would be lost
+        // until the next one (audit, 1 Nov 2026).
+        if (wasServed && targets().singleOrNull() === Link.Internet) {
+            Log.i(TAG, "Bluetooth gone, the internet room serves: sending it what it lacks")
+            replay(Link.Internet, StateMark.newBuilder().setEpoch(HostState.epoch).setSeq(Link.Internet.stateSeq).build(), Link.Internet.textSeq)
         }
     }
 
-    private fun hello(d: Peer, env: Envelope) {
-        val id = env.hello.installId
-        val pin = pinned()
-        val windowOpen = SystemClock.elapsedRealtime() < pairingUntil
+    /** The phone joined the room or left it: a link lasts while both are in. The phone says Hello on a new link. */
+    private fun roomChanged(present: Boolean) {
+        if (present) { Link.Internet.channel.newLink(); return }
+        Link.Internet.channel.close()
+        // A room blip mid-call doesn't touch the call's audio (TURN carries it); it ends with the call.
+        if (!CallRegistry.live()) RemoteCall.close("the phone left the room")
+    }
+
+    /** BLE values arrive on binder threads: handled on main, and never let one take the process down. */
+    private fun onBytes(dev: BluetoothDevice, bytes: ByteArray) {
+        main.post { receive(links.getOrPut(dev.address) { Link.Ble(dev, ble) }, bytes) }
+    }
+
+    private fun receive(link: Link, bytes: ByteArray) {
+        val arrived = try { link.channel.feed(bytes) } catch (e: WireException) {
+            Log.w(TAG, "link ${link.id}: ${e.message}, reset")
+            link.channel.reset(e.fault)
+            link.kick()
+            return
+        }
+        arrived.forEach { message ->
+            runCatching { onPacket(link, message.packet) }.onFailure { Log.e(TAG, "message from ${link.id} failed: $it") }
+        }
+        link.kick()
+        main.removeCallbacks(link.creditTick)
+        main.postDelayed(link.creditTick, 220)                 // the CREDIT that says the messages arrived
+    }
+
+    private fun onPacket(link: Link, bytes: ByteArray) {
+        val p = runCatching { Packet.parseFrom(bytes) }.getOrElse {
+            Log.w(TAG, "link ${link.id}: not a packet, reset")
+            link.channel.reset(WireFault.BAD_PACKET)
+            return
+        }
         when {
-            id.isEmpty() -> return reject(d, env.seq)
-            pin == id -> if (windowOpen && d is Peer.Ble) { pairingUntil = 0; pairableChanged() }   // ours again: close it
-            (windowOpen || pin == null) && d is Peer.Ble -> {
-                app.getSharedPreferences("relay", Context.MODE_PRIVATE).edit().putString("pinned_install_id", id).apply()
-                pairingUntil = 0
-                pairableChanged()
-                Log.i(TAG, "PAIRED with client ${env.hello.deviceModel} install_id=${id.take(8)}")
-            }
-            else -> return reject(d, env.seq)
+            p.hasHello() -> hello(link, p.hello)
+            p.hasPairStart() -> pairStart(link, p.pairStart)
+            p.hasPairProof() -> pairProof(link, p.pairProof)
+            // A host whose app restarted while the link stayed up: ask for a Hello (the phone would otherwise wait)
+            !link.channel.serving -> link.channel.reset(WireFault.NO_SESSION)
+            p.hasRequest() -> Requests.handle(app, main, link, p.request)
+            p.hasEventAck() -> Events.log(app).ack(p.eventAck.textsUpTo)
+            else -> Log.w(TAG, "unexpected ${p.kindCase} from ${link.id}")
         }
-        trusted.add(d.id)
-        seqs.remove(d.id)
-        protocols[d.id] = env.hello.protocolVersion
-        joiners.remove(d.id)
-        if (d is Peer.Ble) {
+    }
+
+    private fun hello(link: Link, h: Hello) {
+        val refusal = HelloRules.refusal(h, pinned())
+        if (refusal != null) {
+            if (refusal == Code.CODE_NOT_PAIRED) notPaired(link, h)
+            return refuse(link, refusal)
+        }
+        val resumed = link.channel.open(if (h.hasResume()) h.resume.sessionId else null)
+        if (!resumed) link.running.clear()
+        link.claimed = null
+        val welcome = Welcome.newBuilder().setVersion(Wire.VERSION).setFeatures(HelloRules.FEATURES)
+            .setSessionId(link.channel.sessionId).setResumed(resumed).setEpoch(HostState.epoch).setHost(hostInfo())
+            .setAudioPsm(if (link.bluetooth) ble.audioPsm else 0)
+        if (resumed) welcome.received = link.channel.received.toInt()
+        send(link, Packet.newBuilder().setWelcome(welcome).build())
+        served(link, h, resumed)
+        replay(link, if (h.hasStateMark()) h.stateMark else null, h.textCursor)
+    }
+
+    private fun hostInfo(): HostInfo = HostInfo.newBuilder().setAppVersion(BuildConfigInfo.version(app))
+        .setDeviceModel("${Build.MANUFACTURER} ${Build.MODEL}").setFirmware(Build.FINGERPRINT)
+        .setMaxBlockedNumbers(CallRulesCore.MAX_NUMBERS).setMaxMacPeers(MacCore.MAX_MACS)
+        .setMaxBlockedClients(HotspotGuardCore.MAX_BLOCKED).build()
+
+    /** What the host does for a phone it serves from now on, apart from the protocol. */
+    private fun served(link: Link, h: Hello, resumed: Boolean) {
+        val via = if (link.bluetooth) "Bluetooth" else "internet"
+        Log.i(TAG, "Hello from ${h.deviceModel} app ${h.appVersion} via $via (session ${if (resumed) "resumed" else "new"})")
+        val edit = prefs().edit().putString("client_model", h.deviceModel)
+        if (link is Link.Ble) {
             noHelloSince = 0
             // What the link agreed on (RadioLook): well after the Hello, when the link serves and nothing is being set up
-            main.postDelayed({ if (d.id in trusted) RadioLook.linkLook() }, 20_000)
+            main.postDelayed({ if (link.channel.serving) RadioLook.linkLook() }, 20_000)
             HostWifi.evaluate("Bluetooth up")
             HotspotPause.transportChanged("Bluetooth back")
-            // Remembered so the same iPhone can pair again on its own after iOS dropped its keys (see the receiver)
-            app.getSharedPreferences("relay", Context.MODE_PRIVATE).edit().putString("client_mac", d.id).apply()
+            // Remembered so the same phone can pair again on its own after its system dropped the keys (see the receiver)
+            edit.putString("client_mac", link.id)
+            scheduleHeartbeat()
         }
-        app.getSharedPreferences("relay", Context.MODE_PRIVATE).edit().putString("client_model", env.hello.deviceModel).apply()
-        Diag.milestone("paired", org.json.JSONObject().put("client", env.hello.deviceModel.substringBefore(' ')))
-        Log.i(TAG, "Hello from ${env.hello.deviceModel} app ${env.hello.appVersion} (protocol ${env.hello.protocolVersion}) via ${if (d is Peer.Ble) "Bluetooth" else "internet"}")
-        send(d, Envelope.newBuilder().setHello(Hello.newBuilder()
-            .setProtocolVersion(PROTOCOL_VERSION).setAppVersion(BuildConfigInfo.version(app))
-            .setDeviceModel("${Build.MANUFACTURER} ${Build.MODEL}")), env.seq)
-        // Also to an iPhone Bluetooth serves, saying Hello in the room for a call's audio: it ends the calls a Hello isn't
-        // followed by (its reconcile), and it takes the copies that come late (iOS 0.9.5 (29) drops stale ones).
-        replay(d)
-    }
-
-    /** All a client may have missed: the status, live calls, texts it hasn't stored yet; then ReplayDone. */
-    private fun replay(d: Peer) {
-        send(d, Envelope.newBuilder().setHostStatus(status()))
-        Updater.informed()
-        val calls = CallRegistry.snapshot()
-        calls.forEach { send(d, Envelope.newBuilder().setCallEvent(it)) }
-        val texts = SmsStore.pending(app)
-        texts.forEach { send(d, Envelope.newBuilder().setSmsReceived(it)) }
-        // The client ends the calls this replay did not name now, instead of guessing the end with a timer.
-        if ((protocols[d.id] ?: 1) >= Chunks.MIN_PROTOCOL) send(d, Envelope.newBuilder().setReplayDone(ReplayDone.newBuilder().setCalls(calls.size).setTexts(texts.size)))
+        edit.apply()
+        Diag.milestone("paired", org.json.JSONObject().put("client", h.deviceModel.substringBefore(' ')))
     }
 
     /**
-     * This phone stops being a host (Retire): the iPhone gets an Unpair it didn't ask for, which tells it the host is
-     * gone for good, then the host forgets it as after any Unpair and stops advertising. [done] runs off main.
+     * All a phone lacks after its Hello: the state since [mark], every live call, the texts above [textCursor] and the
+     * statuses nobody heard; then ReplayEnd, on the stream that carries the slowest of them, so it arrives last.
      */
-    fun retire(done: () -> Unit) = main.post {
-        val p = app.getSharedPreferences("relay", Context.MODE_PRIVATE)
-        val mac = p.getString("client_mac", null)
-        broadcast(Envelope.newBuilder().setUnpair(Unpair.getDefaultInstance()))
-        main.postDelayed({
-            targets().forEach { it.drop() }
-            p.edit().remove("pinned_install_id").remove("client_model").remove("client_mac").apply()
-            Push.setKey(ByteArray(0))
-            RemoteLink.configure(false, null)
-            trusted.clear()
-            if (::ble.isInitialized) runCatching { ble.stop() }
-            Log.i(TAG, "RETIRED: the phone was told, pairing forgotten")
-            pairExec.execute { if (mac != null) RootBt.unbond(app, mac); done() }
-        }, 1500)                                               // time for the Unpair to reach the iPhone
+    private fun replay(link: Link, mark: StateMark?, textCursor: Long) {
+        val (reading, _) = HostState.refresh(app, HostState.ALL - StateBook.SIGNAL, macLink::peers)
+        HostState.signal(reading, force = true)
+        sendChanges(except = link)
+        link.stateSeq = HostState.book.seq
+        var lane =sendBytes(link, Fields.bytes(Packet.STATE_FIELD_NUMBER, HostState.book.since(mark?.epoch, mark?.seq ?: 0)))
+        Updater.informed()
+        val log = Events.log(app)
+        val calls = CallRegistry.snapshot()
+        calls.forEach { live -> send(link, event { setSeq(log.callCursor); call = live }) }
+        log.textsAfter(textCursor).forEach { (_, event) -> lane = maxOf(lane, sendBytes(link, Fields.bytes(Packet.EVENT_FIELD_NUMBER, event))) }
+        link.textSeq = log.textCursor
+        SmsSender.untold().forEach { status ->
+            send(link, event { textStatus = status })
+            SmsSender.told(status.text)
+        }
+        val end = ReplayEnd.newBuilder().setTextCursor(log.textCursor).setCallCursor(log.callCursor)
+            .addAllLiveCalls(calls.filter { it.phase != CallPhase.CALL_PHASE_ENDED }.map { it.call }).build()
+        sendBytes(link, Packet.newBuilder().setReplayEnd(end).build().toByteArray(), lane)
     }
 
-    /** [start] ran in this process (Retire can run from a host whose service never came up). */
-    fun started(): Boolean = ::app.isInitialized
+    private fun refuse(link: Link, code: Code) {
+        Log.w(TAG, "refusing ${link.id}: $code")
+        val refuse = Refuse.newBuilder().setCode(code)
+        if (code == Code.CODE_VERSION) refuse.setMinVersion(Wire.VERSION).setMaxVersion(Wire.VERSION)
+        link.channel.close()
+        sendNow(link, Packet.newBuilder().setRefuse(refuse).build())
+    }
+
+    /**
+     * A phone that is not the paired one. Its install id is kept for a pairing proof, and the link stays up for
+     * pairing; a phone that does not pair is dropped, at once while the host shows no code: connectable advertising
+     * stops while a phone is connected, and the paired phone must still find the host.
+     */
+    private fun notPaired(link: Link, h: Hello) {
+        link.claimed = h.installId.toByteArray()
+        if (link !is Link.Ble) return
+        rejected.add(link.id)
+        main.postDelayed({ if (!link.channel.serving && link.id in rejected) link.drop() }, if (pairingOpen()) PAIR_GRACE_MS else 500)
+    }
+
+    // ------------------------------------------------------------- the end of a pairing
+
+    private fun forgetKeys() {
+        // Both keys go: a room key kept here kept the host in a room nobody holds a key for, and pushing calls and
+        // texts there (Push falls back to it) for a forgotten phone (audit, 1 Nov 2026)
+        Push.setKey(ByteArray(0))
+        RemoteLink.configure(false, null)
+    }
+
+    private fun forgetPin(): String? {
+        val address = prefs().getString("client_mac", null)
+        prefs().edit().remove("pinned_install_id").remove("client_model").remove("client_mac").apply()
+        forgetKeys()
+        return address
+    }
+
+    private fun closeSessions() {
+        links.values.forEach { it.channel.close() }
+        Link.Internet.channel.close()
+    }
+
+    /**
+     * ForgetHost was answered: the host forgets the phone too (pin, keys, Bluetooth bond), so a new pairing starts
+     * clean. A stale bond made the next pairing fail ("encryption is insufficient", 19 Oct).
+     */
+    internal fun forgetPhone(link: Link) {
+        val address = forgetPin() ?: (link as? Link.Ble)?.id
+        Log.i(TAG, "UNPAIRED: the phone forgot this host")
+        Diag.event("unpaired", org.json.JSONObject().put("what", "client_forgot"), withLog = false)
+        main.postDelayed({
+            closeSessions()
+            link.drop()
+            if (address != null) pairExec.execute { RootBt.unbond(app, address) }
+            openPairing(0)                                          // ready for the next phone
+            touch(StateBook.REMOTE)
+        }, 500)                                                     // time for the reply to reach the phone
+    }
+
+    /**
+     * This phone stops being a host (Retire): the phone gets a Bye, which tells it the host is gone for good, then the
+     * host forgets it as after ForgetHost and stops advertising. [done] runs off main.
+     */
+    fun retire(done: () -> Unit) = main.post {
+        broadcast(Packet.newBuilder().setBye(Bye.newBuilder().setReason(ByeReason.BYE_REASON_RETIRED)).build())
+        main.postDelayed({
+            targets().forEach { it.drop() }
+            val address = forgetPin()
+            closeSessions()
+            desk.close()
+            shownCode = null
+            if (::ble.isInitialized) runCatching { ble.stop() }
+            Log.i(TAG, "RETIRED: the phone was told, pairing forgotten")
+            pairExec.execute { if (address != null) RootBt.unbond(app, address); done() }
+        }, 1500)                                               // time for the Bye to reach the phone
+    }
 
     /**
      * Retire failed after [retire]: Bluetooth back as a host's (GATT service and advertising), so the phone isn't left
-     * deaf until someone restarts it. The pairing stays forgotten (the iPhone was told): it pairs again like a new host.
+     * deaf until someone restarts it. The pairing stays forgotten (the phone was told): it pairs again like a new host.
      */
     fun unretire() = main.post {
         if (!::ble.isInitialized) return@post
         runCatching { ble.start() }.onFailure { Log.w(TAG, "unretire: $it") }
-        pairableChanged()
+        openPairing(0)
         Log.i(TAG, "retire rolled back: advertising as an unpaired host")
     }
 
-    /** The paired iPhone forgot this host: forget it too (pin, Bluetooth bond), so a new pairing starts clean. A
-     *  stale bond made the next pairing fail ("encryption is insufficient", 19 Oct). */
-    private fun unpair(d: Peer, replyTo: Int) {
-        val p = app.getSharedPreferences("relay", Context.MODE_PRIVATE)
-        val mac = p.getString("client_mac", null) ?: (d as? Peer.Ble)?.id
-        send(d, Envelope.newBuilder().setUnpair(Unpair.getDefaultInstance()), replyTo)   // the iPhone waits for this
-        p.edit().remove("pinned_install_id").remove("client_model").remove("client_mac").apply()
-        // Both keys go: a room key kept here kept the host in a room nobody holds a key for, and pushing calls and
-        // texts there (Push falls back to it) for a forgotten iPhone (audit, 1 Nov 2026)
-        Push.setKey(ByteArray(0))
-        RemoteLink.configure(false, null)
-        trusted.clear()
-        pairableChanged()                                       // unpaired: ready for the next iPhone
-        Log.i(TAG, "UNPAIRED: the phone forgot this host")
-        Diag.event("unpaired", org.json.JSONObject().put("what", "client_forgot"), withLog = false)
-        main.postDelayed({
-            d.drop()
-            if (mac != null) pairExec.execute { RootBt.unbond(app, mac) }
-            main.post(pushStatus)
-        }, 500)
-    }
+    // ------------------------------------------------------------- roles
 
-    private fun reject(d: Peer, replyTo: Int) {
-        Log.w(TAG, "rejecting ${d.id}: not the paired client")
-        if (d is Peer.Ble) rejected.add(d.id)
-        error(d, replyTo, Error.Code.NOT_PAIRED, "not paired; open the pairing window on the host")
-        main.postDelayed({ d.drop() }, 500)
-    }
-
-    private fun error(d: Peer, replyTo: Int, code: Error.Code, detail: String) {
-        Log.w(TAG, "error to ${d.id}: $code $detail")
-        send(d, Envelope.newBuilder().setError(Error.newBuilder().setCode(code).setDetail(detail)), replyTo)
-    }
-
-    /** SetHotspotCallPause: only a host that offers the pause (Hotspot.callPauseOffered) takes it on. */
-    private fun setCallPause(d: Peer, seq: Int, on: Boolean) {
-        if (on && !Hotspot.callPauseOffered(app))
-            return error(d, seq, Error.Code.BAD_REQUEST, "hotspot: pausing during calls is only for hosts whose hotspot can only use 2.4 GHz")
-        HotspotPause.setSetting(on)
-    }
-
-    // The setup screen can ask before the service has started (fresh install: crashed on the Redmi, 18 Oct).
-    private fun pinned(): String? = if (!::app.isInitialized) null else
-        app.getSharedPreferences("relay", Context.MODE_PRIVATE).getString("pinned_install_id", null)
-
-    /**
-     * The host must stay the default SMS app, or incoming SMS go to another app and never reach the client (Redmi,
-     * 19 Oct: Google Messages had taken the role back after the SIM went in; "Hello" from the S20 FE was never relayed).
-     * Checked at start and every keep-alive; taken back as root when lost.
-     */
-    /**
-     * The host is the phone app from the moment it runs, not only in box mode (20 Oct 2026: during setup the
-     * phone's own call screen came up for the call test, as if the host weren't in charge). Its non-UI InCallService
-     * then sees every call and no call screen lights the host up. The app that had the role is kept for "Stop using
-     * this phone as a host" (Retire), which hands it back.
-     */
     /** Role requests that didn't stick wait longer each time (1, 2, 4 ... up to 60 minutes): a phone that refuses a
      *  role must not get a root command every minute for ever. Holding the role again resets it. */
     private val roleRetryAt = HashMap<String, Long>()
@@ -667,6 +774,12 @@ object Relay {
      *  schedules sent a phone that refuses the role a root command every 10 minutes (audit, 20 Oct 2026). */
     fun smsRoleRequestDue(): Boolean = roleRequestDue("sms", false)
 
+    /**
+     * The host is the phone app from the moment it runs, not only in box mode (20 Oct 2026: during setup the
+     * phone's own call screen came up for the call test, as if the host weren't in charge). Its non-UI InCallService
+     * then sees every call and no call screen lights the host up. The app that had the role is kept for "Stop using
+     * this phone as a host" (Retire), which hands it back.
+     */
     private fun guardDialerRole() {
         if (Retire.running) return
         val tm = app.getSystemService(android.telecom.TelecomManager::class.java) ?: return
@@ -677,6 +790,11 @@ object Relay {
         Daemon.role("android.app.role.DIALER", app.packageName)
     }
 
+    /**
+     * The host must stay the default SMS app, or incoming SMS go to another app and never reach the phone (Redmi,
+     * 19 Oct: Google Messages had taken the role back after the SIM went in). Checked at start and every tick; taken
+     * back as root when lost.
+     */
     private fun guardSmsRole() {
         if (Retire.running) return                              // giving the phone back: the role goes to its old app
         val rm = app.getSystemService(android.app.role.RoleManager::class.java) ?: return
@@ -685,45 +803,19 @@ object Relay {
         Daemon.role(android.app.role.RoleManager.ROLE_SMS, app.packageName)
     }
 
-    private fun uplink(sims: List<Sim>): Uplink {
-        val cm = app.getSystemService(android.net.ConnectivityManager::class.java)
-        val caps = runCatching { cm.activeNetwork?.let { cm.getNetworkCapabilities(it) } }.getOrNull()
-        val kind = when {
-            caps == null || !caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) -> Uplink.Kind.NONE
-            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> Uplink.Kind.WIFI
-            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> Uplink.Kind.MOBILE
-            else -> Uplink.Kind.OTHER
-        }
-        val name = when (kind) {
-            Uplink.Kind.WIFI -> HostWifi.connectedSsid
-            Uplink.Kind.MOBILE -> sims.firstOrNull { it.defaultData }?.operatorName.orEmpty()
-            else -> ""
-        }
-        return Uplink.newBuilder().setKind(kind).setName(name).build()
-    }
-
-    // Runs on the main thread after every change: a failure here must cost one status, not the process.
-    private val pushStatus = Runnable {
-        Bg.guard("status") {
-            val s = status()
-            broadcast(Envelope.newBuilder().setHostStatus(s))
-            Health.notices(s).forEach(::hostNotice)
-            dataLimit(s.hotspot)
-        }
-        if (::macLink.isInitialized) macLink.statusChanged()            // the Macs hear the same changes
-    }
+    // ------------------------------------------------------------- a link without a session
 
     /**
-     * This process may be new while a client's link stayed up (app update or crash): the client doesn't know
-     * we forgot its Hello, so ask for one rather than wait for it to speak (seen 16 Oct). Sent once the GATT
-     * service is up and again with every keep-alive until the client answers.
+     * This process may be new while the phone's link stayed up (app update or crash): the phone doesn't know the host
+     * forgot its session, so the host says so (RESET, "no session") rather than wait for it to speak (seen 16 Oct).
+     * Sent once the GATT service is up and again with every tick until the phone says Hello.
      */
     private fun askForHello() {
-        // Only the paired iPhone, and not after it was told it isn't paired: the phone's other LE links (a watch, a band)
-        // aren't ours to ask, and asking a rejected iPhone looped Hello / NOT_PAIRED every minute (29 Oct 2026, 23 times)
-        val ours = app.getSharedPreferences("relay", Context.MODE_PRIVATE).getString("client_mac", null)
+        // Only the paired phone, and not after it was told it isn't paired: the phone's other LE links (a watch, a band)
+        // aren't ours to ask, and asking a rejected phone looped Hello / NOT_PAIRED every minute (29 Oct 2026, 23 times)
+        val ours = prefs().getString("client_mac", null)
         if (pinned() == null || ours == null) return
-        val silent = ble.connectedDevices().filter { it.address == ours && it.address !in trusted && it.address !in rejected }
+        val silent = ble.connectedDevices().filter { it.address == ours && links[it.address]?.channel?.serving != true && it.address !in rejected }
         watchSilent(silent.firstOrNull())
         silent.forEach { askForHello(it) }
     }
@@ -731,10 +823,10 @@ object Relay {
     @Volatile private var noHelloSince = 0L
 
     /**
-     * The paired phone's Bluetooth link is up and the phone doesn't say Hello, keep-alive after keep-alive: the phone
-     * shows "connecting" meanwhile and nothing works over Bluetooth. An iPhone sat like that for three minutes after its
-     * host updated itself, until its owner paired again, and the host's log held nothing of those minutes (11 Nov 2026).
-     * So the host says so in its log, with what it knows of the link. [d]: the silent link, null when none.
+     * The paired phone's Bluetooth link is up and the phone doesn't say Hello, tick after tick: the phone shows
+     * "connecting" meanwhile and nothing works over Bluetooth. A phone sat like that for three minutes after its host
+     * updated itself, and the host's log held nothing of those minutes (11 Nov 2026). So the host says so in its log,
+     * with what it knows of the link. [d]: the silent link, null when none.
      */
     private fun watchSilent(d: BluetoothDevice?) {
         val now = SystemClock.elapsedRealtime()
@@ -747,122 +839,117 @@ object Relay {
             "subscribed ${ble.subscribers().any { it.address == d.address }}, dropped once ${d.address in droppedOnce})")
     }
 
+    private fun serving(d: BluetoothDevice): Boolean = links[d.address]?.channel?.serving == true
+
     private fun askForHello(d: BluetoothDevice) {
-        Log.i(TAG, "link ${d.address} is up without a Hello: asking for one")
-        error(Peer.Ble(d, ble), 0, Error.Code.HELLO_REQUIRED, "host restarted")
-        // After an app restart the iPhone's subscription belongs to the old process: our request may never reach it
+        Log.i(TAG, "link ${d.address} is up without a session: asking for a Hello")
+        val link = links.getOrPut(d.address) { Link.Ble(d, ble) }
+        link.channel.reset(WireFault.NO_SESSION)
+        link.kick()
+        // After an app restart the phone's subscription belongs to the old process: our request may never reach it
         // (18 Oct, after a self-update: 3 min of silence). No Hello in 5 s -> drop the link; it reconnects at once.
         if (!droppedOnce.add(d.address)) return                      // once per link after a restart, not every minute
         // By alarm, not by the main thread's timer: that one stops while the host sleeps, and a host that restarts in
-        // a drawer goes back to sleep at once. A Redmi Note 9 Pro dropped the link 24 s after asking instead of 5, and
-        // reset Bluetooth two minutes after that instead of 3 s; its iPhone showed "connecting" all that time (11 Nov 2026).
-        WakeAlarm.set(app, "hello-drop", 5000) {
-            // Never during first pairing: a new iPhone may be in iOS's pairing dialog.
-            if (d.address !in trusted && !pairingOpen() && d.bondState != BluetoothDevice.BOND_BONDING &&
-                ble.connectedDevices().any { it.address == d.address }) {
-                Log.i(TAG, "no Hello from ${d.address} after 5 s: dropping the link so it reconnects fresh")
-                ble.disconnect(d)
-                // The iPhone owns the link (it's the central): cancelConnection rarely drops it, and a locked iPhone's
-                // app then hears nothing for minutes (19 Oct, after a self-update: 170 s+, reproduced). Switching our
-                // Bluetooth off and on is a real disconnect, which iOS always delivers: Hello within 3 s. Never in a call.
-                WakeAlarm.set(app, "hello-reset", 3000) {
-                    if (d.address !in trusted && ble.connectedDevices().any { it.address == d.address } &&
-                        CallRegistry.snapshot().none { it.state != CallEvent.State.ENDED }) {
-                        Log.i(TAG, "link ${d.address} still up without a Hello: resetting Bluetooth so the phone reconnects")
-                        // Detached: if this app dies in those 2 s, Bluetooth must still come back on
-                        Root.background("setsid sh -c 'svc bluetooth disable; sleep 2; svc bluetooth enable' </dev/null >/dev/null 2>&1 &")
-                    }
-                }
+        // a drawer goes back to sleep at once (11 Nov 2026).
+        WakeAlarm.set(app, "hello-drop", 5000) { dropSilentLink(d) }
+    }
+
+    /** Never during pairing: a new phone may be in its system's pairing dialog. */
+    private fun dropSilentLink(d: BluetoothDevice) {
+        val up = ble.connectedDevices().any { it.address == d.address }
+        if (serving(d) || pairingOpen() || d.bondState == BluetoothDevice.BOND_BONDING || !up) return
+        Log.i(TAG, "no Hello from ${d.address} after 5 s: dropping the link so it reconnects fresh")
+        ble.disconnect(d)
+        // The phone owns the link (it's the central): cancelConnection rarely drops it, and a locked iPhone's app then
+        // hears nothing for minutes (19 Oct, after a self-update: 170 s+, reproduced). Switching our Bluetooth off and
+        // on is a real disconnect, which its system always delivers: Hello within 3 s. Never in a call.
+        WakeAlarm.set(app, "hello-reset", 3000) {
+            if (!serving(d) && ble.connectedDevices().any { it.address == d.address } && !CallRegistry.live()) {
+                Log.i(TAG, "link ${d.address} still up without a Hello: resetting Bluetooth so the phone reconnects")
+                // Detached: if this app dies in those 2 s, Bluetooth must still come back on
+                Root.background("setsid sh -c 'svc bluetooth disable; sleep 2; svc bluetooth enable' </dev/null >/dev/null 2>&1 &")
             }
         }
     }
 
-    /**
-     * The host's half of a client's diagnostics request: scrubbed log + facts, in parts (frames are <= 4 KB). The client
-     * waits a limited time for it, so the log is read with the short root timeouts ([Diag.recentLog] fast).
-     */
-    private fun sendDiagnostics(d: Peer, maxBytes: Int) = Thread {
-        val t0 = SystemClock.elapsedRealtime()
-        val log = Diag.recentLog(if (maxBytes in 1..32_000) maxBytes else 16_000, fast = true)
-        val facts = Diag.facts("event").apply {
-            remove("install_id"); remove("kind")
-            Compat.bleCaps(app)?.let { put("ble", it) }
-            CallAudioCheck.lastForReport()?.let { put("last_call", it) }     // the last call's audio numbers, poor or not
-        }.toString()
-        val parts = utf8Chunks(log, 2_800).ifEmpty { listOf("") }
-        parts.forEachIndexed { i, chunk ->
-            val m = com.keremgok.hermessim.protocol.v1.Diagnostics.newBuilder().setLog(chunk).setPart(i + 1).setParts(parts.size)
-            if (i == 0) m.setFactsJson(facts)
-            main.post { send(d, Envelope.newBuilder().setDiagnostics(m)) }
-        }
-        Log.i(TAG, "diagnostics sent to the client: ${log.length} chars in ${parts.size} parts, ready after ${SystemClock.elapsedRealtime() - t0} ms")
-    }.start()
+    // ------------------------------------------------------------- the minute's tick
 
     /**
-     * The keep-alive is the iPhone's wake-up call too (its automatic hotspot and liveness checks run on it), but the
-     * main-thread timer stops while the host is in deep sleep: it ran ~3 times an hour, and the iPhone's automatic
-     * hotspot waited for something else to wake it (22 Oct 2026). An alarm allowed while idle runs it every few
-     * minutes in deep sleep; while awake the timer runs it and the alarm does nothing.
+     * An idle link carries one CREDIT a minute from each side, and that is all that keeps it alive (SPEC.md "CREDIT").
+     * It is the phone's wake-up call too. The main thread's timer stops while the host is in deep sleep, so an alarm
+     * allowed while idle runs the tick then: every minute while a phone is on Bluetooth, else every few minutes.
      */
-    @Volatile private var lastKeepAliveAt = 0L
-    private const val HEARTBEAT_MS = 3 * 60_000L
+    @Volatile private var lastTickAt = 0L
+    private var ticks = 0
+    private const val FULL_READ_TICKS = 10
+
     private fun heartbeat() {
-        if (SystemClock.elapsedRealtime() - lastKeepAliveAt > KEEPALIVE_MS + 30_000L) {
-            Log.i(TAG, "heartbeat: keep-alive while asleep")
-            main.removeCallbacks(keepAlive)
-            keepAlive.run()
+        if (SystemClock.elapsedRealtime() - lastTickAt >= TICK_MS - 2_000L) {
+            main.removeCallbacks(tick)
+            tick.run()
         }
         scheduleHeartbeat()
     }
-    private fun scheduleHeartbeat() = WakeAlarm.set(app, "heartbeat", HEARTBEAT_MS, ::heartbeat)
 
-    private val keepAlive = object : Runnable {
+    private fun scheduleHeartbeat() = WakeAlarm.set(app, "heartbeat", if (bleNear()) TICK_MS else HEARTBEAT_IDLE_MS, ::heartbeat)
+
+    private val tick = object : Runnable {
         override fun run() {
-            lastKeepAliveAt = SystemClock.elapsedRealtime()
-            askForHello()
-            HostWifi.evaluate("keep-alive")
-            guardSmsRole()
-            guardDialerRole()
-            Onboarding.selfHeal(app)
-            Diag.retry()                                     // reports queued while offline
-            if (Box.blocksPowerKey) Daemon.powerKey(true)    // the daemon's dead-man: an unconfirmed block lapses in 15 min
-            broadcast(Envelope.newBuilder().setKeepAlive(KeepAlive.newBuilder().setN(++kaN)))
-            main.postDelayed(this, KEEPALIVE_MS)
+            lastTickAt = SystemClock.elapsedRealtime()
+            Bg.guard("tick") {
+                askForHello()
+                links.values.filter { it.channel.serving }.forEach(::keepOrAsk)
+                if (Link.Internet.channel.serving) Link.Internet.kick()
+                HostWifi.evaluate("tick")
+                guardSmsRole()
+                guardDialerRole()
+                Onboarding.selfHeal(app)
+                Diag.retry()                                     // reports queued while offline
+                if (Box.blocksPowerKey) Daemon.powerKey(true)    // the daemon's dead-man: an unconfirmed block lapses in 15 min
+                // A change no part reported: everything is read again now and then, and only what differs is sent
+                if (++ticks % FULL_READ_TICKS == 0) touch(*HostState.ALL.toIntArray())
+            }
+            main.postDelayed(this, TICK_MS)
         }
     }
 
-    @SuppressLint("MissingPermission")
-    private fun status(): HostStatus {
-        val bm = app.getSystemService(BatteryManager::class.java)
-        val tm = app.getSystemService(TelephonyManager::class.java)
-        val b = HostStatus.newBuilder()
-            .setBatteryPercent(bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY))
-            .setCharging(bm.isCharging)
-            .setSignalLevel(tm.signalStrength?.level ?: 0)
-            .setVoiceTier(if (VoiceGate.fullVoice) HostStatus.VoiceTier.FULL_VOICE else HostStatus.VoiceTier.BASIC)
-            .setVoice(VoiceGate.status())
-        val hs = Hotspot.info(app)
-        b.setHotspotOn(hs.on).setHotspot(hs)
-        b.addAllSims(Sims.status(app))
-        b.setBox(com.keremgok.hermessim.protocol.v1.Box.newBuilder()
-            .setOn(Box.on).setSuspended(Box.pausedNow).setSuspendedUntilMs(if (Box.pausedNow) Box.suspendedUntil else 0)
-            .setChargeLimit(Box.chargeLimit).setChargeLimitSupported(Box.chargeSupported).setChargeState(Box.chargeState)
-            .setCallScreenHidden(Box.callScreenHidden()))
-        b.setRemote(Remote.newBuilder().setEnabled(RemoteLink.enabled).setOnline(RemoteLink.online))
-        b.setMobileData(MobileData.isOn(app))
-        b.setHostWifi(HostWifi.status())
-        b.setUplink(uplink(b.simsList))
-        Push.keyId()?.let { b.setPushKeyId(com.google.protobuf.ByteString.copyFrom(it)) }
-        b.setUpdate(Updater.status())
-        if (::macLink.isInitialized) b.setMac(macLink.access())
-        b.setUssd(true)
-        b.setCallRules(CallRuleStore.rules)
-        b.setHostActions(true)
-        return b.build()
+    /** A served link gets its idle CREDIT; one that has been silent too long is asked for a Hello instead. */
+    private fun keepOrAsk(link: Link.Ble) {
+        if (!link.channel.silent()) return link.kick()
+        Log.w(TAG, "link ${link.id}: no frame for ${Wire.DEAD_MS / 1000} s, asking for a Hello")
+        link.channel.reset(WireFault.NO_SESSION)
+        link.kick()
+    }
+
+    // ------------------------------------------------------------- the hotspot switch and the Macs
+
+    private val hotspotGroups = intArrayOf(StateBook.HOTSPOT, StateBook.HOTSPOT_CLIENTS)
+
+    /**
+     * SetHotspot from the phone or a Mac. on = false with [offWhenUnusedS] > 0: the host keeps the "off once unused"
+     * timer. [done] hears CODE_OK or why it didn't happen.
+     */
+    internal fun switchHotspot(on: Boolean, offWhenUnusedS: Int, done: (Code) -> Unit) {
+        if (!on && offWhenUnusedS > 0) { Hotspot.offWhenUnused(app, offWhenUnusedS); return done(Code.CODE_OK) }
+        Hotspot.cancelOffWhenUnused()
+        // Starting the hotspot can take the host off Wi-Fi, which may carry this internet call (18 Oct).
+        if (on && !bleNear() && CallRegistry.live()) return done(Code.CODE_IN_CALL)
+        HotspotPause.userSwitched(on)        // the user's switch wins over a call pause
+        HostState.hotspotFailed = false
+        Hotspot.set(app, on) { ok, detail ->
+            if (!ok) { if (on) HostState.hotspotFailed = true; Log.w(TAG, "hotspot switch: $detail") }
+            done(if (ok) Code.CODE_OK else Code.CODE_FAILED)
+            // The AP state change itself reports the hotspot (Hotspot.watch); this catches a settle without one.
+            touchLater(1500, *hotspotGroups)
+        }
+        touch(*hotspotGroups, delayMs = 0)      // "starting" / off right away, not after the AP settles
+        // A start Android accepted can still die before the AP is up (no state change then): end "starting"
+        // as soon as its 15 s window closes.
+        if (on) touchLater(15_500, *hotspotGroups)
     }
 
     /**
-     * What a Mac is shown (MacStatus): the hotspot as the client sees it, plus the host's battery and signal, and the
+     * What a Mac is shown (MacStatus): the hotspot as the phone sees it, plus the host's battery and signal, and the
      * lines and devices MacLink keeps for a Mac with control.
      */
     @SuppressLint("MissingPermission")
@@ -871,45 +958,24 @@ object Relay {
         val bm = app.getSystemService(BatteryManager::class.java)
         val name = runCatching { (app.getSystemService(Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager).adapter?.name }.getOrNull()
         return MacStatus.newBuilder()
-            .setState(MacCore.state(hs.on, hs.starting, hotspotFailed))
+            .setState(MacCore.state(hs.on, hs.starting, HostState.hotspotFailed))
             .setSsid(hs.ssid).setFrequencyMhz(hs.frequencyMhz).setGateway(hs.gateway)
             .setBatteryPercent(bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)).setCharging(bm.isCharging)
             .setSignalLevel(app.getSystemService(TelephonyManager::class.java).signalStrength?.level ?: 0)
             .setHostName(name?.takeIf { it.isNotBlank() } ?: Build.MODEL)
-            .setControllable(hs.supported && HostWifi.clientOverride == null)
-            .setPausedForCall(hs.pausedForCall).setOffWhenUnused(true).setLimitReached(hs.limitReached)
-            .setDevices(hs.clientsCount).setHostActions(true)
-            .addAllLines(MacControlCore.lines(Sims.status(app))).addAllClients(hs.clientsList).addAllBlocked(hs.blockedList)
+            .setControllable(hs.available && HostWifi.clientOverride == null)
+            .setPausedForCall(HotspotPause.paused && !hs.on).setOffWhenUnused(true)
+            .setLimitReached(DataLimit.reached(DataUsage.usage().month))
+            .setDevices(hs.clients.size).setHostActions(true)
+            .addAllLines(MacControlCore.lines(Sims.status(app)))
+            .addAllClients(MacControlCore.devices(hs.clients)).addAllBlocked(MacControlCore.devices(HotspotGuard.blocked()))
             .build()
     }
 
-    /** A Mac's command (MacLink, main thread): the same switch as the client's SetHotspot. */
+    /** A Mac's command (MacLink, main thread): the same switch as the phone's SetHotspot. */
     private fun macCommand(cmd: MacCommand) {
         if (HostWifi.clientOverride != null) { Log.i(TAG, "rig running: the Mac's hotspot switch ignored"); return }
-        switchHotspot(cmd.on, cmd.offWhenUnusedS) { _, detail -> Log.w(TAG, "Mac hotspot switch: $detail") }
-    }
-
-    /**
-     * SetHotspot from the client or a Mac. on = false with [offWhenUnusedS] > 0: the host keeps the "off once unused"
-     * timer. [refused] hears why it didn't happen (code, detail).
-     */
-    private fun switchHotspot(on: Boolean, offWhenUnusedS: Int, refused: (Error.Code, String) -> Unit) {
-        if (!on && offWhenUnusedS > 0) { Hotspot.offWhenUnused(app, offWhenUnusedS); return }
-        Hotspot.cancelOffWhenUnused()
-        // Starting the hotspot can take the host off Wi-Fi, which may carry this internet call (18 Oct).
-        if (on && !bleNear() && CallRegistry.snapshot().any { it.state != CallEvent.State.ENDED })
-            return refused(Error.Code.BAD_REQUEST, "hotspot: after the call")
-        HotspotPause.userSwitched(on)        // the user's switch wins over a call pause
-        hotspotFailed = false
-        Hotspot.set(app, on) { ok, detail ->
-            if (!ok) { if (on) hotspotFailed = true; refused(Error.Code.INTERNAL, "hotspot: $detail") }
-            // The AP state change itself pushes status (Hotspot.watch); this catches a settle without one.
-            main.postDelayed(pushStatus, 1500)
-        }
-        main.post(pushStatus)                   // "Starting…" / off right away, not after the AP settles
-        // A start Android accepted can still die before the AP is up (no state change then): end "Starting…"
-        // as soon as its 15 s window closes.
-        if (on) main.postDelayed(pushStatus, 15_500)
+        switchHotspot(cmd.on, cmd.offWhenUnusedS) { code -> if (code != Code.CODE_OK) Log.w(TAG, "Mac hotspot switch: $code") }
     }
 }
 

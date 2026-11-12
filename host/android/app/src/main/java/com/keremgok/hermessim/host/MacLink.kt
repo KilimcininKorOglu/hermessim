@@ -13,14 +13,16 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
-import com.keremgok.hermessim.protocol.v1.HostSmsSent
-import com.keremgok.hermessim.protocol.v1.MacAccess
+import com.google.protobuf.ByteString
 import com.keremgok.hermessim.protocol.v1.MacCommand
 import com.keremgok.hermessim.protocol.v1.MacSecret
 import com.keremgok.hermessim.protocol.v1.MacStatus
 import com.keremgok.hermessim.protocol.v1.MacText
-import com.keremgok.hermessim.protocol.v1.PairedMac
-import com.keremgok.hermessim.protocol.v1.SmsReceived
+import com.keremgok.hermessim.wire.Peer
+import com.keremgok.hermessim.wire.PeerGrants
+import com.keremgok.hermessim.wire.Peers
+import com.keremgok.hermessim.wire.TextIn
+import com.keremgok.hermessim.wire.TextOrigin
 import java.util.UUID
 
 /**
@@ -82,14 +84,19 @@ class MacLink(
     fun isMac(address: String): Boolean = core.isMac(address)
     fun windowOpen(): Boolean = core.windowOpen()
 
-    /** For HostStatus.mac. */
-    fun access(): MacAccess = MacAccess.newBuilder().setSupported(advertiser.supported()).setPairing(core.windowOpen()).setTexts(true)
-        .setControl(true)
-        .addAllMacs(core.macs.map {
-            PairedMac.newBuilder().setName(it.name).setAddress(it.address).setConnected(it.address in connected)
-                .setTexts(core.texts(it.address)).setControl(core.control(it.address)).build()
+    /** The `Peers` group. A Mac's id is the 6 bytes of its Bluetooth address. */
+    fun peers(): Peers = Peers.newBuilder().setAvailable(advertiser.supported()).setWindowOpen(core.windowOpen())
+        .addAllPeers(core.macs.map {
+            Peer.newBuilder().setId(ByteString.copyFrom(ApClient.bytes(it.address.lowercase()))).setName(it.name)
+                .setConnected(it.address in connected)
+                .setGrants(PeerGrants.newBuilder().setTexts(core.texts(it.address)).setControl(core.control(it.address))).build()
         })
         .build()
+
+    /** The address of the listed Mac a peer names by [id] (Peer.id), or null. */
+    fun address(id: ByteString): String? = ApClient.text(id.toByteArray()).let { text ->
+        core.macs.firstOrNull { it.address.equals(text, ignoreCase = true) }?.address
+    }
 
     /** A new GATT service object for each GATT server (Bluetooth restarted: the old one went with it). */
     fun service(server: BluetoothGattServer): BluetoothGattService {
@@ -184,7 +191,7 @@ class MacLink(
         return reply?.let { r ->
             {
                 Log.i(TAG, "Mac ${device.address}: reply on slot ${r.slot} (${r.body.length} chars)")
-                SmsSender.sendFromHost(ctx, r.to, r.body, r.slot, HostSmsSent.Origin.MAC)
+                SmsSender.sendFromHost(ctx, r.to, r.body, r.slot, TextOrigin.TEXT_ORIGIN_MAC)
             }
         }
     }
@@ -249,9 +256,9 @@ class MacLink(
     fun statusChanged() = main.post { notifier.subscribers(STATUS).forEach { notifier.notify(it, STATUS) } }
 
     /** A text arrived: it goes on the shelf, and every Mac subscribed to the texts is told to read them. */
-    fun textArrived(m: SmsReceived) = main.post {
-        shelf.add(MacText.newBuilder().setId(m.id).setSender(m.fromE164.ifEmpty { m.fromRaw }).setBody(m.body).setAtMs(m.receivedMs).build(),
-            from = m.fromRaw, slot = m.slot)
+    fun textArrived(seq: Long, t: TextIn) = main.post {
+        shelf.add(MacText.newBuilder().setId(seq.toString()).setSender(t.fromE164.ifEmpty { t.from }).setBody(t.body).setAtMs(t.atMs).build(),
+            from = t.from, slot = if (t.hasLine()) t.line else -1)
         notifier.subscribers(TEXTS).filter(core::texts).forEach { notifier.notify(it, TEXTS) }
     }
 

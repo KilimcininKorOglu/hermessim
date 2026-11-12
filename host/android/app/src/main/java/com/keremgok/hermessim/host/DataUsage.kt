@@ -5,7 +5,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.keremgok.hermessim.protocol.v1.Hotspot.Usage
+import com.keremgok.hermessim.wire.HotspotUsage
 import java.time.LocalDate
 import java.time.YearMonth
 
@@ -86,12 +86,12 @@ object DataUsage {
         prefs.edit().putLong("last_rx_$iface", rx).putLong("last_tx_$iface", tx).apply()
     }
 
-    fun usage(): Usage {
-        if (!::app.isInitialized) return Usage.getDefaultInstance()
+    fun usage(): HotspotUsage {
+        if (!::app.isInitialized) return HotspotUsage.getDefaultInstance()
         val p = prefs
         val today = if (p.getString("day", null) == LocalDate.now().toString()) p.getLong("today", 0) else 0
         val month = if (p.getString("month_key", null) == YearMonth.now().toString()) p.getLong("month", 0) else 0
-        return Usage.newBuilder().setSessionDown(p.getLong("session_down", 0)).setSessionUp(p.getLong("session_up", 0))
+        return HotspotUsage.newBuilder().setSessionDown(p.getLong("session_down", 0)).setSessionUp(p.getLong("session_up", 0))
             .setToday(today).setMonth(month).build()
     }
 }

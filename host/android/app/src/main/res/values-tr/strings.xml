@@ -66,7 +66,7 @@
     <string name="btn_fix">Şimdi düzelt</string>
     <string name="btn_fixing">Düzeltiliyor…</string>
     <string name="pair_title">Telefonunuzu eşleştirin</string>
-    <string name="pair_body">Telefonunuzda (iPhone ya da Android): HermesSIM\'i kurup açın, Ana cihaz ekle\'ye dokunun, \"%1$s\" seçin ve telefonunuz sorduğunda eşleştirmeyi onaylayın.</string>
+    <string name="pair_body">Telefonunuzda (iPhone ya da Android): HermesSIM\'i kurup açın, Ana cihaz ekle\'ye dokunun, \"%1$s\" seçin, telefonunuz sorduğunda eşleştirmeyi onaylayın ve aşağıdaki eşleştirme kodunu yazın.</string>
     <string name="pair_open_left">Eşleştirme %s daha açık.</string>
     <string name="pair_closed">Eşleştirme kapalı.</string>
     <string name="c_lock">Ekran kilidi</string>
@@ -75,7 +75,7 @@
     <string name="lock_title">Ekran kilidini kaldırın</string>
     <string name="lock_body">PIN, desen veya şifre varken Android, her yeniden başlatma veya elektrik kesintisinden sonra telefonun kilidi açılana kadar HermesSIM\'i kilitli tutar; çantanızdaki ya da evde bıraktığınız bir telefonun kilidini de kimse açmaz. Ekran kilidini Yok (veya Kaydırma) yapın.</string>
     <string name="btn_lock_settings">Ekran kilidi ayarlarını aç</string>
-    <string name="pair_ready">Eşleştirmeye hazır: bu ana cihazı ilk ekleyen telefon onu alır.</string>
+    <string name="pair_code">Eşleştirme kodu: %1$s</string>
     <string name="btn_open_pairing">Eşleştirmeyi aç (5 dk)</string>
     <string name="next_title">Telefonunuzda devam edin</string>
     <string name="next_test">%1$s ile eşleşti. Sıradaki adım, telefonunuzdaki HermesSIM\'de: Ana cihaz → Arama sesi → Arama testini yap. Bir arkadaşınızı arayın ve ses çıkarıp çıkarmadığını duymak için bu telefonu yanınızda tutun.</string>

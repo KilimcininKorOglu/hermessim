@@ -3,18 +3,17 @@ package com.keremgok.hermessim.host
 
 import android.content.Context
 import android.content.SharedPreferences
-import com.keremgok.hermessim.protocol.v1.HostNotice
-import com.keremgok.hermessim.protocol.v1.Hotspot as HotspotMsg
+import com.keremgok.hermessim.wire.NoticeKind
 import java.time.YearMonth
 
 /**
- * The hotspot's monthly data limit (protocol Hotspot.monthly_limit_bytes), counted as DataUsage's month: a notice at
+ * The hotspot's monthly data limit (Hotspot.month_limit_bytes), counted as DataUsage's month: a notice at
  * 80 %, and at 100 % the hotspot goes off once with a notice. Turned on again by the user, it is not cut a second time
  * that month; a new month or a new limit starts over. Pure: [DataLimit] keeps the state.
  */
 class DataLimitCore(var limitBytes: Long = 0, var month: String = "", var step: Int = 0) {
     /** What this month's usage calls for: a notice, and whether to turn the hotspot off. */
-    data class Outcome(val notice: HostNotice.Kind?, val percent: Int, val cutOff: Boolean)
+    data class Outcome(val notice: NoticeKind?, val percent: Int, val cutOff: Boolean)
 
     fun check(month: String, used: Long, hotspotOn: Boolean): Outcome {
         if (month != this.month) { this.month = month; step = 0 }
@@ -27,8 +26,8 @@ class DataLimitCore(var limitBytes: Long = 0, var month: String = "", var step: 
         }
         if (due <= step) return Outcome(null, percent, false)
         step = due
-        return if (due == STEP_REACHED) Outcome(HostNotice.Kind.DATA_LIMIT_REACHED, percent, hotspotOn)
-        else Outcome(HostNotice.Kind.DATA_LIMIT_NEAR, percent, false)
+        return if (due == STEP_REACHED) Outcome(NoticeKind.NOTICE_KIND_DATA_LIMIT_REACHED, percent, hotspotOn)
+        else Outcome(NoticeKind.NOTICE_KIND_DATA_LIMIT_NEAR, percent, false)
     }
 
     fun reached(used: Long): Boolean = limitBytes in 1..used
@@ -46,12 +45,6 @@ class DataLimitCore(var limitBytes: Long = 0, var month: String = "", var step: 
         const val NEAR_PERCENT = 80
         private const val STEP_NEAR = 1
         private const val STEP_REACHED = 2
-
-        /** True when [asked] changes nothing but the limit against [current]: no hotspot restart is needed. */
-        fun onlyLimit(asked: HotspotMsg, current: HotspotMsg): Boolean = radio(asked) == radio(current)
-
-        private fun radio(h: HotspotMsg): List<Any> = listOf(h.ssid, h.passphrase, h.band, h.hidden, h.security,
-            h.maxClients, h.autoOff, h.autoOffMinutes, h.appleMarker)
     }
 }
 
@@ -69,17 +62,18 @@ object DataLimit {
 
     fun reached(used: Long): Boolean = ::core.isInitialized && core.reached(used)
 
-    /** SetHotspotConfig's limit; true when it changed. */
+    /** The limit a peer set; true when it changed. */
     fun set(bytes: Long): Boolean {
         if (!::core.isInitialized || !core.setLimit(bytes)) return false
         save()
         return true
     }
 
-    /** Relay's status, main thread: the notice this month's usage calls for, and whether to turn the hotspot off. */
-    fun check(h: HotspotMsg): DataLimitCore.Outcome {
+    /** Main thread, after each change of the usage: the notice this month's usage calls for, and whether to turn the
+     *  hotspot off. */
+    fun check(monthUsed: Long, hotspotOn: Boolean): DataLimitCore.Outcome {
         if (!::core.isInitialized) return DataLimitCore.Outcome(null, 0, false)
-        val out = core.check(YearMonth.now().toString(), h.usage.month, h.on)
+        val out = core.check(YearMonth.now().toString(), monthUsed, hotspotOn)
         if (out.notice != null) save()
         return out
     }

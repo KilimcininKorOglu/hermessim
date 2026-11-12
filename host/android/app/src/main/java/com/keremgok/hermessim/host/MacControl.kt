@@ -4,12 +4,13 @@ package com.keremgok.hermessim.host
 import android.content.Context
 import android.os.Handler
 import android.util.Log
-import com.keremgok.hermessim.protocol.v1.HostActionResult
+import com.keremgok.hermessim.protocol.v1.HostAction
+import com.keremgok.hermessim.protocol.v1.Hotspot.Client as MacDevice
 import com.keremgok.hermessim.protocol.v1.MacControl
 import com.keremgok.hermessim.protocol.v1.MacLine
 import com.keremgok.hermessim.protocol.v1.MacStatus
-import com.keremgok.hermessim.protocol.v1.SetSim
-import com.keremgok.hermessim.protocol.v1.Sim
+import com.keremgok.hermessim.wire.Code
+import com.keremgok.hermessim.wire.HostVerb
 
 /**
  * A Mac's control write (protocol/README.md "Mac", Control): the mobile data line, a host action or a hotspot device
@@ -23,12 +24,20 @@ object MacControlCore {
 
     fun parse(value: ByteArray): MacControl? = runCatching { MacControl.parseFrom(value) }.getOrNull()
 
+    /** A Mac's host action as the host runs it. */
+    fun verb(action: HostAction.Action): HostVerb = verbs[action] ?: HostVerb.HOST_VERB_UNSPECIFIED
+
+    private val verbs = mapOf(
+        HostAction.Action.RECONNECT_NETWORK to HostVerb.HOST_VERB_REGISTER_AGAIN,
+        HostAction.Action.REBOOT to HostVerb.HOST_VERB_RESTART,
+    )
+
     /** The status for a control that may not run, or null when it may. [slots]: the lines that are on. */
     fun refusal(control: MacControl?, inCall: Boolean, slots: Set<Int>): Int? = when (control?.whatCase) {
         MacControl.WhatCase.DATA_SLOT -> if (control.dataSlot in slots) null else FAILED
-        MacControl.WhatCase.HOST_ACTION -> when (HostActionCore.refusal(control.hostAction, inCall)) {
+        MacControl.WhatCase.HOST_ACTION -> when (HostActionCore.refusal(verb(control.hostAction), inCall)) {
             null -> null
-            HostActionResult.Failure.IN_CALL -> IN_CALL
+            Code.CODE_IN_CALL -> IN_CALL
             else -> FAILED
         }
         MacControl.WhatCase.BLOCK -> if (HotspotGuardCore.validMac(control.block.mac.lowercase())) null else FAILED
@@ -36,9 +45,13 @@ object MacControlCore {
     }
 
     /** The host's lines as a Mac with control chooses among them (MacStatus.lines). */
-    fun lines(sims: List<Sim>): List<MacLine> = sims.map { sim ->
-        MacLine.newBuilder().apply { slot = sim.slot; name = sim.operatorName; enabled = sim.enabled; defaultData = sim.defaultData }.build()
+    fun lines(sims: List<SimLine>): List<MacLine> = sims.map { sim ->
+        MacLine.newBuilder().apply { slot = sim.slot; name = sim.carrier; enabled = sim.enabled; defaultData = sim.defaultData }.build()
     }
+
+    /** The hotspot's devices as a Mac with control lists them (MacStatus.clients, MacStatus.blocked). */
+    fun devices(clients: List<ApClient>): List<MacDevice> =
+        clients.map { MacDevice.newBuilder().setMac(it.mac).setIp(it.ip).setName(it.name).setDown(it.down).setUp(it.up).build() }
 
     /** [base] as one Mac sees it: its own permissions, and the lines and devices only with [control]. */
     fun shown(base: MacStatus, texts: Boolean, control: Boolean): MacStatus = base.toBuilder().also { b ->
@@ -69,10 +82,9 @@ object MacControlRunner {
         Log.i(TAG, "Mac $address: control ${c.whatCase}")
         return when (c.whatCase) {
             MacControl.WhatCase.DATA_SLOT ->
-                if (Sims.apply(ctx, SetSim.newBuilder().setSlot(c.dataSlot).setMakeDefaultData(true).build()) == null) MacControlCore.OK
-                else MacControlCore.FAILED
+                if (Sims.setDataLine(ctx, c.dataSlot) == Code.CODE_OK) MacControlCore.OK else MacControlCore.FAILED
             MacControl.WhatCase.HOST_ACTION -> {
-                HostActions.run(ctx, c.hostAction, main) { r -> Log.i(TAG, "Mac $address: ${c.hostAction} ok=${r.ok} ${r.failure}") }
+                HostActions.run(ctx, MacControlCore.verb(c.hostAction), main) { code -> Log.i(TAG, "Mac $address: ${c.hostAction} $code") }
                 MacControlCore.OK
             }
             else -> if (HotspotGuard.set(c.block.mac, c.block.blocked, c.block.name)) MacControlCore.OK else MacControlCore.FAILED

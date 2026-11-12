@@ -114,7 +114,7 @@ object HotspotPause {
     }
 
     /** CallRegistry, at every call change. */
-    fun calls(relayed: Boolean, live: Boolean) = onMain {
+    fun calls(relayed: Boolean, live: Boolean) = Bg.onMain {
         callUp = live
         val was = core.inCall
         core.calls(relayed, live)
@@ -123,7 +123,7 @@ object HotspotPause {
     }
 
     /** The client's link changed: Bluetooth up or gone, the call's audio onto or off the internet path. */
-    fun transportChanged(why: String) = onMain { evaluate(why) }
+    fun transportChanged(why: String) = Bg.onMain { evaluate(why) }
 
     /** The user switched the hotspot (client app, widget, adb): main thread, before Hotspot.set. */
     fun userSwitched(on: Boolean) {
@@ -231,6 +231,4 @@ object HotspotPause {
 
     private fun bootCount(): Int =
         runCatching { android.provider.Settings.Global.getInt(app.contentResolver, android.provider.Settings.Global.BOOT_COUNT) }.getOrDefault(-1)
-
-    private fun onMain(f: () -> Unit) { if (Looper.myLooper() == Looper.getMainLooper()) f() else main.post(f) }
 }

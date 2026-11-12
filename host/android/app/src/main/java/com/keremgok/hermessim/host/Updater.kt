@@ -7,7 +7,13 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.PowerManager
 import android.util.Log
-import com.keremgok.hermessim.protocol.v1.Update
+import com.keremgok.hermessim.wire.Code
+import com.keremgok.hermessim.wire.Update
+import com.keremgok.hermessim.wire.UpdateFault
+import com.keremgok.hermessim.wire.UpdateNote
+import com.keremgok.hermessim.wire.UpdatePhase
+import com.keremgok.hermessim.wire.UpdateText
+import com.keremgok.hermessim.wire.UpdateVerb
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
@@ -18,7 +24,7 @@ import java.util.zip.ZipFile
 
 /**
  * The host app updates itself from hermessim.keremgok.tr (protocol/README.md "Updates"): check daily. Automatic
- * updates are a setting, off by default ([UpdateCore]). Off: a newer version is only offered (AVAILABLE), and the
+ * updates are a setting, off by default ([UpdateCore]). Off: a newer version is only offered, and the
  * user's "Update now" downloads, verifies (sha256 + same signing key as the installed app) and installs it. On: the
  * host downloads and verifies the newest APK by itself, tells the client, then installs on the user's word or by itself
  * between 02:00 and 05:00 once the client has been told. Never during a call. "Later" = one day.
@@ -32,10 +38,10 @@ object Updater {
     private lateinit var app: Context
     private lateinit var changed: () -> Unit
 
-    @Volatile private var state = Update.State.IDLE
+    @Volatile private var state = UpdatePhase.UPDATE_PHASE_IDLE
     @Volatile private var available: JSONObject? = null     // newest release (from the API)
-    @Volatile private var notes: List<Update.Note> = emptyList()
-    @Volatile private var error = ""
+    @Volatile private var notes: List<UpdateNote> = emptyList()
+    @Volatile private var fault = UpdateFault.UPDATE_FAULT_UNSPECIFIED
 
     private fun prefs() = app.getSharedPreferences("updater", Context.MODE_PRIVATE)
     private val apkFile get() = File(app.filesDir, "update.apk")
@@ -62,33 +68,39 @@ object Updater {
         val a = available
         val b = Update.newBuilder()
             .setCurrentVersion(BuildConfigInfo.version(app)).setCurrentCode(myCode())
-            .setState(state).addAllNotes(notes).setError(error).setAutoUpdate(auto())
-            .setDeferredUntilMs(prefs().getLong("deferred_until", 0)).setCheckedMs(prefs().getLong("checked", 0))
-        if (a != null) b.setAvailableVersion(a.optString("version")).setAvailableCode(a.optInt("code"))
+            .setPhase(state).addAllNotes(notes).setFault(fault).setAutomatic(auto())
+            .setLaterUntilMs(prefs().getLong("deferred_until", 0)).setCheckedMs(prefs().getLong("checked", 0))
+        if (a != null) b.setVersion(a.optString("version")).setCode(a.optInt("code"))
         return b.build()
     }
 
     /** A client has seen the status with a ready update: an hour later it may install at night. */
     fun informed() {
-        if (state == Update.State.READY && !prefs().getBoolean("informed_${available?.optInt("code")}", false)) {
+        if (state == UpdatePhase.UPDATE_PHASE_READY && !prefs().getBoolean("informed_${available?.optInt("code")}", false)) {
             prefs().edit().putBoolean("informed_${available?.optInt("code")}", true)
                 .putLong("informed_at_${available?.optInt("code")}", System.currentTimeMillis()).apply()
             Log.i(TAG, "update ${available?.optString("version")}: the phone has been told")
         }
     }
 
-    fun action(a: com.keremgok.hermessim.protocol.v1.UpdateAction.Action, done: (String?) -> Unit) = h.post {
-        when (a) {
-            com.keremgok.hermessim.protocol.v1.UpdateAction.Action.CHECK -> { check(); done(null) }
-            com.keremgok.hermessim.protocol.v1.UpdateAction.Action.LATER -> {
-                prefs().edit().putLong("deferred_until", System.currentTimeMillis() + DAY_MS).apply()
-                Log.i(TAG, "update postponed by a day"); changed(); done(null)
-            }
-            com.keremgok.hermessim.protocol.v1.UpdateAction.Action.INSTALL_NOW -> done(installNow())
-            com.keremgok.hermessim.protocol.v1.UpdateAction.Action.AUTO_ON -> { setAuto(true); done(null) }
-            com.keremgok.hermessim.protocol.v1.UpdateAction.Action.AUTO_OFF -> { setAuto(false); done(null) }
-            else -> done(null)
+    /** A peer's UpdateControl. [done] hears CODE_OK or why not; with CODE_UPDATE_FAILED the fault too. Off main. */
+    fun action(verb: UpdateVerb, done: (Code, UpdateFault) -> Unit) = h.post {
+        val code = when (verb) {
+            UpdateVerb.UPDATE_VERB_CHECK -> { check(); Code.CODE_OK }
+            UpdateVerb.UPDATE_VERB_LATER -> later()
+            UpdateVerb.UPDATE_VERB_INSTALL -> installNow()
+            UpdateVerb.UPDATE_VERB_AUTO_ON -> { setAuto(true); Code.CODE_OK }
+            UpdateVerb.UPDATE_VERB_AUTO_OFF -> { setAuto(false); Code.CODE_OK }
+            else -> Code.CODE_BAD_VALUE
         }
+        done(code, fault)
+    }
+
+    private fun later(): Code {
+        prefs().edit().putLong("deferred_until", System.currentTimeMillis() + DAY_MS).apply()
+        Log.i(TAG, "update postponed by a day")
+        changed()
+        return Code.CODE_OK
     }
 
     /** Turning automatic updates on downloads a version that was only offered; turning them off keeps a download. */
@@ -96,24 +108,34 @@ object Updater {
         prefs().edit().putBoolean("auto_update", on).apply()
         Log.i(TAG, "automatic updates ${if (on) "on" else "off"}")
         val offered = available
-        if (on && state == Update.State.AVAILABLE && offered != null) download(offered) else changed()
+        if (on && state == UpdatePhase.UPDATE_PHASE_AVAILABLE && offered != null) download(offered) else changed()
     }
 
-    /** "Update now": an offered version is downloaded and verified first. null = started, else why not. */
-    private fun installNow(): String? {
+    /** "Update now": an offered version is downloaded and verified first. CODE_OK = started, else why not. */
+    private fun installNow(): Code {
         val offered = available
         if (UpdateCore.installNow(state) == UpdateCore.Install.DOWNLOAD_THEN_INSTALL && offered != null) {
             download(offered)
-            if (state != Update.State.READY) return error.ifEmpty { "no update ready" }
+            if (state != UpdatePhase.UPDATE_PHASE_READY) return notReady()
         }
         return install()
     }
+
+    /** No update can be installed: because the last step failed, or because there is none. */
+    private fun notReady(): Code =
+        if (fault == UpdateFault.UPDATE_FAULT_UNSPECIFIED) Code.CODE_UPDATE_NONE else Code.CODE_UPDATE_FAILED
 
     private fun myCode(): Int = runCatching {
         @Suppress("DEPRECATION") app.packageManager.getPackageInfo(app.packageName, 0).versionCode
     }.getOrDefault(0)
 
-    private fun set(s: Update.State, err: String = "") { state = s; error = err; changed() }
+    /** The new phase; with a [why] the fault a peer shows its own text for, and [detail] for this host's log. */
+    private fun set(s: UpdatePhase, why: UpdateFault = UpdateFault.UPDATE_FAULT_UNSPECIFIED, detail: String = "") {
+        if (why != UpdateFault.UPDATE_FAULT_UNSPECIFIED) Log.w(TAG, "update: $why $detail")
+        state = s
+        fault = why
+        changed()
+    }
 
     /** Keeps the CPU up for [block]: the phone suspends with its screen off even on the charger, and 30 Oct 2026 an
      *  install sat 44 s in suspend (5 s otherwise) while Play Protect's check ran. A successful install ends this
@@ -126,8 +148,8 @@ object Updater {
     }
 
     private fun check() {
-        if (state == Update.State.DOWNLOADING || state == Update.State.INSTALLING) return
-        set(Update.State.CHECKING)
+        if (state == UpdatePhase.UPDATE_PHASE_DOWNLOADING || state == UpdatePhase.UPDATE_PHASE_INSTALLING) return
+        set(UpdatePhase.UPDATE_PHASE_CHECKING)
         // The check also tells the server which version this install runs (admin Fleet page; hashed id).
         val r = Api.postJson("/releases/host/check", JSONObject().put("install_id", Api.installId(app))
             .put("version", BuildConfigInfo.version(app)).put("code", myCode())
@@ -136,25 +158,30 @@ object Updater {
         if (r == null) {
             // A failed check must not throw away an update already downloaded and verified (it would block the
             // night install and "Update now" for a day).
-            if (available != null && apkFile.exists()) { set(Update.State.READY, ""); return }
-            set(Update.State.FAILED, "could not reach the update server"); return
+            if (available != null && apkFile.exists()) { set(UpdatePhase.UPDATE_PHASE_READY); return }
+            set(UpdatePhase.UPDATE_PHASE_FAILED, UpdateFault.UPDATE_FAULT_UNREACHABLE); return
         }
         prefs().edit().putLong("checked", System.currentTimeMillis()).apply()
         val list = r.optJSONArray("releases")
-        // The notes ride in every HostStatus: newest 3 versions, each capped, so a host far behind never builds a status
-        // too big for one frame (that would crash-loop the app).
-        notes = (0 until minOf(list?.length() ?: 0, 3)).mapNotNull { list?.optJSONObject(it) }.map {
-            Update.Note.newBuilder().setVersion(it.optString("version"))
-                .setEn(it.optJSONObject("notes")?.optString("en").orEmpty().take(600))
-                .setTr(it.optJSONObject("notes")?.optString("tr").orEmpty().take(600)).build()
-        }
+        // The notes ride in the Update group: the newest 3 versions, each text capped.
+        notes = (0 until minOf(list?.length() ?: 0, 3)).mapNotNull { list?.optJSONObject(it) }.map(::note)
         val latest = list?.optJSONObject(0)
-        if (latest == null || latest.optInt("code") <= myCode()) { available = null; set(Update.State.IDLE); return }
+        if (latest == null || latest.optInt("code") <= myCode()) { available = null; set(UpdatePhase.UPDATE_PHASE_IDLE); return }
         available = latest
         when (UpdateCore.afterCheck(auto(), downloaded(latest))) {
             UpdateCore.Next.DOWNLOAD -> download(latest)
-            UpdateCore.Next.OFFER -> set(Update.State.AVAILABLE)
+            UpdateCore.Next.OFFER -> set(UpdatePhase.UPDATE_PHASE_AVAILABLE)
         }
+    }
+
+    /** A release's notes in every language the server has them, each cut to 600 characters. */
+    private fun note(release: JSONObject): UpdateNote {
+        val texts = release.optJSONObject("notes")
+        val note = UpdateNote.newBuilder().setVersion(release.optString("version"))
+        for (language in texts?.keys()?.asSequence().orEmpty().sorted()) {
+            note.addTexts(UpdateText.newBuilder().setLanguage(language).setText(texts?.optString(language).orEmpty().take(600)))
+        }
+        return note.build()
     }
 
     /** [r]'s APK is already here (the download is kept when automatic updates are turned off). */
@@ -164,10 +191,10 @@ object Updater {
     }
 
     private fun download(r: JSONObject) {
-        val apk = r.optJSONObject("apk") ?: return set(Update.State.FAILED, "release has no APK")
+        val apk = r.optJSONObject("apk") ?: return set(UpdatePhase.UPDATE_PHASE_FAILED, UpdateFault.UPDATE_FAULT_NO_PACKAGE)
         val sha = apk.optString("sha256")
         if (apkFile.exists() && sha256(apkFile) == sha) return verified()
-        set(Update.State.DOWNLOADING)
+        set(UpdatePhase.UPDATE_PHASE_DOWNLOADING)
         val tmp = File(app.filesDir, "update.part")
         val ok = awake("download") { runCatching {
             val c = URL(apk.getString("url")).openConnection() as HttpURLConnection
@@ -177,7 +204,10 @@ object Updater {
             check(sha256(tmp) == sha) { "checksum mismatch" }
             tmp.renameTo(apkFile)
         } }
-        ok.exceptionOrNull()?.let { tmp.delete(); return set(Update.State.FAILED, "download failed: ${it.message}") }
+        ok.exceptionOrNull()?.let {
+            tmp.delete()
+            return set(UpdatePhase.UPDATE_PHASE_FAILED, UpdateFault.UPDATE_FAULT_DOWNLOAD, it.message.orEmpty())
+        }
         verified()
     }
 
@@ -189,38 +219,38 @@ object Updater {
         val mine = pm.getPackageInfo(app.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
         val theirs = info?.signingInfo?.apkContentsSigners?.map { it.toCharsString() }?.toSet()
         val ours = mine.signingInfo?.apkContentsSigners?.map { it.toCharsString() }?.toSet()
+        // The APK itself must be the advertised, newer version (else it would "install" the same version nightly).
+        val wrong = info?.packageName != app.packageName || code <= myCode() || code != (available?.optLong("code") ?: -1L)
         when {
-            info?.packageName != app.packageName -> { apkFile.delete(); set(Update.State.FAILED, "not a HermesSIM Host package") }
-            // The APK itself must be the advertised, newer version (else it would "install" the same version nightly).
-            code <= myCode() || code != (available?.optLong("code") ?: -1L) ->
-                { apkFile.delete(); set(Update.State.FAILED, "the downloaded package isn't version ${available?.optString("version")}") }
-            theirs == null || theirs != ours -> set(Update.State.FAILED,
-                "the update is signed with a different key than this installation (a development build?)")
-            else -> { Log.i(TAG, "update ${available?.optString("version")} downloaded and verified"); set(Update.State.READY) }
+            wrong -> {
+                apkFile.delete()
+                set(UpdatePhase.UPDATE_PHASE_FAILED, UpdateFault.UPDATE_FAULT_WRONG_PACKAGE, "${info?.packageName} code $code")
+            }
+            theirs == null || theirs != ours -> set(UpdatePhase.UPDATE_PHASE_FAILED, UpdateFault.UPDATE_FAULT_WRONG_KEY)
+            else -> { Log.i(TAG, "update ${available?.optString("version")} downloaded and verified"); set(UpdatePhase.UPDATE_PHASE_READY) }
         }
     }
 
-    /** null = started (the app is replaced and restarts), else why not. */
-    private fun install(): String? = awake("install") { installAwake() }
+    /** CODE_OK = started (the app is replaced and restarts), else why not. */
+    private fun install(): Code = awake("install") { installAwake() }
 
-    private fun installAwake(): String? {
-        if (state != Update.State.READY) return "no update ready"
-        if (CallRegistry.snapshot().any { it.state != com.keremgok.hermessim.protocol.v1.CallEvent.State.ENDED }) return "after the call"
-        set(Update.State.INSTALLING)
+    private fun installAwake(): Code {
+        if (state != UpdatePhase.UPDATE_PHASE_READY) return Code.CODE_UPDATE_NONE
+        if (CallRegistry.live()) return Code.CODE_IN_CALL
+        set(UpdatePhase.UPDATE_PHASE_INSTALLING)
         Log.i(TAG, "installing update ${available?.optString("version")}")
-        // The install replaces this process within a second or two: let "Installing" reach the iPhone first.
+        // The install replaces this process within a second or two: let "Installing" reach the phone first.
         Thread.sleep(1500)
-        if (CallRegistry.snapshot().any { it.state != com.keremgok.hermessim.protocol.v1.CallEvent.State.ENDED }) {
-            set(Update.State.READY, ""); return "after the call"     // a call started during the pause
+        if (CallRegistry.live()) {
+            set(UpdatePhase.UPDATE_PHASE_READY); return Code.CODE_IN_CALL     // a call started during the pause
         }
         val tmp = "/data/local/tmp/hermessim-update.apk"
         val out = Root.sh("cp ${Root.q(apkFile.path)} $tmp && chmod 644 $tmp && pm install -r $tmp; rc=\$?; rm -f $tmp; exit \$rc", 180_000).out.trim()
         // Success replaces this process before we get here, usually; if we're still alive, it failed.
-        Log.e(TAG, "update install: $out")
-        val why = if (out.contains("Permission denied", true) || out.contains("not allowed", true))
-            "root was refused: allow HermesSIM Host in Magisk (the module grants it at the next boot)" else "install failed: ${out.take(120)}"
-        set(Update.State.READY, why)               // still downloaded and verified: "Update now" can retry
-        return why
+        val refused = out.contains("Permission denied", true) || out.contains("not allowed", true)
+        // Still downloaded and verified: "Update now" can retry
+        set(UpdatePhase.UPDATE_PHASE_READY, if (refused) UpdateFault.UPDATE_FAULT_ROOT_REFUSED else UpdateFault.UPDATE_FAULT_INSTALL, out.take(120))
+        return Code.CODE_UPDATE_FAILED
     }
 
     /** Daily check; night window: with automatic updates on, install a ready update the client has been told about
@@ -232,7 +262,7 @@ object Updater {
             if (now - prefs().getLong("checked", 0) > DAY_MS) check()
             val code = available?.optInt("code") ?: return
             val night = UpdateCore.Night(
-                auto = auto(), ready = state == Update.State.READY,
+                auto = auto(), ready = state == UpdatePhase.UPDATE_PHASE_READY,
                 hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY), nowMs = now,
                 deferredUntilMs = prefs().getLong("deferred_until", 0),
                 toldAtMs = if (prefs().getBoolean("informed_$code", false)) prefs().getLong("informed_at_$code", 0) else 0,
@@ -246,7 +276,7 @@ object Updater {
 
     /** After an update: the embedded module's hermessimd replaces the running one if they differ (no call up). */
     private fun swapDaemonIfNeeded() {
-        if (CallRegistry.snapshot().any { it.state != com.keremgok.hermessim.protocol.v1.CallEvent.State.ENDED }) {
+        if (CallRegistry.live()) {
             h.postDelayed({ swapDaemonIfNeeded() }, 60_000); return
         }
         val abi = Onboarding.daemonAbi ?: return                     // no build for this phone: the module never installed

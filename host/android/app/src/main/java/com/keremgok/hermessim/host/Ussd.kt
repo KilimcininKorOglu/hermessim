@@ -7,10 +7,9 @@ import android.os.Handler
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
 import android.util.Log
-import com.keremgok.hermessim.protocol.v1.UssdRequest
-import com.keremgok.hermessim.protocol.v1.UssdResult
+import com.keremgok.hermessim.wire.Code
 
-/** What a client may run as a USSD code, and how Android's failures read (protocol "UssdRequest"). Pure. */
+/** What a client may run as a USSD code, and how Android's failures read. Pure. */
 object UssdCode {
     const val MAX_LENGTH = 32
     private const val DIGITS_AND_MARKS = "0123456789*#"
@@ -20,65 +19,59 @@ object UssdCode {
         code.all { it in DIGITS_AND_MARKS }
 
     /** TelephonyManager.USSD_ERROR_SERVICE_UNAVAIL means the line can't run it now; anything else is the network's no. */
-    fun failure(androidCode: Int): UssdResult.Failure =
-        if (androidCode == TelephonyManager.USSD_ERROR_SERVICE_UNAVAIL) UssdResult.Failure.NO_SERVICE else UssdResult.Failure.NETWORK
-
-    fun failed(why: UssdResult.Failure): UssdResult = UssdResult.newBuilder().setFailure(why).build()
-
-    fun answered(text: CharSequence): UssdResult = UssdResult.newBuilder().also {
-        it.ok = true
-        it.text = text.toString()
-    }.build()
+    fun failure(androidCode: Int): Code =
+        if (androidCode == TelephonyManager.USSD_ERROR_SERVICE_UNAVAIL) Code.CODE_NO_SERVICE else Code.CODE_NETWORK_REFUSED
 }
 
 /**
  * Runs one USSD code at a time on a line ([TelephonyManager.sendUssdRequest]). The answer comes once: the network's
- * text, its refusal, or [TIMEOUT_MS] without either. Main thread only.
+ * text with CODE_OK, its refusal, or [TIMEOUT_MS] without either. Main thread only.
  */
 object Ussd {
     private const val TAG = "Ussd"
     const val TIMEOUT_MS = 30_000L
 
     /** The answer of the code running now; null when none runs. */
-    private var pending: ((UssdResult) -> Unit)? = null
+    private var pending: ((Code, String) -> Unit)? = null
 
+    /** [slot] below 0: the phone system's default line for texts. */
     @SuppressLint("MissingPermission")
-    fun run(ctx: Context, req: UssdRequest, main: Handler, answer: (UssdResult) -> Unit) {
-        if (!UssdCode.valid(req.code)) return answer(UssdCode.failed(UssdResult.Failure.BAD_CODE))
-        if (pending != null) return answer(UssdCode.failed(UssdResult.Failure.NETWORK))
-        val sub = Sims.subIdForSlot(ctx, req.slot)
-        if (!SubscriptionManager.isValidSubscriptionId(sub)) return answer(UssdCode.failed(UssdResult.Failure.NO_SERVICE))
+    fun run(ctx: Context, slot: Int, code: String, main: Handler, answer: (Code, String) -> Unit) {
+        if (!UssdCode.valid(code)) return answer(Code.CODE_BAD_VALUE, "")
+        if (pending != null) return answer(Code.CODE_BUSY, "")
+        val sub = Sims.subIdForSlot(ctx, slot)
+        if (!SubscriptionManager.isValidSubscriptionId(sub)) return answer(Code.CODE_NO_SERVICE, "")
         val done = once(main, answer)
         val tm = ctx.getSystemService(TelephonyManager::class.java).createForSubscriptionId(sub)
         val callback = object : TelephonyManager.UssdResponseCallback() {
             override fun onReceiveUssdResponse(t: TelephonyManager, request: String, response: CharSequence) =
-                done(UssdCode.answered(response))
+                done(Code.CODE_OK, response.toString())
 
             override fun onReceiveUssdResponseFailed(t: TelephonyManager, request: String, failureCode: Int) {
-                Log.i(TAG, "USSD on slot ${req.slot} failed: $failureCode")
-                done(UssdCode.failure(failureCode).let(UssdCode::failed))
+                Log.i(TAG, "USSD on slot $slot failed: $failureCode")
+                done(UssdCode.failure(failureCode), "")
             }
         }
-        runCatching { tm.sendUssdRequest(req.code, callback, main) }.onFailure {
+        runCatching { tm.sendUssdRequest(code, callback, main) }.onFailure {
             Log.w(TAG, "USSD could not start: $it")
-            done(UssdCode.failed(UssdResult.Failure.NETWORK))
+            done(Code.CODE_FAILED, "")
         }
     }
 
     /** [answer] wrapped so it runs once, by whichever comes first: the network or the timeout. */
-    private fun once(main: Handler, answer: (UssdResult) -> Unit): (UssdResult) -> Unit {
-        val timeout = Runnable { finish(answer, UssdCode.failed(UssdResult.Failure.TIMEOUT)) }
+    private fun once(main: Handler, answer: (Code, String) -> Unit): (Code, String) -> Unit {
+        val timeout = Runnable { finish(answer, Code.CODE_TIMEOUT, "") }
         pending = answer
         main.postDelayed(timeout, TIMEOUT_MS)
-        return { r ->
+        return { code, text ->
             main.removeCallbacks(timeout)
-            finish(answer, r)
+            finish(answer, code, text)
         }
     }
 
-    private fun finish(answer: (UssdResult) -> Unit, r: UssdResult) {
+    private fun finish(answer: (Code, String) -> Unit, code: Code, text: String) {
         if (pending !== answer) return
         pending = null
-        answer(r)
+        answer(code, text)
     }
 }

@@ -14,13 +14,15 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
-import com.keremgok.hermessim.protocol.v1.HostWifi as HostWifiMsg
-import com.keremgok.hermessim.protocol.v1.WifiAddResult
-import com.keremgok.hermessim.protocol.v1.WifiScanResult
-import java.util.concurrent.Executors
+import com.keremgok.hermessim.wire.Code
+import com.keremgok.hermessim.wire.HostWifi as HostWifiMsg
+import com.keremgok.hermessim.wire.SavedWifi
+import com.keremgok.hermessim.wire.WifiList
+import com.keremgok.hermessim.wire.WifiRule
+import com.keremgok.hermessim.wire.WifiSeen
 
 /**
- * The host's own Wi-Fi connection (not the hotspot), one rule on every phone (18 Oct 2026; protocol HostWifi):
+ * The host's own Wi-Fi connection (not the hotspot), one rule on every phone (18 Oct 2026; `HostWifi`, `WifiRule`):
  * off while the hotspot is on and while the client is on Bluetooth; when the client has been away [AWAY_MS], on only if
  * the user chose "use Wi-Fi when I'm away". Never switched during a call; left alone until a client is paired.
  *
@@ -47,13 +49,13 @@ object HostWifi {
      *  no 2-minute wait), null = the real Bluetooth state. */
     @Volatile var clientOverride: Boolean? = null
     @Volatile private var setupUntil = 0L
-    @Volatile private var reason = HostWifiMsg.Reason.REASON_UNSPECIFIED
+    @Volatile private var reason = WifiRule.WIFI_RULE_UNSPECIFIED
     @Volatile var connectedSsid = ""; private set
     private var wasAway = true      // no "you just left" at start-up
     private var wasNear = false
     private const val AWAY_ALARM = "client-away"
     private const val JOIN_ALARM = "wifi-join"
-    @Volatile private var saved: List<HostWifiMsg.Saved> = emptyList()
+    @Volatile private var saved: List<SavedWifi> = emptyList()
 
     private val prefs by lazy { app.getSharedPreferences("hostwifi", Context.MODE_PRIVATE) }
     val useWhenAway get() = prefs.getBoolean("use_when_away", false)
@@ -104,20 +106,20 @@ object HostWifi {
         if (away && !wasAway && paired()) leftHost()
         wasAway = away
         val (want, r) = when {
-            !paired() -> null to HostWifiMsg.Reason.NOT_PAIRED
-            inCall() -> null to HostWifiMsg.Reason.IN_CALL
-            hotspotOn() -> false to HostWifiMsg.Reason.HOTSPOT
-            now < setupUntil -> true to HostWifiMsg.Reason.SETUP
-            !away -> false to HostWifiMsg.Reason.BLUETOOTH
-            useWhenAway -> true to HostWifiMsg.Reason.AWAY
-            else -> false to HostWifiMsg.Reason.SETTING_OFF
+            !paired() -> null to WifiRule.WIFI_RULE_NOT_PAIRED
+            inCall() -> null to WifiRule.WIFI_RULE_IN_CALL
+            hotspotOn() -> false to WifiRule.WIFI_RULE_HOTSPOT
+            now < setupUntil -> true to WifiRule.WIFI_RULE_SETUP
+            !away -> false to WifiRule.WIFI_RULE_PHONE_NEAR
+            useWhenAway -> true to WifiRule.WIFI_RULE_AWAY
+            else -> false to WifiRule.WIFI_RULE_SETTING_OFF
         }
         if (r != reason) { reason = r; changed() }
         if (want != null && want != wifiOn()) {
             Log.i(TAG, "host Wi-Fi -> ${if (want) "on" else "off"} ($r, $why)")
             setRadio(want)
         }
-        if (want == true && r == HostWifiMsg.Reason.AWAY) kickJoin() else { WakeAlarm.cancel(app, JOIN_ALARM); kicks = 0 }
+        if (want == true && r == WifiRule.WIFI_RULE_AWAY) kickJoin() else { WakeAlarm.cancel(app, JOIN_ALARM); kicks = 0 }
         // Bluetooth just went: look again when "away" begins.
         if (!isNear && !away) WakeAlarm.set(app, AWAY_ALARM, lastNear + AWAY_MS - now + 500) { evaluate("client away") }
         else WakeAlarm.cancel(app, AWAY_ALARM)
@@ -130,7 +132,7 @@ object HostWifi {
      */
     private var kicks = 0
     private fun joinKick() {
-        if (reason != HostWifiMsg.Reason.AWAY || !wifiOn() || connectedSsid.isNotEmpty()) { kicks = 0; return }
+        if (reason != WifiRule.WIFI_RULE_AWAY || !wifiOn() || connectedSsid.isNotEmpty()) { kicks = 0; return }
         kicks++
         exec.execute { root("cmd wifi start-scan"); refresh() }
         Log.i(TAG, "host Wi-Fi: not joined yet, scanning (try $kicks)")
@@ -178,8 +180,8 @@ object HostWifi {
     }
 
     fun status(): HostWifiMsg = HostWifiMsg.newBuilder()
-        .setUseWhenAway(useWhenAway).setOn(wifiOn()).setConnectedSsid(connectedSsid)
-        .addAllSaved(saved).setReason(reason).build()
+        .setUseWhenAway(useWhenAway).setOn(wifiOn()).setJoined(connectedSsid)
+        .addAllSaved(saved).setRule(reason).build()
 
     private fun wifiOn() = app.getSystemService(WifiManager::class.java).isWifiEnabled
 
@@ -201,58 +203,75 @@ object HostWifi {
     // ------------------------------------------------------------------ client requests (Bluetooth only)
 
     /** Networks around the host, for the client's "Add network" list. Turns Wi-Fi on for a moment if needed. */
-    fun scan(done: (WifiScanResult?, String?) -> Unit) {
-        if (hotspotOn()) return done(null, "turn the hotspot off first")
+    fun scan(done: (WifiList?, Code) -> Unit) {
+        if (hotspotOn()) return done(null, Code.CODE_HOTSPOT_ON)
         holdForSetup()
         exec.execute {
-            if (!awaitRadio()) { main.post { done(null, "Wi-Fi didn't turn on") }; return@execute }
+            if (!awaitRadio()) { main.post { done(null, Code.CODE_FAILED) }; return@execute }
             root("cmd wifi start-scan")
             var list = scanResults()
             for (i in 1..8) { if (list.isNotEmpty() && i > 3) break; Thread.sleep(500); list = scanResults() }
-            val savedNames = saved.map { it.ssid }.toSet()
+            val savedNames = saved.map { it.name }.toSet()
             val nets = list.filter { it.ssid.isNotEmpty() && !it.enterprise }
                 .groupBy { it.ssid }.map { (_, g) -> g.maxBy { it.rssi } }.sortedByDescending { it.rssi }.take(30)
-                .map { WifiScanResult.Network.newBuilder().setSsid(it.ssid).setSecure(it.secure).setLevel(level(it.rssi))
+                .map { WifiSeen.newBuilder().setName(it.ssid).setSecure(it.secure).setLevel(level(it.rssi))
                     .setSaved(it.ssid in savedNames).build() }
             Log.i(TAG, "host Wi-Fi scan: ${nets.size} networks")
-            main.post { done(WifiScanResult.newBuilder().addAllNetworks(nets).build(), null) }
+            main.post { done(WifiList.newBuilder().addAllNetworks(nets).build(), Code.CODE_OK) }
         }
     }
 
-    /** Save a network and join it to prove the password; forgotten again if that fails. */
-    fun add(ssid: String, passphrase: String, done: (WifiAddResult) -> Unit) {
-        fun result(ok: Boolean, p: WifiAddResult.Problem) = WifiAddResult.newBuilder().setSsid(ssid).setOk(ok).setProblem(p).build()
+    /** Save a network and join it to prove the password; forgotten again if that fails. [done]: CODE_OK or why not. */
+    fun add(ssid: String, passphrase: String, done: (Code) -> Unit) {
         if (ssid.isEmpty() || ssid.toByteArray().size > 32 || (passphrase.isNotEmpty() && passphrase.length !in 8..63))
-            return done(result(false, WifiAddResult.Problem.BAD_INPUT))
-        if (hotspotOn()) return done(result(false, WifiAddResult.Problem.HOTSPOT_ON))
+            return done(Code.CODE_BAD_VALUE)
+        if (hotspotOn()) return done(Code.CODE_HOTSPOT_ON)
         holdForSetup()
         exec.execute {
-            val r = runCatching {
-                if (!awaitRadio()) return@runCatching result(false, WifiAddResult.Problem.JOIN_FAILED)
-                var seen = scanResults().firstOrNull { it.ssid == ssid }
-                if (seen == null) { root("cmd wifi start-scan"); for (i in 1..10) { Thread.sleep(500); seen = scanResults().firstOrNull { it.ssid == ssid }; if (seen != null) break } }
-                // Not in the scan: still try (a stuck scanner was seen on the Redmi, 18 Oct; or a hidden network).
-                val sec = when {
-                    seen == null -> if (passphrase.isEmpty()) "open" else "wpa2"
-                    !seen.secure -> "open"
-                    seen.sae && !seen.psk -> "wpa3"
-                    else -> "wpa2"
-                }
-                if (sec != "open" && passphrase.isEmpty()) return@runCatching result(false, WifiAddResult.Problem.BAD_INPUT)
-                root("cmd wifi connect-network ${Root.q(ssid)} $sec" + if (sec == "open") "" else " ${Root.q(passphrase)}")
-                var joined = false
-                for (i in 1..40) {          // up to 20 s: association + DHCP
-                    Thread.sleep(500)
-                    if (joinedSsid() == ssid) { joined = true; break }
-                }
-                if (!joined) listSaved().filter { it.ssid == ssid }.forEach { root("cmd wifi forget-network ${it.id}") }
-                result(joined, when { joined -> WifiAddResult.Problem.NONE; seen == null -> WifiAddResult.Problem.NOT_FOUND
-                                      else -> WifiAddResult.Problem.JOIN_FAILED })
-            }.getOrElse { Log.w(TAG, "host Wi-Fi add failed: $it"); result(false, WifiAddResult.Problem.JOIN_FAILED) }
+            val r = runCatching { join(ssid, passphrase) }
+                .getOrElse { Log.w(TAG, "host Wi-Fi add failed: $it"); Code.CODE_WIFI_JOIN_FAILED }
             saved = listSaved()
-            Log.i(TAG, "host Wi-Fi add: ok=${r.ok} ${r.problem}")
+            Log.i(TAG, "host Wi-Fi add: $r")
             main.post { done(r); release() }
         }
+    }
+
+    /** On [exec]: saves [ssid] and waits for the host to join it. */
+    private fun join(ssid: String, passphrase: String): Code {
+        if (!awaitRadio()) return Code.CODE_WIFI_JOIN_FAILED
+        val seen = inScan(ssid)
+        // Not in the scan: still try (a stuck scanner was seen on the Redmi, 18 Oct; or a hidden network).
+        val sec = when {
+            seen == null -> if (passphrase.isEmpty()) "open" else "wpa2"
+            !seen.secure -> "open"
+            seen.sae && !seen.psk -> "wpa3"
+            else -> "wpa2"
+        }
+        if (sec != "open" && passphrase.isEmpty()) return Code.CODE_BAD_VALUE
+        root("cmd wifi connect-network ${Root.q(ssid)} $sec" + if (sec == "open") "" else " ${Root.q(passphrase)}")
+        if (awaitJoined(ssid)) return Code.CODE_OK
+        listSaved().filter { it.name == ssid }.forEach { root("cmd wifi forget-network ${it.id}") }
+        return if (seen == null) Code.CODE_WIFI_NOT_FOUND else Code.CODE_WIFI_JOIN_FAILED
+    }
+
+    /** [ssid] as the scanner sees it; scans once more (up to 5 s) when it is not in the last results. */
+    private fun inScan(ssid: String): Seen? {
+        scanResults().firstOrNull { it.ssid == ssid }?.let { return it }
+        root("cmd wifi start-scan")
+        repeat(10) {
+            Thread.sleep(500)
+            scanResults().firstOrNull { it.ssid == ssid }?.let { return it }
+        }
+        return null
+    }
+
+    /** Up to 20 s: association and DHCP. */
+    private fun awaitJoined(ssid: String): Boolean {
+        repeat(40) {
+            Thread.sleep(500)
+            if (joinedSsid() == ssid) return true
+        }
+        return false
     }
 
     fun forget(id: Int, done: () -> Unit) = exec.execute {
@@ -296,8 +315,8 @@ object HostWifi {
     //   Network Id  SSID  Security type   (Samsung lists one id once per security type)
     private val netLine = Regex("^\\s*(\\d+)\\s+(.*?)\\s+(\\S+)$")
 
-    private fun listSaved(): List<HostWifiMsg.Saved> = root("cmd wifi list-networks").lines().drop(1).mapNotNull { l ->
-        netLine.find(l)?.groupValues?.let { g -> HostWifiMsg.Saved.newBuilder().setId(g[1].toInt()).setSsid(g[2]).build() }
+    private fun listSaved(): List<SavedWifi> = root("cmd wifi list-networks").lines().drop(1).mapNotNull { l ->
+        netLine.find(l)?.groupValues?.let { g -> SavedWifi.newBuilder().setId(g[1].toInt()).setName(g[2]).build() }
     }.distinctBy { it.id }
 
     private fun level(rssi: Int) = when { rssi >= -55 -> 4; rssi >= -66 -> 3; rssi >= -77 -> 2; rssi >= -88 -> 1; else -> 0 }

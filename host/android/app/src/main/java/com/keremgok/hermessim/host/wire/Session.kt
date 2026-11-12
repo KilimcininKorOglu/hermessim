@@ -58,6 +58,12 @@ class EventLog(private val store: EventStore) {
 
     fun nextCall(): Long = next(CALL)
 
+    /** The seq of a text the host sends for a peer: it has no event, only statuses. */
+    fun nextText(): Long = next(TEXT)
+
+    /** True while no peer has acknowledged the text event [seq]. */
+    fun holds(seq: Long): Boolean = store.read("$TEXT.$seq") != null
+
     /** Keeps a text event until a peer acknowledges it; [body] is given the event's seq and returns its bytes. */
     fun addText(body: (seq: Long) -> ByteArray): Pair<Long, ByteArray> {
         val seq = next(TEXT)

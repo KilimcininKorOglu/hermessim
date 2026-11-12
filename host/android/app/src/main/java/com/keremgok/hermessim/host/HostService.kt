@@ -116,9 +116,10 @@ class HostService : Service() {
             "STATUS" -> {
                 Daemon.status()
                 val h = Hotspot.info(this)
-                Log.i(TAG, "hotspot: supported=${h.supported} on=${h.on} band=${h.band} sec=${h.security} hidden=${h.hidden} " +
-                        "max=${h.maxClients} autoOff=${h.autoOff}/${h.autoOffMinutes}min clients=${h.clientsCount} " +
-                        "caps bands=${h.capabilities.bandsList} sec=${h.capabilities.securitiesList}")
+                val limits = Hotspot.limits(this)
+                Log.i(TAG, "hotspot: available=${h.available} on=${h.on} band=${h.band} sec=${h.security} hidden=${h.hidden} " +
+                        "idleOff=${h.idleOff}/${h.idleOffMinutes}min clients=${h.clients.size} " +
+                        "offered bands=${limits.bandsList} sec=${limits.securitiesList}")
                 Log.i(TAG, "bluetooth: advertising status ${Relay.advertisingStatus()} (0 = works), client connected ${Relay.clientConnected()}")
             }
             "PAIR" -> Relay.openPairing()          // adb: re-pair a (new) client within 5 min
@@ -128,13 +129,13 @@ class HostService : Service() {
             // adb debug, the host's own Wi-Fi: -a WIFI --es op scan|add|forget|away [--es ssid S --es pass P | --ei id N | --ez on B]
             "WIFI" -> when (intent.getStringExtra("op")) {
                 "scan" -> HostWifi.scan { r, why -> Log.i(TAG, "WIFI scan -> ${r?.networksList?.map { "${it.level}${if (it.secure) "*" else ""}${if (it.saved) "S" else ""}" } ?: why}") }
-                "add" -> HostWifi.add(intent.getStringExtra("ssid").orEmpty(), intent.getStringExtra("pass").orEmpty()) { r -> Log.i(TAG, "WIFI add -> ok=${r.ok} ${r.problem}") }
+                "add" -> HostWifi.add(intent.getStringExtra("ssid").orEmpty(), intent.getStringExtra("pass").orEmpty()) { code -> Log.i(TAG, "WIFI add -> $code") }
                 "forget" -> HostWifi.forget(intent.getIntExtra("id", -1)) { Log.i(TAG, "WIFI forget done") }
                 "away" -> HostWifi.setUseWhenAway(intent.getBooleanExtra("on", false), remote = false)
                 // test rig: --es state away|near|real
                 "client" -> { HostWifi.clientOverride = when (intent.getStringExtra("state")) { "away" -> false; "near" -> true; else -> null }
                               HostWifi.evaluate("rig: client ${intent.getStringExtra("state")}") }
-                else -> Log.i(TAG, "WIFI status: ${HostWifi.status().let { "on=${it.on} reason=${it.reason} away=${it.useWhenAway} saved=${it.savedCount} connected=${it.connectedSsid.isNotEmpty()}" }} " +
+                else -> Log.i(TAG, "WIFI status: ${HostWifi.status().let { "on=${it.on} rule=${it.rule} away=${it.useWhenAway} saved=${it.savedCount} connected=${it.joined.isNotEmpty()}" }} " +
                     "hotspot=${Hotspot.isOn(this)} uplink=${HostWifi.uplinkKind()} override=${HostWifi.clientOverride}")
             }
             "HOTSPOT" -> switchHotspot(intent.getBooleanExtra("on", false))
@@ -166,14 +167,14 @@ class HostService : Service() {
 
     /**
      * adb debug (root only). SEND_SMS sends a text as the phone would (no client needed), e.g. to a short code:
-     * --es to 12345 [--es body Test] [--ei slot 0]; the result is the log's "SMS <id> sent=..." line. SHORT_CODES puts
+     * --es to 12345 [--es body Test] [--ei slot 0]; the result is the log's "text <seq> sent=..." line. SHORT_CODES puts
      * Android's short-code question back on (--es answer ask) or answers it (allow).
      */
     private fun textTest(intent: Intent) {
         if (intent.action == "SHORT_CODES") { RootSms.set(this, intent.getStringExtra("answer") ?: "allow", "adb"); return }
         val to = intent.getStringExtra("to") ?: return
-        SmsSender.send(this, com.keremgok.hermessim.protocol.v1.SmsSend.newBuilder().setClientMsgId("adb-" + System.currentTimeMillis())
-            .setTo(to).setBody(intent.getStringExtra("body") ?: "Test").setSlot(intent.getIntExtra("slot", -1)).build())
+        val (code, seq) = SmsSender.sendFromPeer(this, "", to, intent.getStringExtra("body") ?: "Test", intent.getIntExtra("slot", -1))
+        Log.i(TAG, "SEND_SMS -> $code, text $seq")
     }
 
     /** adb debug: --ez on true|false, exactly what a SetHotspot from the iPhone does (the user's switch ends a call pause). */
@@ -194,12 +195,8 @@ class HostService : Service() {
     }
 
     private fun injectSms(from: String, body: String) {
-        val msg = com.keremgok.hermessim.protocol.v1.SmsReceived.newBuilder()
-            .setId(java.util.UUID.randomUUID().toString()).setFromRaw(from).setFromE164(from)
-            .setBody(body).setReceivedMs(System.currentTimeMillis()).setSlot(1).build()
-        SmsStore.add(this, msg)
-        Log.i(TAG, "INJECTED test SMS ${msg.id.take(8)} (${body.length} chars)")
-        Relay.smsReceived(msg)
+        val seq = TextsIn.take(this, from, body, 1, System.currentTimeMillis())
+        Log.i(TAG, "INJECTED test text $seq (${body.length} chars)")
     }
 
     private fun notification(): Notification {

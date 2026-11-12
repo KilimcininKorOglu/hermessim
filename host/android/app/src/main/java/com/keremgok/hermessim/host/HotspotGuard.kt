@@ -5,7 +5,6 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.keremgok.hermessim.protocol.v1.Hotspot as HotspotMsg
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -31,12 +30,10 @@ object HotspotGuard {
     fun init(ctx: Context, changed: () -> Unit) { app = ctx.applicationContext; onChange = changed }
 
     /** The blocked devices (MAC and the name the client gave), connected or not. */
-    fun blocked(): List<HotspotMsg.Client> {
+    fun blocked(): List<ApClient> {
         if (!ready) return emptyList()
         val a = JSONArray(prefs.getString("list", "[]"))
-        return (0 until a.length()).map { a.getJSONObject(it) }.map { o ->
-            with(HotspotMsg.Client.newBuilder()) { mac = o.optString("mac"); name = o.optString("name"); build() }
-        }
+        return (0 until a.length()).map { a.getJSONObject(it) }.map { o -> ApClient(o.optString("mac"), name = o.optString("name")) }
     }
 
     /** Main: block or unblock [mac]. False when it isn't a MAC or the list already holds [HotspotGuardCore.MAX_BLOCKED]. */
@@ -73,7 +70,7 @@ object HotspotGuard {
     }
 
     /** The devices on the hotspot now (Hotspot's NEIGH poll): count the new ones, then read every device's bytes. */
-    fun seen(clients: List<HotspotMsg.Client>) {
+    fun seen(clients: List<ApClient>) {
         if (!ready || iface == null) return
         val ips = clients.map { it.ip }
         exec.execute {

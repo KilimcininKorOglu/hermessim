@@ -5,7 +5,9 @@ import android.content.Context
 import android.net.LocalSocket
 import android.net.LocalSocketAddress
 import android.util.Log
-import com.keremgok.hermessim.protocol.v1.RemoteAudio
+import com.google.protobuf.ByteString
+import com.keremgok.hermessim.wire.AudioPath
+import com.keremgok.hermessim.wire.Code
 import org.json.JSONObject
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -59,8 +61,11 @@ object RemoteCall {
         return c
     }
 
-    /** The iPhone's offer: set up our side and answer with our relay address. */
-    fun offer(ctx: Context, crypto: RemoteCrypto, peerIp: String, peerPort: Int, answer: (RemoteAudio) -> Unit) {
+    /**
+     * The phone's OpenAudioPath: set up our side and answer with our relay address ([opened], off main), or with why
+     * not. [closed] (off main) runs when the path later ends by itself.
+     */
+    fun offer(ctx: Context, crypto: RemoteCrypto, peer: ByteArray, peerPort: Int, opened: (Code, AudioPath?) -> Unit, closed: () -> Unit) {
         close("new offer")
         val my = gen.incrementAndGet()
         setup.execute {
@@ -74,7 +79,7 @@ object RemoteCall {
                 turn = Turn(hp, c.getString("username"), c.getString("credential"))
                 val t0 = System.currentTimeMillis()
                 val relay = turn.allocate()
-                turn.bind(InetSocketAddress(InetAddress.getByName(peerIp), peerPort))
+                turn.bind(InetSocketAddress(InetAddress.getByAddress(peer), peerPort))
                 check(gen.get() == my) { "superseded during setup" }
                 daemon = LocalSocket(LocalSocket.SOCKET_SEQPACKET)
                 daemon.connect(LocalSocketAddress("hermessimd-audio", LocalSocketAddress.Namespace.ABSTRACT))
@@ -88,18 +93,18 @@ object RemoteCall {
                 // Refresh on a timer, not on packet flow: a stalled capture must not let the allocation expire.
                 s.refresh = timers.scheduleWithFixedDelay({ if (s.alive) runCatching { s.turn.refresh() } }, REFRESH_S, REFRESH_S, TimeUnit.SECONDS)
                 Log.i(TAG, "remote audio: relay ${relay.port} bound to the phone's relay in ${System.currentTimeMillis() - t0} ms")
-                answer(RemoteAudio.newBuilder().setRelayIp(relay.address.hostAddress ?: "").setRelayPort(relay.port).build())
-                Thread({ pump(s, crypto, answer) }, "remote-audio").start()
+                opened(Code.CODE_OK, AudioPath.newBuilder().setAddress(ByteString.copyFrom(relay.address.address)).setPort(relay.port).build())
+                Thread({ pump(s, crypto, closed) }, "remote-audio").start()
             } catch (e: Exception) {
                 Log.e(TAG, "remote audio failed: ${e.message ?: e}")
                 daemon?.closeNow()
                 turn?.let { t -> Thread { runCatching { t.close() } }.start() }
-                if (gen.get() == my) answer(RemoteAudio.newBuilder().setClose(true).build())
+                if (gen.get() == my) opened(Code.CODE_FAILED, null)
             }
         }
     }
 
-    private fun pump(s: Session, crypto: RemoteCrypto, answer: (RemoteAudio) -> Unit) {
+    private fun pump(s: Session, crypto: RemoteCrypto, closed: () -> Unit) {
         var nextLog = System.currentTimeMillis() + 5000
         val buf = ByteArray(512)
         try {
@@ -129,9 +134,9 @@ object RemoteCall {
             if (s.alive) {
                 s.close()
                 Log.i(TAG, "remote audio closed (daemon side ended): sent=${s.tx} recv=${s.rx} bad=${s.bad}")
-                // Tell the iPhone (usually Bluetooth took the daemon's audio slot): closed silently, its side waited 6 s
+                // Tell the phone (usually Bluetooth took the daemon's audio slot): closed silently, its side waited 6 s
                 // for audio, then rebuilt the path and broke the call's Bluetooth audio (20 Oct 2026)
-                answer(RemoteAudio.newBuilder().setClose(true).build())
+                closed()
             }
         }
     }

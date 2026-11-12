@@ -22,6 +22,12 @@ object StreamChoice {
     }
 }
 
+/** True when [value] begins with a whole frame that carries a Hello: the peer's answer to a RESET. */
+private fun startsWithHello(value: ByteArray): Boolean = runCatching {
+    val first = FrameReader().feed(value).firstOrNull()
+    first != null && first.type == Wire.DATA && !first.more && Packet.parseFrom(first.body).hasHello()
+}.getOrDefault(false)
+
 /**
  * The host's end of one peer's control channel: the bytes of a link in, whole messages out, and the frames to
  * send with their credit. A session outlives its links; [newLink] starts each one. Not thread-safe.
@@ -40,9 +46,12 @@ class Channel(private val clock: () -> Long, newSessionId: () -> Int) {
     var heardAt = 0L
         private set
 
-    /** True from an accepted Hello until the link ends. */
-    var serving = false
+    /** True from an accepted Hello until the link ends. Read from any thread. */
+    @Volatile var serving = false
         private set
+
+    /** After this side's RESET: every value is dropped until one starts with a Hello (SPEC.md "RESET"). */
+    private var deaf = false
 
     val sessionId: Int get() = desk.id
 
@@ -56,16 +65,18 @@ class Channel(private val clock: () -> Long, newSessionId: () -> Int) {
         outbox.newLink()
         grant.clear()
         serving = false
+        deaf = false
         heardAt = clock()
     }
 
     /**
-     * Takes bytes of the link and gives the messages they complete. Throws [WireException] for bytes outside the
-     * rules; the caller then calls [reset] with its fault.
+     * Takes one value of the link (a write, or a relay message) and gives the messages it completes. Throws
+     * [WireException] for bytes outside the rules; the caller then calls [reset] with its fault.
      */
     fun feed(bytes: ByteArray): List<Arrived> {
         heardAt = clock()
-        return reader.feed(bytes).mapNotNull(::take)
+        deaf = deaf && !startsWithHello(bytes)
+        return if (deaf) emptyList() else reader.feed(bytes).mapNotNull(::take)
     }
 
     private fun take(frame: Frame): Arrived? = when (frame.type) {
@@ -94,13 +105,15 @@ class Channel(private val clock: () -> Long, newSessionId: () -> Int) {
 
     fun send(packet: ByteArray, stream: Int) = outbox.queue(packet, stream)
 
-    /** Tells the peer of a fault (or that the host holds no session); the messages in progress are dropped. */
+    /**
+     * Tells the peer of a fault (or that the host holds no session). The messages in progress are dropped, the byte
+     * totals start again, and nothing the peer sent before its next Hello is read: those bytes may start anywhere
+     * in a frame.
+     */
     fun reset(fault: WireFault) {
-        reader.clear()
-        assembler.clear()
-        outbox.newLink()
+        newLink()
         outbox.queueControl(fault.frame)
-        serving = false
+        deaf = true
     }
 
     /** True when [next] has something to give now: frames that may leave, or a CREDIT that is due. */

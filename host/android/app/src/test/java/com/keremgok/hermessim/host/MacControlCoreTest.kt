@@ -5,7 +5,6 @@ import com.keremgok.hermessim.protocol.v1.Hotspot
 import com.keremgok.hermessim.protocol.v1.MacControl
 import com.keremgok.hermessim.protocol.v1.MacStatus
 import com.keremgok.hermessim.protocol.v1.SetHotspotBlock
-import com.keremgok.hermessim.protocol.v1.Sim
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -50,9 +49,10 @@ class MacControlCoreTest {
 
     @Test
     fun onlyAMacWithControlSeesTheLinesAndDevices() {
-        val device = Hotspot.Client.newBuilder().setMac("aa:bb:cc:dd:ee:0f").setIp("192.168.43.10").build()
+        val device = Hotspot.Client.newBuilder().setMac("aa:bb:cc:dd:ee:0f").setIp("192.168.43.10").setDown(7).build()
+        assertEquals(listOf(device), MacControlCore.devices(listOf(ApClient("aa:bb:cc:dd:ee:0f", "192.168.43.10", down = 7))))
         val base = MacStatus.newBuilder().setDevices(1).addAllLines(MacControlCore.lines(listOf(
-            Sim.newBuilder().setSlot(1).setOperatorName("Turkcell").setEnabled(true).setDefaultData(true).build())))
+            SimLine(slot = 1, carrier = "Turkcell", enabled = true, defaultData = true))))
             .addClients(device).addBlocked(device).build()
         with(MacControlCore.shown(base, texts = true, control = true)) {
             assertTrue(control && texts)

@@ -14,15 +14,51 @@ import android.telecom.VideoProfile
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
 import android.util.Log
-import com.keremgok.hermessim.protocol.v1.CallAction
-import com.keremgok.hermessim.protocol.v1.CallEvent
-import com.keremgok.hermessim.protocol.v1.Dial
-import java.util.UUID
+import com.google.protobuf.ByteString
+import com.keremgok.hermessim.wire.CallEnd
+import com.keremgok.hermessim.wire.CallPhase
+import com.keremgok.hermessim.wire.CallState
+import com.keremgok.hermessim.wire.CallVerb
+import com.keremgok.hermessim.wire.Code
 import java.util.concurrent.ConcurrentHashMap
 
+/** The parts of the call rules that need no phone. Pure. */
+object CallCore {
+    /** The phase a Telecom call state (android.telecom.Call.STATE_*) stands for. An unknown state counts as dialling. */
+    fun phase(telecomState: Int): CallPhase = phases[telecomState] ?: CallPhase.CALL_PHASE_DIALING
+
+    private val phases = mapOf(
+        Call.STATE_RINGING to CallPhase.CALL_PHASE_RINGING, Call.STATE_ACTIVE to CallPhase.CALL_PHASE_ACTIVE,
+        Call.STATE_HOLDING to CallPhase.CALL_PHASE_HELD,
+        Call.STATE_DISCONNECTED to CallPhase.CALL_PHASE_ENDED, Call.STATE_DISCONNECTING to CallPhase.CALL_PHASE_ENDED,
+    )
+
+    private val ends = mapOf(
+        DisconnectCause.LOCAL to CallEnd.CALL_END_LOCAL, DisconnectCause.REMOTE to CallEnd.CALL_END_REMOTE,
+        DisconnectCause.REJECTED to CallEnd.CALL_END_REJECTED, DisconnectCause.MISSED to CallEnd.CALL_END_MISSED,
+        DisconnectCause.BUSY to CallEnd.CALL_END_BUSY, DisconnectCause.ERROR to CallEnd.CALL_END_FAILED,
+    )
+
+    /** How a call ended, from Telecom's DisconnectCause code (null: none given). */
+    fun end(disconnectCode: Int?): CallEnd = ends[disconnectCode] ?: CallEnd.CALL_END_UNSPECIFIED
+
+    /** True when a peer must hear of [now]: the first state of a call, another phase, or the far end's ringing changed. */
+    fun changed(before: CallState?, now: CallState): Boolean =
+        before == null || before.phase != now.phase || before.farEndRings != now.farEndRings || before.farEndKnown != now.farEndKnown
+
+    /** A client ref as the text the host keeps it under. */
+    fun refText(ref: ByteString): String = ref.toByteArray().joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+
+    fun refBytes(text: String): ByteString = ByteString.copyFrom(text.chunked(2).map { it.toInt(16).toByte() }.toByteArray())
+
+    private const val TONES = "0123456789*#ABCD"
+
+    fun validTones(digits: String): Boolean = digits.isNotEmpty() && digits.all { it in TONES }
+}
+
 /**
- * Bridges Telecom calls (seen by CallMonitor, our non-UI InCallService) to protocol CallEvents, and
- * carries out the client's CallAction / Dial. Also drives the audio daemon: only an ACTIVE (or DIALING) call has
+ * Bridges Telecom calls (seen by CallMonitor, our non-UI InCallService) to `CallState` events, and
+ * carries out the client's CallControl / Dial. Also drives the audio daemon: only an ACTIVE (or DIALING) call has
  * its routes and mutes applied, only with full voice on or for the guided call test (VoiceGate), and only for a call
  * the iPhone owns: one it dialled or answered. Any other call is not relayed (20 Oct 2026: a test phone's own host,
  * restarted mid-call, relayed a call answered on its screen and fed the caller silence); the host is the phone app,
@@ -30,22 +66,29 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object CallRegistry {
     private const val TAG = "HermesSimHost"
-    private val ids = ConcurrentHashMap<Call, String>()
-    private val byId = ConcurrentHashMap<String, Call>()
-    private val clientUuids = ConcurrentHashMap<String, String>()   // call id -> client's CallKit UUID
-    private val lastSent = ConcurrentHashMap<String, CallEvent>()       // send changes only
-    private val clock = CallStateClock<CallEvent.State>(System::currentTimeMillis)
-    @Volatile private var pendingDial: Pair<String, Long>? = null     // client uuid, when requested
-    private val owned: MutableSet<String> = ConcurrentHashMap.newKeySet()   // call ids the iPhone dialled or answered
+    private val ids = ConcurrentHashMap<Call, Long>()
+    private val byId = ConcurrentHashMap<Long, Call>()
+    private val clientRefs = ConcurrentHashMap<Long, String>()      // call id -> the client's ref of the call (hex)
+    private val lastSent = ConcurrentHashMap<Long, CallState>()         // send changes only
+    private val clock = CallStateClock<CallPhase>(System::currentTimeMillis)
+    @Volatile private var pendingDial: Pair<String, Long>? = null     // client ref, when requested
+    private val owned: MutableSet<Long> = ConcurrentHashMap.newKeySet()     // call ids the phone dialled or answered
     private lateinit var app: Context
 
     fun init(ctx: Context) { app = ctx.applicationContext }
+
+    /** A call id this host never used before, also across restarts: a peer may still hold calls of an earlier run. */
+    @Synchronized private fun newId(): Long {
+        val id = prefs.getLong("last_id", 0) + 1
+        prefs.edit().putLong("last_id", id).apply()
+        return id
+    }
 
     // Ownership outlives a host restart mid-call (keep-alive, update, crash): keyed by Telecom's creation time, which
     // the same call keeps, in a small prefs set pruned of anything older than a day.
     private val prefs get() = app.getSharedPreferences("calls", Context.MODE_PRIVATE)
     private fun key(call: Call) = "${call.details.creationTimeMillis}"
-    private fun own(call: Call, id: String) {
+    private fun own(call: Call, id: Long) {
         owned.add(id)
         val now = System.currentTimeMillis()
         val keep = prefs.getStringSet("owned", emptySet()).orEmpty().filter { now - (it.toLongOrNull() ?: 0) < 86_400_000L }
@@ -55,19 +98,19 @@ object CallRegistry {
     private fun isOwned(call: Call): Boolean =
         ids[call] in owned || call.children.any { ids[it] in owned } || call.parent?.let { ids[it] in owned } == true
 
-    private fun disown(call: Call, id: String) {
+    private fun disown(call: Call, id: Long) {
         owned.remove(id)
         prefs.edit().putStringSet("owned", prefs.getStringSet("owned", emptySet()).orEmpty() - key(call)).apply()
     }
 
     fun added(call: Call) {
-        val id = UUID.randomUUID().toString()
+        val id = newId()
         ids[call] = id
         byId[id] = call
         val pd = pendingDial
         if (call.details.callDirection == Call.Details.DIRECTION_OUTGOING && pd != null &&
             System.currentTimeMillis() - pd.second < 15_000) {
-            clientUuids[id] = pd.first
+            clientRefs[id] = pd.first
             pendingDial = null
             own(call, id)
         } else if (key(call) in prefs.getStringSet("owned", emptySet()).orEmpty()) {
@@ -86,7 +129,7 @@ object CallRegistry {
         val active = byId.values.filter { it.stateCompat == Call.STATE_ACTIVE }
         val dialing = byId.values.filter { it.stateCompat == Call.STATE_DIALING }
         val audible = active.firstOrNull(::isOwned) ?: active.firstOrNull() ?: dialing.firstOrNull(::isOwned) ?: dialing.firstOrNull()
-        val relayed = audible != null && isOwned(audible) && VoiceGate.allows(ids[audible]?.let { clientUuids[it] })
+        val relayed = audible != null && isOwned(audible) && VoiceGate.allows(ids[audible]?.let { clientRefs[it] })
         HotspotPause.calls(relayed, live = liveCalls())
         if (byId.values.any { it.stateCompat == Call.STATE_HOLDING }) CallAudioCheck.held()
         if (relayed) {
@@ -104,10 +147,10 @@ object CallRegistry {
 
     fun removed(call: Call) {
         val id = ids.remove(call) ?: return
-        if (lastSent.remove(id)?.state != CallEvent.State.ENDED) Relay.callEvent(event(call, forceEnded = true, id = id))
+        if (lastSent.remove(id)?.phase != CallPhase.CALL_PHASE_ENDED) Relay.callEvent(event(call, forceEnded = true, id = id))
         byId.remove(id)
-        clock.forget(id)
-        clientUuids.remove(id)
+        clock.forget(id.toString())
+        clientRefs.remove(id)
         alertingIds.remove(id)
         if (!dialingPhase()) RootCallState.stop()
         disown(call, id)
@@ -118,10 +161,12 @@ object CallRegistry {
     /** Any call not yet over (a held one counts: the hotspot stays paused through a hold). */
     private fun liveCalls() = byId.values.any { it.stateCompat != Call.STATE_DISCONNECTED }
 
+    /** A call is ringing, being dialled, active or held. Safe before [init] and off the main thread. */
+    fun live(): Boolean = byId.values.any { CallCore.phase(it.stateCompat) != CallPhase.CALL_PHASE_ENDED }
+
+    /** The call's state goes to the phone when it differs from the last one sent. */
     private fun send(call: Call) {
-        val e = event(call)
-        val prev = lastSent.put(e.callId, e)
-        if (prev == null || prev.state != e.state || prev.alerting != e.alerting || prev.alertingKnown != e.alertingKnown) Relay.callEvent(e)
+        event(call).takeIf { CallCore.changed(lastSent.put(it.call, it), it) }?.let(Relay::callEvent)
     }
 
     // ------------------------------------------------------------------ ringback
@@ -129,7 +174,7 @@ object CallRegistry {
     // modem's precise call state (RootCallState, any phone) and Samsung's own connection event. The client relies on
     // it (alerting_known) only on a firmware where an alert was seen before, and not after this dial's watcher failed;
     // otherwise it rings back from the start of dialing, as before 0.12.14.
-    private val alertingIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    private val alertingIds: MutableSet<Long> = ConcurrentHashMap.newKeySet()
     @Volatile private var watchLost = false
     private const val SAMSUNG_ALERTING = "com.samsung.telecom.Call.EVENT_SET_ALERTING"
 
@@ -146,7 +191,7 @@ object CallRegistry {
     private fun alerting(call: Call, how: String) {
         val id = ids[call] ?: return
         if (call.stateCompat !in dialingStates || !alertingIds.add(id)) return
-        Log.i(TAG, "call ${id.take(8)} alerting ($how)")
+        Log.i(TAG, "call $id alerting ($how)")
         if (prefs.getString("alerting_seen", null) != Build.FINGERPRINT) prefs.edit().putString("alerting_seen", Build.FINGERPRINT).apply()
         send(call)
     }
@@ -173,41 +218,46 @@ object CallRegistry {
     fun anyCall(): Boolean = byId.isNotEmpty()
 
     /** Current calls, for replay after the client reconnects. */
-    fun snapshot(): List<CallEvent> = byId.values.map { event(it) }
+    fun snapshot(): List<CallState> = byId.values.map { event(it) }
 
-    fun action(a: CallAction): String? {
-        val call = byId[a.callId] ?: return "no such call ${a.callId}"
-        Log.i(TAG, "client action ${a.action} on ${a.callId}")
-        when (a.action) {
-            CallAction.Action.ANSWER -> { own(call, a.callId); call.answer(VideoProfile.STATE_AUDIO_ONLY) }
-            CallAction.Action.REJECT -> call.reject(false, null)
-            CallAction.Action.HANG_UP -> call.disconnect()
-            CallAction.Action.HOLD -> call.hold()
-            CallAction.Action.UNHOLD -> call.unhold()
-            CallAction.Action.DTMF -> a.dtmf.firstOrNull()?.let { call.playDtmfTone(it); call.stopDtmfTone() }
-            else -> return "bad action ${a.action}"
+    /** A peer's CallControl. CALL_VERB_END rejects a call that still rings and ends any other. */
+    fun control(id: Long, verb: CallVerb): Code {
+        val call = byId[id] ?: return Code.CODE_NO_SUCH_CALL
+        Log.i(TAG, "client $verb on call $id")
+        when (verb) {
+            CallVerb.CALL_VERB_ANSWER -> { own(call, id); call.answer(VideoProfile.STATE_AUDIO_ONLY) }
+            CallVerb.CALL_VERB_END -> if (call.stateCompat == Call.STATE_RINGING) call.reject(false, null) else call.disconnect()
+            CallVerb.CALL_VERB_HOLD -> call.hold()
+            CallVerb.CALL_VERB_RESUME -> call.unhold()
+            else -> return Code.CODE_BAD_VALUE
         }
-        return null
+        return Code.CODE_OK
     }
 
+    /** A peer's SendTones: each digit as one key press on the call. */
+    fun tones(id: Long, digits: String): Code {
+        val call = byId[id] ?: return Code.CODE_NO_SUCH_CALL
+        if (!CallCore.validTones(digits)) return Code.CODE_BAD_VALUE
+        digits.forEach { call.playDtmfTone(it); call.stopDtmfTone() }
+        return Code.CODE_OK
+    }
+
+    /** A peer's Dial. [slot] below 0: the phone system's default line; [ref]: the client's ref of the call (hex). */
     @SuppressLint("MissingPermission") // CALL_PHONE / READ_PHONE_STATE granted by the Magisk module
-    fun dial(d: Dial): String? {
-        if (d.number.isBlank()) return "empty number"
-        val pd = pendingDial
-        if ((pd != null && System.currentTimeMillis() - pd.second < 15_000) ||
-            byId.values.any { it.stateCompat in setOf(Call.STATE_DIALING, Call.STATE_CONNECTING) })
-            return "a call is already being dialled"
+    fun dial(number: String, slot: Int, ref: String, test: Boolean): Code {
+        if (number.isBlank()) return Code.CODE_BAD_VALUE
+        if (dialingPhase()) return Code.CODE_BUSY
         val tm = app.getSystemService(TelecomManager::class.java)
         val extras = Bundle()
-        val account = accountForSlot(d.slot)
-        if (d.slot >= 0 && account == null) return "SIM ${d.slot + 1} is switched off"
+        val account = accountForSlot(slot)
+        if (slot >= 0 && account == null) return Code.CODE_LINE_OFF
         account?.let { extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, it) }
-        pendingDial = d.clientCallUuid to System.currentTimeMillis()
-        if (d.voiceTest) VoiceGate.testUuid = d.clientCallUuid
-        Log.i(TAG, "client dial slot=${d.slot}${if (d.voiceTest) " (call test)" else ""}")
+        pendingDial = ref to System.currentTimeMillis()
+        if (test) VoiceGate.testRef = ref
+        Log.i(TAG, "client dial slot=$slot${if (test) " (call test)" else ""}")
         watchAlerting()
-        tm.placeCall(Uri.fromParts("tel", d.number, null), extras)
-        return null
+        tm.placeCall(Uri.fromParts("tel", number, null), extras)
+        return Code.CODE_OK
     }
 
     // ------------------------------------------------------------------ mapping
@@ -220,45 +270,27 @@ object CallRegistry {
         return CallRuleStore.blocksCall(raw, d.handlePresentation != TelecomManager.PRESENTATION_ALLOWED || raw.isEmpty())
     }
 
-    private fun event(call: Call, forceEnded: Boolean = false, id: String? = null): CallEvent {
+    private fun event(call: Call, forceEnded: Boolean = false, id: Long? = null): CallState {
         val d = call.details
         val raw = d.handle?.schemeSpecificPart.orEmpty()
         val slot = slotOf(call)
         val withheld = d.handlePresentation != TelecomManager.PRESENTATION_ALLOWED || raw.isEmpty()
-        val state = if (forceEnded) CallEvent.State.ENDED else when (call.stateCompat) {
-            Call.STATE_RINGING -> CallEvent.State.RINGING
-            Call.STATE_DIALING, Call.STATE_CONNECTING, Call.STATE_SELECT_PHONE_ACCOUNT,
-            Call.STATE_PULLING_CALL -> CallEvent.State.DIALING
-            Call.STATE_ACTIVE -> CallEvent.State.ACTIVE
-            Call.STATE_HOLDING -> CallEvent.State.HOLDING
-            Call.STATE_DISCONNECTED, Call.STATE_DISCONNECTING -> CallEvent.State.ENDED
-            else -> CallEvent.State.DIALING
-        }
-        val callId = id ?: ids[call].orEmpty()
-        return CallEvent.newBuilder()
-            .setCallId(callId)
-            .setState(state)
+        val phase = if (forceEnded) CallPhase.CALL_PHASE_ENDED else CallCore.phase(call.stateCompat)
+        val callId = id ?: ids[call] ?: 0L
+        val dialing = phase == CallPhase.CALL_PHASE_DIALING
+        val b = CallState.newBuilder()
+            .setCall(callId)
+            .setPhase(phase)
             .setIncoming(d.callDirection == Call.Details.DIRECTION_INCOMING)
-            .setNumberRaw(if (withheld) "" else raw)
+            .setNumber(if (withheld) "" else raw)
             .setNumberE164(if (withheld) "" else e164(raw, slot))
-            .setNumberWithheld(withheld)
-            .setSlot(slot)
-            .setStateSinceMs(clock.since(callId, state))
-            .setCause(if (state == CallEvent.State.ENDED) cause(d.disconnectCause) else CallEvent.DisconnectCause.CAUSE_UNSPECIFIED)
-            .setClientCallUuid(clientUuids[callId].orEmpty())
-            .setAlerting(state == CallEvent.State.DIALING && callId in alertingIds)
-            .setAlertingKnown(state == CallEvent.State.DIALING && alertingKnown(call))
-            .build()
-    }
-
-    private fun cause(dc: DisconnectCause?): CallEvent.DisconnectCause = when (dc?.code) {
-        DisconnectCause.LOCAL -> CallEvent.DisconnectCause.LOCAL
-        DisconnectCause.REMOTE -> CallEvent.DisconnectCause.REMOTE
-        DisconnectCause.REJECTED -> CallEvent.DisconnectCause.REJECTED
-        DisconnectCause.MISSED -> CallEvent.DisconnectCause.MISSED
-        DisconnectCause.BUSY -> CallEvent.DisconnectCause.BUSY
-        DisconnectCause.ERROR -> CallEvent.DisconnectCause.ERROR
-        else -> CallEvent.DisconnectCause.CAUSE_UNSPECIFIED
+            .setPhaseSinceMs(clock.since(callId.toString(), phase))
+            .setClientRef(CallCore.refBytes(clientRefs[callId].orEmpty()))
+            .setFarEndRings(dialing && callId in alertingIds)
+            .setFarEndKnown(dialing && alertingKnown(call))
+        if (slot >= 0) b.line = slot
+        if (phase == CallPhase.CALL_PHASE_ENDED) b.end = CallCore.end(d.disconnectCause?.code)
+        return b.build()
     }
 
     /** 0-based SIM slot of the call's account; -1 if unknown. */

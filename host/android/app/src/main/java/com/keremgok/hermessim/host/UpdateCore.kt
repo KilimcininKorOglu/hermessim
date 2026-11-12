@@ -1,11 +1,11 @@
 // HermesSIM host. Copyright (C) 2026 SIM Relay authors. GPL-3.0-or-later.
 package com.keremgok.hermessim.host
 
-import com.keremgok.hermessim.protocol.v1.Update
+import com.keremgok.hermessim.wire.UpdatePhase
 
 /**
  * The update rules, apart from the network and the installer. Automatic updates are a setting, off by default: while
- * it is off a newer version is only offered (AVAILABLE) and "Update now" downloads and installs it; while it is on the
+ * it is off a newer version is only offered (UPDATE_PHASE_AVAILABLE) and "Update now" downloads and installs it; while it is on the
  * host downloads it by itself and installs it at night once a client has been told. Pure, for [UpdateCoreTest].
  */
 object UpdateCore {
@@ -19,12 +19,12 @@ object UpdateCore {
     fun afterCheck(auto: Boolean, downloaded: Boolean): Next = if (auto || downloaded) Next.DOWNLOAD else Next.OFFER
 
     private val ON_INSTALL_NOW = mapOf(
-        Update.State.READY to Install.INSTALL,
-        Update.State.AVAILABLE to Install.DOWNLOAD_THEN_INSTALL,
+        UpdatePhase.UPDATE_PHASE_READY to Install.INSTALL,
+        UpdatePhase.UPDATE_PHASE_AVAILABLE to Install.DOWNLOAD_THEN_INSTALL,
     )
 
     /** What "Update now" does in [state]. */
-    fun installNow(state: Update.State): Install = ON_INSTALL_NOW[state] ?: Install.NONE
+    fun installNow(state: UpdatePhase): Install = ON_INSTALL_NOW[state] ?: Install.NONE
 
     /** Facts the night install needs. [toldAtMs]: when a client was first shown this version (0: never). */
     data class Night(

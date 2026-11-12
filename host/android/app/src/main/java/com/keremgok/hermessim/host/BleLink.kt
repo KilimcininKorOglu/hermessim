@@ -25,45 +25,21 @@ import android.util.Log
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-/** Length-prefixed frames over a byte stream (protocol/README.md): [u16 LE length][payload]. */
-object Framing {
-    const val MAX_FRAME = 4096
-
-    fun frame(payload: ByteArray): ByteArray {
-        require(payload.size <= MAX_FRAME) { "frame too large: ${payload.size}" }
-        return byteArrayOf((payload.size and 0xff).toByte(), (payload.size shr 8).toByte()) + payload
-    }
-
-    class Reader {
-        private var buf = ByteArray(0)
-
-        /** Feed received bytes, get every complete frame. Returns null on a corrupt stream. */
-        fun feed(bytes: ByteArray): List<ByteArray>? {
-            buf += bytes
-            val out = ArrayList<ByteArray>()
-            while (buf.size >= 2) {
-                val len = (buf[0].toInt() and 0xff) or ((buf[1].toInt() and 0xff) shl 8)
-                if (len > MAX_FRAME) { buf = ByteArray(0); return null }
-                if (buf.size < 2 + len) break
-                out += buf.copyOfRange(2, 2 + len)
-                buf = buf.copyOfRange(2 + len, buf.size)
-            }
-            return out
-        }
-    }
-}
-
 /**
- * BLE peripheral side of the control channel (protocol/README.md). Lessons from the M1 spike:
- * restart advertising after a real disconnect; verify DISCONNECTED against the stack (a short duplicate
- * connection produced a false one); persist CCCD state for bonded clients; one notification in flight
- * per device (Android drops the rest), so frames are chunked to MTU-3 and queued.
+ * BLE peripheral side of the control channel (protocol/v2/SPEC.md "Bluetooth LE service"). The values of each
+ * direction are one byte stream of frames: what a peer writes is handed on as it comes ([onBytes]), and what goes to
+ * a peer is pulled from its channel ([next]) one notification at a time. Lessons from the M1 spike: restart
+ * advertising after a real disconnect; verify DISCONNECTED against the stack (a short duplicate connection produced a
+ * false one); persist CCCD state for bonded clients; one notification in flight per device (Android drops the rest).
  */
 @SuppressLint("MissingPermission") // runtime permissions are granted by the Magisk module (headless host)
 class BleLink(
     private val ctx: Context,
-    private val onFrame: (BluetoothDevice, ByteArray) -> Unit,
+    /** The bytes a peer wrote, in order. Binder threads. */
+    private val onBytes: (BluetoothDevice, ByteArray) -> Unit,
     private val onLink: (BluetoothDevice, Boolean) -> Unit,
+    /** The next bytes for a peer, at most the given count; empty when it has nothing to send. Main thread. */
+    private val next: (BluetoothDevice, Int) -> ByteArray,
     private val pairable: () -> Boolean = { false },
     private val mac: MacLink? = null,
 ) {
@@ -71,15 +47,15 @@ class BleLink(
         /** The link's connection interval as last reported to our client role (ms; 0 = not yet): call audio check. */
         @Volatile var lastIntervalMs = 0.0
 
-        /** Advertised instead of [SERVICE] while the host is ready to pair; the iPhone's Add host sheet looks for it
-         *  only. (A manufacturer-data mark under company 0xFFFF was ignored by iOS's sheet, 19 Oct.) */
-        val PAIR_SERVICE: UUID = UUID.fromString("0e9c0002-0971-48af-ba0b-2c5c254faec0")
+        /** Advertised instead of [SERVICE] while the host shows a pairing code; a phone's Add host sheet looks for it only. */
+        val PAIR_SERVICE: UUID = UUID.fromString("7d5f00f0-3c1a-4b6e-9e42-5a1c0de51a00")
         private const val TAG = "HermesSimHost"
-        val SERVICE: UUID = UUID.fromString("0e9c0001-0971-48af-ba0b-2c5c254faec0")
-        val CTRL_TX: UUID = UUID.fromString("0e9c0002-0971-48af-ba0b-2c5c254faec0")
-        val CTRL_RX: UUID = UUID.fromString("0e9c0003-0971-48af-ba0b-2c5c254faec0")
-        val AUDIO_PSM: UUID = UUID.fromString("0e9c0004-0971-48af-ba0b-2c5c254faec0")
+        val SERVICE: UUID = UUID.fromString("7d5f0001-3c1a-4b6e-9e42-5a1c0de51a00")
+        val DOWN: UUID = UUID.fromString("7d5f0002-3c1a-4b6e-9e42-5a1c0de51a00")
+        val UP: UUID = UUID.fromString("7d5f0003-3c1a-4b6e-9e42-5a1c0de51a00")
         val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+        /** ATT caps an attribute value at 512 bytes, whatever the MTU. */
+        private const val MAX_VALUE = 512
 
         /** Advertising data naming one service: the client's set and the Mac's carry nothing else. */
         fun advertised(uuid: UUID): AdvertiseData = AdvertiseData.Builder().addServiceUuid(ParcelUuid(uuid)).build()
@@ -90,12 +66,13 @@ class BleLink(
     private val prefs = ctx.getSharedPreferences("ble", Context.MODE_PRIVATE)
     private var gatt: BluetoothGattServer? = null
     private lateinit var tx: BluetoothGattCharacteristic
-    private val readers = ConcurrentHashMap<String, Framing.Reader>()
     private val mtu = ConcurrentHashMap<String, Int>()
     init { mac?.apply { admitted = { restartAdvertising() }; mtu = { address -> this@BleLink.mtu[address] ?: 23 } } }
-    private val queues = ConcurrentHashMap<String, ArrayDeque<ByteArray>>()
-    private val inFlight = ConcurrentHashMap<String, Boolean>()
-    private val notifyFails = ConcurrentHashMap<String, Int>()
+    /** Main thread: the value in the air per link, and the one a failed notify left to send again. */
+    private val inFlight = HashSet<String>()
+    private val held = HashMap<String, ByteArray>()
+    private val notifyFails = HashMap<String, Int>()
+    /** The L2CAP channel of call audio (AudioBridge): the Welcome carries it. */
     @Volatile var audioPsm = 0
 
     /**
@@ -142,16 +119,14 @@ class BleLink(
         if (waitingPermission) { waitingPermission = false; Log.i(TAG, "Bluetooth permission back: starting the GATT service") }
         if (bt.adapter?.isEnabled != true) { Log.w(TAG, "Bluetooth is off: GATT service waits for it"); radioBack(); return }
         val service = BluetoothGattService(SERVICE, BluetoothGattService.SERVICE_TYPE_PRIMARY)
-        tx = BluetoothGattCharacteristic(CTRL_TX, BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+        tx = BluetoothGattCharacteristic(DOWN, BluetoothGattCharacteristic.PROPERTY_NOTIFY,
             BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED).apply {
             addDescriptor(BluetoothGattDescriptor(CCCD,
                 BluetoothGattDescriptor.PERMISSION_READ_ENCRYPTED or BluetoothGattDescriptor.PERMISSION_WRITE_ENCRYPTED))
         }
         service.addCharacteristic(tx)
-        service.addCharacteristic(BluetoothGattCharacteristic(CTRL_RX, BluetoothGattCharacteristic.PROPERTY_WRITE,
+        service.addCharacteristic(BluetoothGattCharacteristic(UP, BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE,
             BluetoothGattCharacteristic.PERMISSION_WRITE_ENCRYPTED))
-        service.addCharacteristic(BluetoothGattCharacteristic(AUDIO_PSM, BluetoothGattCharacteristic.PROPERTY_READ,
-            BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED))
         val server = bt.openGattServer(ctx, callback) ?: run { Log.w(TAG, "GATT server unavailable (radio turning off?)"); return }
         server.addService(service)
         gatt = server
@@ -173,7 +148,7 @@ class BleLink(
                     advSet = null; registered = false; starting = false; replacing = false; enableTries = 0; failures = 0; advDisabled = false   // the radio drops it
                     advStatus = null
                     mac?.radioOff()
-                    readers.clear(); queues.clear(); inFlight.clear(); mtu.clear(); notifyFails.clear()
+                    held.clear(); inFlight.clear(); mtu.clear(); notifyFails.clear()
                 }
                 android.bluetooth.BluetoothAdapter.STATE_OFF -> radioBack()
                 android.bluetooth.BluetoothAdapter.STATE_ON -> main.post {
@@ -210,21 +185,14 @@ class BleLink(
         gatt = null
     }
 
-    /** Devices the stack reports connected that have subscribed to CTRL_TX (now or in an earlier connection). */
+    /** Devices the stack reports connected that have subscribed to [DOWN] (now or in an earlier connection). */
     fun subscribers(): List<BluetoothDevice> {
         if (gatt == null) return emptyList()           // no service (radio off, or no permission: the stack would throw)
         return bt.getConnectedDevices(BluetoothProfile.GATT).filter { it.address in subscribed() }
     }
 
-    fun send(device: BluetoothDevice, payload: ByteArray) {
-        val bytes = Framing.frame(payload)
-        // ATT caps an attribute value at 512 bytes: a 514-byte chunk (MTU 517) reached iOS 2 bytes short and broke
-        // every message longer than one chunk ("corrupt stream", 18 Oct: the status with update notes).
-        val chunk = minOf((mtu[device.address] ?: 23) - 3, 512)
-        val q = queues.getOrPut(device.address) { ArrayDeque() }
-        synchronized(q) { for (i in bytes.indices step chunk) q.addLast(bytes.copyOfRange(i, minOf(i + chunk, bytes.size))) }
-        pump(device)
-    }
+    /** The peer's channel has bytes to send: they go out as soon as no notification to it is in the air. Any thread. */
+    fun kick(device: BluetoothDevice) = Bg.onMain { pump(device) }
 
     fun disconnect(device: BluetoothDevice) { gatt?.cancelConnection(device) }
 
@@ -298,27 +266,28 @@ class BleLink(
         if (g != null) clients[d.address] = g else Log.w(TAG, "connection priority: no GATT client right now")
     }
 
+    /**
+     * Main thread: one value to [device] when none is in the air. The value is as long as the link takes (ATT caps it
+     * at 512 bytes: a 514-byte value at MTU 517 reached iOS 2 bytes short, 18 Oct), so small frames share it.
+     */
     private fun pump(device: BluetoothDevice) {
-        val q = queues[device.address] ?: return
-        synchronized(q) {
-            if (inFlight[device.address] == true) return
-            val chunk = q.removeFirstOrNull() ?: return
-            inFlight[device.address] = true
-            val rc = notify(device, chunk)
-            if (rc != BluetoothStatusCodes.SUCCESS) {
-                val n = (notifyFails[device.address] ?: 0) + 1
-                inFlight[device.address] = false
-                if (n > 100) {                       // ~5 s: the link is gone; its next Hello replays the state
-                    Log.w(TAG, "notify to ${device.address} keeps failing (rc=$rc): dropping ${q.size + 1} queued frames")
-                    q.clear(); notifyFails.remove(device.address)
-                    return
-                }
-                if (n == 1 || n % 20 == 0) Log.w(TAG, "notify to ${device.address} rc=$rc, retrying (#$n)")
-                notifyFails[device.address] = n
-                q.addFirst(chunk)
-                main.postDelayed({ pump(device) }, 50)
-            } else notifyFails.remove(device.address)
+        val address = device.address
+        if (address in inFlight || address !in subscribed()) return
+        val value = held.remove(address) ?: next(device, minOf((mtu[address] ?: 23) - 3, MAX_VALUE))
+        if (value.isEmpty()) return
+        val rc = notify(device, value)
+        if (rc == BluetoothStatusCodes.SUCCESS) { inFlight.add(address); notifyFails.remove(address); return }
+        val n = (notifyFails[address] ?: 0) + 1
+        if (n > 100) {                       // ~5 s: the link is gone; the peer resumes its session on the next one
+            Log.w(TAG, "notify to $address keeps failing (rc=$rc): giving the link up")
+            notifyFails.remove(address)
+            gatt?.cancelConnection(device)
+            return
         }
+        if (n == 1 || n % 20 == 0) Log.w(TAG, "notify to $address rc=$rc, retrying (#$n)")
+        notifyFails[address] = n
+        held[address] = value                // the stream has no gaps: the same bytes go again
+        main.postDelayed({ pump(device) }, 50)
     }
 
     /** notifyCharacteristicChanged(device, char, confirm, value) is API 33; Android 11-12 set the value first. */
@@ -339,11 +308,10 @@ class BleLink(
         prefs.edit().putStringSet("cccd", s).apply()
     }
 
+    /** A link came or went: nothing of the one before is sent on. The peer's channel starts its own link apart ([onLink]). */
     private fun resetStream(address: String) {
-        readers.remove(address)
         if (bt.getConnectedDevices(BluetoothProfile.GATT).none { it.address == address }) mtu.remove(address)
-        queues[address]?.let { synchronized(it) { it.clear() } }
-        inFlight.remove(address)
+        main.post { held.remove(address); inFlight.remove(address); notifyFails.remove(address) }
     }
 
     private fun linkDown(d: BluetoothDevice) {
@@ -412,7 +380,7 @@ class BleLink(
             if (d.uuid == CCCD) {
                 val on = value.isNotEmpty() && value[0].toInt() and 1 == 1
                 setSubscribed(device.address, on)
-                Log.i(TAG, "CTRL_TX notify=$on for ${device.address}")
+                Log.i(TAG, "down notify=$on for ${device.address}")
                 if (on) {
                     resetStream(device.address); onLink(device, true)
                     // Subscribed during a call: the fast interval applies to it too (it was only asked for on a change)
@@ -425,8 +393,7 @@ class BleLink(
         override fun onCharacteristicReadRequest(device: BluetoothDevice, requestId: Int, offset: Int,
                                                  c: BluetoothGattCharacteristic) {
             if (forMac(c)) { mac?.onRead(device, requestId, offset, c.uuid); return }
-            val v = if (c.uuid == AUDIO_PSM) byteArrayOf((audioPsm and 0xff).toByte(), (audioPsm shr 8).toByte()) else ByteArray(0)
-            gatt?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, v)
+            gatt?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, ByteArray(0))
         }
 
         override fun onCharacteristicWriteRequest(device: BluetoothDevice, requestId: Int, c: BluetoothGattCharacteristic,
@@ -437,10 +404,7 @@ class BleLink(
                 return
             }
             if (responseNeeded) gatt?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
-            if (c.uuid != CTRL_RX) return
-            val frames = readers.getOrPut(device.address) { Framing.Reader() }.feed(value)
-            if (frames == null) { Log.w(TAG, "corrupt stream from ${device.address}, resetting"); readers.remove(device.address); return }
-            frames.forEach { onFrame(device, it) }
+            if (c.uuid == UP) onBytes(device, value)
         }
 
         /** The end of a long (prepared) write: only the Mac service takes them. */
@@ -452,8 +416,7 @@ class BleLink(
         override fun onNotificationSent(device: BluetoothDevice, status: Int) {
             if (status != BluetoothGatt.GATT_SUCCESS) Log.w(TAG, "notification to ${device.address} status=$status")
             if (mac?.isMac(device.address) == true) { mac.notificationSent(device); return }
-            inFlight[device.address] = false
-            pump(device)
+            main.post { inFlight.remove(device.address); pump(device) }
         }
     }
 

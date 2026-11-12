@@ -71,7 +71,7 @@
     <string name="btn_fix">Fix now</string>
     <string name="btn_fixing">Fixing…</string>
     <string name="pair_title">Pair your phone</string>
-    <string name="pair_body">On your phone (iPhone or Android): install HermesSIM, open it, tap Add host, choose \"%1$s\", then tap Pair when your phone asks.</string>
+    <string name="pair_body">On your phone (iPhone or Android): install HermesSIM, open it, tap Add host, choose \"%1$s\", tap Pair when your phone asks, then type the pairing code shown below.</string>
     <string name="pair_open_left">Pairing is open for %s.</string>
     <string name="pair_closed">Pairing is closed.</string>
     <string name="c_lock">Screen lock</string>
@@ -80,7 +80,7 @@
     <string name="lock_title">Remove the screen lock</string>
     <string name="lock_body">With a PIN, pattern or password, Android keeps HermesSIM locked after every restart or power cut until someone unlocks the phone, and nobody will on a phone in your bag or left at home. Set the screen lock to None (or Swipe).</string>
     <string name="btn_lock_settings">Open screen lock settings</string>
-    <string name="pair_ready">Ready to pair: the first phone that adds this host gets it.</string>
+    <string name="pair_code">Pairing code: %1$s</string>
     <string name="btn_open_pairing">Open pairing (5 min)</string>
     <string name="next_title">Continue on your phone</string>
     <string name="next_test">Paired with %1$s. Next, in HermesSIM on your phone: Host → Call audio → Run the call test. Call a friend, and keep this phone next to you to hear whether it makes any sound.</string>

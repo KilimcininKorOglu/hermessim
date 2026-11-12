@@ -4,10 +4,10 @@ package com.keremgok.hermessim.host
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Base64
-import com.keremgok.hermessim.protocol.v1.CallRules as Rules
+import com.keremgok.hermessim.wire.CallRules as Rules
 
 /**
- * Blocked numbers and the busy reply (protocol "CallRules"). Numbers match on their last 10 digits. While busy, a
+ * Blocked numbers and the busy reply (`CallRules`). Numbers match on their last 10 digits. While busy, a
  * text gets the reply once an hour per number at most; short codes, senders with letters, hidden and blocked numbers
  * never get one. Pure: [CallRuleStore] keeps the rules and the reply times across host restarts.
  */
@@ -67,6 +67,8 @@ class CallRulesCore(rules: Rules = Rules.getDefaultInstance(), replied: Map<Stri
 
 /** [CallRulesCore] with its state in the "call_rules" prefs. Main thread. */
 object CallRuleStore {
+    /** The rules as a `CallRules` of the wire schema; rules stored in the form before it are not read. */
+    private const val RULES_KEY = "rules_v2"
     private lateinit var prefs: SharedPreferences
     private lateinit var core: CallRulesCore
 
@@ -75,7 +77,7 @@ object CallRuleStore {
         if (::core.isInitialized) return
         val stored = ctx.getSharedPreferences("call_rules", Context.MODE_PRIVATE)
         prefs = stored
-        val rules = stored.getString("rules", null)
+        val rules = stored.getString(RULES_KEY, null)
             ?.let { runCatching { Rules.parseFrom(Base64.decode(it, Base64.NO_WRAP)) }.getOrNull() }
         val replied = stored.getStringSet("replied", emptySet()).orEmpty().mapNotNull { entry ->
             entry.substringAfter(':').toLongOrNull()?.let { entry.substringBefore(':') to it }
@@ -99,7 +101,7 @@ object CallRuleStore {
         (::core.isInitialized && core.autoReply(from, System.currentTimeMillis())).also { if (it) save() }
 
     private fun save() = with(prefs.edit()) {
-        putString("rules", Base64.encodeToString(core.rules.toByteArray(), Base64.NO_WRAP))
+        putString(RULES_KEY, Base64.encodeToString(core.rules.toByteArray(), Base64.NO_WRAP))
         putStringSet("replied", core.replies().map { (k, at) -> "$k:$at" }.toSet())
         apply()
     }

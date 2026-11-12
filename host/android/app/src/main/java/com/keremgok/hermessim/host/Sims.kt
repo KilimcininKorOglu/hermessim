@@ -7,18 +7,39 @@ import android.telephony.SubscriptionInfo
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
 import android.util.Log
-import com.keremgok.hermessim.protocol.v1.SetSim
-import com.keremgok.hermessim.protocol.v1.Sim
-import com.keremgok.hermessim.protocol.v1.UnlockSim
-import com.keremgok.hermessim.protocol.v1.UnlockSimResult
+import com.keremgok.hermessim.wire.Code
+import com.keremgok.hermessim.wire.LineLock
+import com.keremgok.hermessim.wire.NetworkCeiling
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
+
+/** One SIM as the host sees it. [card] is the stable id of the SIM card as 16 hex digits; [attemptsLeft] -1 = unknown. */
+data class SimLine(
+    val slot: Int,
+    val carrier: String = "",
+    val country: String = "",
+    val enabled: Boolean = false,
+    val defaultData: Boolean = false,
+    val card: String = "",
+    val embedded: Boolean = false,
+    val signal: Int = 0,
+    val roaming: Boolean = false,
+    val dataRoaming: Boolean = false,
+    val volte: Boolean = false,
+    val number: String = "",
+    val ceiling: NetworkCeiling = NetworkCeiling.NETWORK_CEILING_UNSPECIFIED,
+    val ceilings: List<NetworkCeiling> = emptyList(),
+    val lock: LineLock = LineLock.LINE_LOCK_OPEN,
+    val attemptsLeft: Int = -1,
+) {
+    val asksForCode: Boolean get() = lock == LineLock.LINE_LOCK_PIN || lock == LineLock.LINE_LOCK_PUK
+}
 
 /**
  * SIM slots: per-SIM status for the client and the per-SIM settings it can change (line on/off, data
  * roaming, network mode, which SIM carries mobile data). The setters are @SystemApi: reached by reflection (system APIs
  * are not hidden-API restricted) and allowed by MODIFY_PHONE_STATE, which the Magisk module grants us as a
- * privileged app. Calls and SMS pick their SIM per request (Dial.slot / SmsSend.slot), so the host's own
+ * privileged app. Calls and texts pick their SIM per request (Dial.line / SendText.line), so the host's own
  * default call/SMS SIM does not matter.
  */
 object Sims {
@@ -94,8 +115,8 @@ object Sims {
     }
 
     fun log(ctx: Context) = Log.i(TAG, "SIMs: " + status(ctx).joinToString("; ") {
-        "slot ${it.slot} ${it.operatorName}/${it.countryIso} on=${it.enabled} signal=${it.signalLevel} volte=${it.volte} " +
-            "roaming=${it.roaming} dataRoaming=${it.dataRoaming} data=${it.defaultData} card=${it.carrierId}"
+        "slot ${it.slot} ${it.carrier}/${it.country} on=${it.enabled} signal=${it.signal} volte=${it.volte} " +
+            "roaming=${it.roaming} dataRoaming=${it.dataRoaming} data=${it.defaultData} card=${it.card}"
     }.ifEmpty { "none" })
 
     fun countryIso(ctx: Context, slot: Int): String =
@@ -116,54 +137,59 @@ object Sims {
             ?: SubscriptionManager.getDefaultSmsSubscriptionId()
 
     @SuppressLint("MissingPermission")
-    fun status(ctx: Context): List<Sim> {
+    fun status(ctx: Context): List<SimLine> {
         val defaultData = SubscriptionManager.getDefaultDataSubscriptionId()
         val activeIds = active(ctx).map { it.subscriptionId }.toSet()
         val inserted = inserted(ctx)
         // A PIN-locked SIM may have no subscription yet: list it by slot so the client can unlock it.
         val locked = (0 until ctx.getSystemService(TelephonyManager::class.java).activeModemCount)
-            .filter { slot -> inserted.none { it.simSlotIndex == slot } && lockOf(ctx, slot) != Sim.Lock.UNLOCKED }
+            .filter { slot -> inserted.none { it.simSlotIndex == slot } && lockOf(ctx, slot) != LineLock.LINE_LOCK_OPEN }
             .map { slot ->
                 val lock = lockOf(ctx, slot)
-                Sim.newBuilder().setSlot(slot).setEnabled(false).setLock(lock).setAttemptsLeft(attemptsFor(ctx, slot, lock)).build()
+                SimLine(slot, lock = lock, attemptsLeft = attemptsFor(ctx, slot, lock))
             }
         return (inserted.map { info -> simFor(ctx, info, defaultData, activeIds) } + locked).sortedBy { it.slot }
     }
 
     @SuppressLint("MissingPermission")
-    private fun simFor(ctx: Context, info: SubscriptionInfo, defaultData: Int, activeIds: Set<Int>): Sim {
+    private fun simFor(ctx: Context, info: SubscriptionInfo, defaultData: Int, activeIds: Set<Int>): SimLine {
         val sub = info.subscriptionId
         val on = sub in activeIds
-        val tm = ctx.getSystemService(TelephonyManager::class.java).createForSubscriptionId(sub)
-        val b = Sim.newBuilder()
-            .setSlot(info.simSlotIndex)
-            .setOperatorName(info.carrierName?.toString().orEmpty())
-            .setCountryIso(info.countryIso.orEmpty())
-            .setEnabled(on)
-            .setDefaultData(sub == defaultData)
-            .setCarrierId(cardId(info))
-        if (on) {
-            b.setSignalLevel(runCatching { tm.signalStrength?.level ?: 0 }.getOrDefault(0))
-                .setRoaming(runCatching { tm.isNetworkRoaming }.getOrDefault(false))
-                .setDataRoaming(runCatching { tm.isDataRoamingEnabled }.getOrDefault(false))
-                .setVolte(volte(ctx, sub))
-                .setNumberE164(runCatching { number(ctx, info) }.getOrDefault(""))
-            NetworkModes.describe(tm, b)
-        }
         val lock = lockOf(ctx, info.simSlotIndex)
-        if (lock == Sim.Lock.UNLOCKED) attempts.remove(info.simSlotIndex)
-        return b.setLock(lock).setAttemptsLeft(attemptsFor(ctx, info.simSlotIndex, lock)).build()
+        if (lock == LineLock.LINE_LOCK_OPEN) attempts.remove(info.simSlotIndex)
+        val line = SimLine(
+            slot = info.simSlotIndex, carrier = info.carrierName?.toString().orEmpty(), country = info.countryIso.orEmpty(),
+            enabled = on, defaultData = sub == defaultData, card = cardId(info), embedded = info.isEmbedded,
+            lock = lock, attemptsLeft = attemptsFor(ctx, info.simSlotIndex, lock),
+        )
+        return if (on) withRadio(ctx, line, info) else line
+    }
+
+    /** [line] with what only a switched-on SIM has: signal, roaming, VoLTE, its number and its network mode. */
+    @SuppressLint("MissingPermission")
+    private fun withRadio(ctx: Context, line: SimLine, info: SubscriptionInfo): SimLine {
+        val tm = ctx.getSystemService(TelephonyManager::class.java).createForSubscriptionId(info.subscriptionId)
+        val mode = NetworkModes.describe(tm)
+        return line.copy(
+            signal = runCatching { tm.signalStrength?.level ?: 0 }.getOrDefault(0),
+            roaming = runCatching { tm.isNetworkRoaming }.getOrDefault(false),
+            dataRoaming = runCatching { tm.isDataRoamingEnabled }.getOrDefault(false),
+            volte = volte(ctx, info.subscriptionId),
+            number = runCatching { number(ctx, info) }.getOrDefault(""),
+            ceiling = mode?.first ?: NetworkCeiling.NETWORK_CEILING_UNSPECIFIED,
+            ceilings = mode?.second.orEmpty(),
+        )
     }
 
     // ------------------------------------------------------------------ SIM PIN
 
-    private fun lockOf(ctx: Context, slot: Int): Sim.Lock =
+    private fun lockOf(ctx: Context, slot: Int): LineLock =
         when (ctx.getSystemService(TelephonyManager::class.java).getSimState(slot)) {
-            TelephonyManager.SIM_STATE_PIN_REQUIRED -> Sim.Lock.PIN_REQUIRED
-            TelephonyManager.SIM_STATE_PUK_REQUIRED -> Sim.Lock.PUK_REQUIRED
-            TelephonyManager.SIM_STATE_PERM_DISABLED -> Sim.Lock.PERM_DISABLED
-            TelephonyManager.SIM_STATE_NETWORK_LOCKED -> Sim.Lock.OTHER_LOCK
-            else -> Sim.Lock.UNLOCKED
+            TelephonyManager.SIM_STATE_PIN_REQUIRED -> LineLock.LINE_LOCK_PIN
+            TelephonyManager.SIM_STATE_PUK_REQUIRED -> LineLock.LINE_LOCK_PUK
+            TelephonyManager.SIM_STATE_PERM_DISABLED -> LineLock.LINE_LOCK_DEAD
+            TelephonyManager.SIM_STATE_NETWORK_LOCKED -> LineLock.LINE_LOCK_NETWORK
+            else -> LineLock.LINE_LOCK_OPEN
         }
 
     /**
@@ -173,12 +199,12 @@ object Sims {
      */
     @Volatile var attemptsKnown: () -> Unit = {}
     private val asking = java.util.Collections.synchronizedSet(HashSet<Int>())
-    private fun attemptsFor(ctx: Context, slot: Int, lock: Sim.Lock): Int {
-        if (lock != Sim.Lock.PIN_REQUIRED && lock != Sim.Lock.PUK_REQUIRED) return -1
+    private fun attemptsFor(ctx: Context, slot: Int, lock: LineLock): Int {
+        if (lock != LineLock.LINE_LOCK_PIN && lock != LineLock.LINE_LOCK_PUK) return -1
         attempts[slot]?.let { return it }
         if (asking.add(slot)) imsExec.execute {
             try {
-                val r = supply(ctx, slot, if (lock == Sim.Lock.PUK_REQUIRED) "" else null, "")
+                val r = supply(ctx, slot, if (lock == LineLock.LINE_LOCK_PUK) "" else null, "")
                 attempts[slot] = r?.second ?: -1
             } finally { asking.remove(slot) }
             attemptsKnown()
@@ -186,17 +212,19 @@ object Sims {
         return -1
     }
 
-    /** Client PIN (or PUK + new PIN). Runs the modem call off the main thread; never logs the codes. */
-    fun unlock(ctx: Context, u: UnlockSim, done: (UnlockSimResult) -> Unit) = Thread {
-        val r = supply(ctx, u.slot, u.puk.ifEmpty { null }, u.pin)
+    /** What an unlock did: whether the code was right, the attempts left after a wrong one (-1 unknown), the lock now. */
+    class Unlocked(val ok: Boolean, val attemptsLeft: Int, val lock: LineLock)
+
+    /** Client PIN (or [puk] + new PIN). Runs the modem call off the main thread; never logs the codes. */
+    fun unlock(ctx: Context, slot: Int, pin: String, puk: String, done: (Unlocked) -> Unit) = Thread {
+        val r = supply(ctx, slot, puk.ifEmpty { null }, pin)
         val ok = r?.first == true
-        if (ok) attempts.remove(u.slot) else r?.second?.let { attempts[u.slot] = it }
+        if (ok) attempts.remove(slot) else r?.second?.let { attempts[slot] = it }
         Thread.sleep(300)
-        val lock = lockOf(ctx, u.slot)
-        Log.i(TAG, "SIM slot ${u.slot} ${if (u.puk.isEmpty()) "PIN" else "PUK"} entry: ${if (ok) "unlocked" else "refused"}, " +
+        val lock = lockOf(ctx, slot)
+        Log.i(TAG, "SIM slot $slot ${if (puk.isEmpty()) "PIN" else "PUK"} entry: ${if (ok) "unlocked" else "refused"}, " +
             "attempts left ${r?.second ?: "?"}, now $lock")
-        done(UnlockSimResult.newBuilder().setSlot(u.slot).setOk(ok).setAttemptsLeft(if (ok) -1 else r?.second ?: -1)
-            .setLock(lock).build())
+        done(Unlocked(ok, if (ok) -1 else r?.second ?: -1, lock))
     }.start()
 
     /** supplyIccLockPin / supplyIccLockPuk (@SystemApi, MODIFY_PHONE_STATE) -> (success, attempts left). */
@@ -232,33 +260,34 @@ object Sims {
             ?.firstOrNull()
     }.getOrNull()
 
-    /**
-     * Applies a client SetSim. Returns null on success or a short reason. A SIM seen for the first time gets
-     * data roaming switched off (cost protection) before the client ever asks.
-     */
-    fun apply(ctx: Context, s: SetSim, inCall: Boolean = false): String? {
-        val info = inserted(ctx).firstOrNull { it.simSlotIndex == s.slot } ?: return "no SIM in slot ${s.slot}"
-        val sub = info.subscriptionId
-        return switchLine(ctx, s, info)
-            ?: (if (s.hasDataRoaming()) dataRoaming(ctx, s, sub) else null)
-            ?: (if (s.hasNetworkMode()) NetworkModes.set(ctx, sub, s.slot, s.networkMode, inCall) else null)
-            ?: (if (s.makeDefaultData) defaultData(ctx, s.slot, sub) else null)
+    // ------------------------------------------------------------------ the settings a peer changes
+    // Each answers CODE_OK or why not. A SIM seen for the first time gets data roaming switched off (cost protection)
+    // before a peer ever asks.
+
+    private fun inSlot(ctx: Context, slot: Int): SubscriptionInfo? = inserted(ctx).firstOrNull { it.simSlotIndex == slot }
+
+    fun setEnabled(ctx: Context, slot: Int, on: Boolean): Code {
+        val info = inSlot(ctx, slot) ?: return Code.CODE_NO_SUCH_LINE
+        // An eSIM switched off may leave the list (nothing to switch back on from the phone, and the host has no screen)
+        if (!on && info.isEmbedded) return Code.CODE_ESIM_STAYS_ON
+        return outcome(subscriptions(ctx, "setUiccApplicationsEnabled", info.subscriptionId, on), "SIM slot $slot switched ${if (on) "on" else "off"}")
     }
 
-    private fun switchLine(ctx: Context, s: SetSim, info: SubscriptionInfo): String? {
-        if (!s.hasEnabled()) return null
-        // An eSIM switched off may leave the list (nothing to switch back on from the iPhone, and the host has no screen)
-        if (!s.enabled && info.isEmbedded) return "an eSIM line can't be switched off from HermesSIM Host yet"
-        val word = if (s.enabled) "on" else "off"
-        return outcome(subscriptions(ctx, "setUiccApplicationsEnabled", info.subscriptionId, s.enabled),
-            "this phone cannot switch the SIM $word", "SIM slot ${s.slot} switched $word")
+    fun setRoaming(ctx: Context, slot: Int, on: Boolean): Code {
+        val info = inSlot(ctx, slot) ?: return Code.CODE_NO_SUCH_LINE
+        return outcome(setDataRoaming(ctx, info.subscriptionId, on), "SIM slot $slot data roaming $on")
     }
 
-    private fun dataRoaming(ctx: Context, s: SetSim, sub: Int): String? =
-        outcome(setDataRoaming(ctx, sub, s.dataRoaming), "could not change data roaming", "SIM slot ${s.slot} data roaming ${s.dataRoaming}")
+    fun setCeiling(ctx: Context, slot: Int, ceiling: NetworkCeiling, inCall: Boolean): Code {
+        val info = inSlot(ctx, slot) ?: return Code.CODE_NO_SUCH_LINE
+        return NetworkModes.set(ctx, info.subscriptionId, slot, ceiling, inCall)
+    }
 
-    private fun defaultData(ctx: Context, slot: Int, sub: Int): String? =
-        outcome(subscriptions(ctx, "setDefaultDataSubId", sub), "could not move mobile data to this SIM", "mobile data now on SIM slot $slot")
+    /** Mobile data moves to the SIM in [slot]. */
+    fun setDataLine(ctx: Context, slot: Int): Code {
+        val info = inSlot(ctx, slot) ?: return Code.CODE_NO_SUCH_LINE
+        return outcome(subscriptions(ctx, "setDefaultDataSubId", info.subscriptionId), "mobile data now on SIM slot $slot")
+    }
 
     /** A SubscriptionManager system API taking the subscription id and, for a switch, the new state. */
     private fun subscriptions(ctx: Context, method: String, sub: Int, on: Boolean? = null): Boolean {
@@ -270,11 +299,11 @@ object Sims {
         }
     }
 
-    /** null when [ok] (logging [done]), else the [failure] reason for the client. */
-    private fun outcome(ok: Boolean, failure: String, done: String): String? {
-        if (!ok) return failure
+    /** CODE_OK when [ok] (logging [done]), else CODE_FAILED: the phone system refused, and [call] logged why. */
+    private fun outcome(ok: Boolean, done: String): Code {
+        if (!ok) return Code.CODE_FAILED
         Log.i(TAG, done)
-        return null
+        return Code.CODE_OK
     }
 
     private val volteExec = Bg.single("volte")

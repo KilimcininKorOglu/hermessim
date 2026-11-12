@@ -2,7 +2,7 @@
 package com.keremgok.hermessim.host
 
 import android.telephony.TelephonyManager
-import com.keremgok.hermessim.protocol.v1.UssdResult
+import com.keremgok.hermessim.wire.Code
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -17,6 +17,6 @@ class UssdCodeTest {
     @Test fun anUnavailableServiceIsNoServiceAndEveryOtherFailureIsTheNetworks() {
         val failures = listOf(TelephonyManager.USSD_ERROR_SERVICE_UNAVAIL, TelephonyManager.USSD_RETURN_FAILURE, 99)
             .map(UssdCode::failure)
-        assertEquals(listOf(UssdResult.Failure.NO_SERVICE, UssdResult.Failure.NETWORK, UssdResult.Failure.NETWORK), failures)
+        assertEquals(listOf(Code.CODE_NO_SERVICE, Code.CODE_NETWORK_REFUSED, Code.CODE_NETWORK_REFUSED), failures)
     }
 }

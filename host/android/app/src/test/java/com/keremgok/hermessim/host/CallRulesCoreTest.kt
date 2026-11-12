@@ -1,7 +1,7 @@
 // HermesSIM host. Copyright (C) 2026 SIM Relay authors. GPL-3.0-or-later.
 package com.keremgok.hermessim.host
 
-import com.keremgok.hermessim.protocol.v1.CallRules
+import com.keremgok.hermessim.wire.CallRules
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

@@ -3,7 +3,7 @@ package com.keremgok.hermessim.host
 
 import com.keremgok.hermessim.host.UpdateCore.Install
 import com.keremgok.hermessim.host.UpdateCore.Next
-import com.keremgok.hermessim.protocol.v1.Update
+import com.keremgok.hermessim.wire.UpdatePhase
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -25,10 +25,10 @@ class UpdateCoreTest {
     }
 
     @Test fun updateNowDownloadsFirstWhenTheVersionWasOnlyOffered() {
-        assertEquals(Install.INSTALL, UpdateCore.installNow(Update.State.READY))
-        assertEquals(Install.DOWNLOAD_THEN_INSTALL, UpdateCore.installNow(Update.State.AVAILABLE))
-        assertEquals(Install.NONE, UpdateCore.installNow(Update.State.IDLE))
-        assertEquals(Install.NONE, UpdateCore.installNow(Update.State.DOWNLOADING))
+        assertEquals(Install.INSTALL, UpdateCore.installNow(UpdatePhase.UPDATE_PHASE_READY))
+        assertEquals(Install.DOWNLOAD_THEN_INSTALL, UpdateCore.installNow(UpdatePhase.UPDATE_PHASE_AVAILABLE))
+        assertEquals(Install.NONE, UpdateCore.installNow(UpdatePhase.UPDATE_PHASE_IDLE))
+        assertEquals(Install.NONE, UpdateCore.installNow(UpdatePhase.UPDATE_PHASE_DOWNLOADING))
     }
 
     @Test fun theNightInstallNeedsTheSetting() {
