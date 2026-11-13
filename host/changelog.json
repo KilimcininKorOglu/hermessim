@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.2.2",
+    "code": 67,
+    "en": "Internet mode uses less battery: while your phone is connected over Bluetooth, the host leaves the HermesSIM server, so its mobile data no longer wakes up every few seconds. It goes back the moment your phone leaves Bluetooth range.",
+    "tr": "İnternet modu daha az pil harcar: telefonunuz Bluetooth ile bağlıyken ana cihaz HermesSIM sunucusundan ayrılır, böylece mobil verisi artık birkaç saniyede bir uyanmaz. Telefonunuz Bluetooth menzilinden çıktığı anda sunucuya geri döner."
+  },
+  {
     "version": "1.2.1",
     "code": 66,
     "en": "Bluetooth uses less battery: when no call is up, the link to your phone and your Mac runs at the low-power interval, and the host looks for your phone less often once it has been away for 2 minutes.",
