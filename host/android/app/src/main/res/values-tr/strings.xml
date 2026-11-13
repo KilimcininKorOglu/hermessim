@@ -80,7 +80,7 @@
     <string name="next_title">Telefonunuzda devam edin</string>
     <string name="next_test">%1$s ile eşleşti. Sıradaki adım, telefonunuzdaki HermesSIM\'de: Ana cihaz → Arama sesi → Arama testini yap. Bir arkadaşınızı arayın ve ses çıkarıp çıkarmadığını duymak için bu telefonu yanınızda tutun.</string>
     <string name="next_retest">Bu telefonun yazılımı arama testinden sonra değişti. Tam sesi yeniden açmak için telefonunuzdaki HermesSIM\'de arama testini tekrar yapın.</string>
-    <string name="next_basic">%1$s ile eşleşti. Bu telefon Temel modda çalışır: mesajlar, arama kontrolü ve erişim noktası (arama sesi bu telefonda henüz desteklenmiyor). Sıradaki adım, telefonunuzdaki HermesSIM\'de: Kutu modunu açın.</string>
+    <string name="next_basic">%1$s ile eşleşti. Bu telefon Temel modda çalışır: mesajlar, arama kontrolü ve hotspot (arama sesi bu telefonda henüz desteklenmiyor). Sıradaki adım, telefonunuzdaki HermesSIM\'de: Kutu modunu açın.</string>
     <string name="next_box">%1$s ile eşleşti ve tam ses açık. Son adım, telefonunuzdaki HermesSIM\'de: bu telefonun ekranı kapalı kalsın diye Kutu modunu açın.</string>
     <string name="sim_title">SIM takın</string>
     <string name="sim_body">SIM bulunamadı. Bir SIM takın (iyi oturduğundan emin olun); HermesSIM onu kendiliğinden algılar.</string>
@@ -99,8 +99,8 @@
     <string name="tier_verified">Doğrulandı: HermesSIM ekibi bu telefonda arama sesini ölçtü.</string>
     <string name="tier_expected">Çalışması bekleniyor: kendi yazılımı, doğrulanmış bir telefonun ses sistemiyle eşleşiyor. Arama sesi kısa bir arama testinden sonra açılır.</string>
     <string name="tier_experimental">Deneysel: HermesSIM\'in ses sistemi, bu telefonda henüz doğrulanmadı. Arama sesi için arama testi gerekir.</string>
-    <string name="tier_not_yet">Temel mod: HermesSIM bu telefonda arama sesini henüz aktaramıyor. Mesajlar, arama kontrolü ve erişim noktası çalışır.</string>
-    <string name="tier_unknown">Henüz araştırılmadı. Mesajlar, arama kontrolü ve erişim noktası çalışmalı (Temel mod); arama sesinin çalışıp çalışmadığını arama testi gösterir.</string>
+    <string name="tier_not_yet">Temel mod: HermesSIM bu telefonda arama sesini henüz aktaramıyor. Mesajlar, arama kontrolü ve hotspot çalışır.</string>
+    <string name="tier_unknown">Henüz araştırılmadı. Mesajlar, arama kontrolü ve hotspot çalışmalı (Temel mod); arama sesinin çalışıp çalışmadığını arama testi gösterir.</string>
     <string name="tier_unsupported">Desteklenmiyor.</string>
     <string name="c_boot">Önyükleyici</string>
     <string name="boot_unlocked">Kilidi açık</string>
@@ -193,7 +193,7 @@
     <string name="perm_phone_control">telefon denetimi</string>
     <string name="perm_settings">sistem ayarları</string>
     <string name="perm_call_screen">arama ekranı</string>
-    <string name="perm_hotspot">erişim noktası</string>
+    <string name="perm_hotspot">hotspot</string>
     <string name="perm_other">diğerleri</string>
     <string name="sim_locked_title">SIM kilidini açın</string>
     <string name="sim_locked_puk">SIM %d bloke: PUK kodunu (SIM\'in kartında ya da operatörünüzden) ve yeni bir PIN\'i telefonunuzdaki HermesSIM\'de girin (Ana cihaz → SIM).</string>
