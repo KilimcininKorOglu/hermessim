@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.2.1",
+    "code": 66,
+    "en": "Bluetooth uses less battery: when no call is up, the link to your phone and your Mac runs at the low-power interval, and the host looks for your phone less often once it has been away for 2 minutes.",
+    "tr": "Bluetooth daha az pil harcar: arama yokken telefonunuz ve Mac'inizle bağlantı düşük güç aralığında çalışır, telefonunuz 2 dakikadır uzaktaysa ana cihaz onu daha seyrek arar."
+  },
+  {
     "version": "1.2.0",
     "code": 65,
     "en": "Scheduled texts: the host keeps a text you scheduled on your phone and sends it at its time, even while your phone is off or far away. Update the HermesSIM app on your phone to 1.2.0 to schedule texts.",
