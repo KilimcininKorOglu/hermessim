@@ -80,6 +80,7 @@ Requirements: Android 11 or newer, an unlockable bootloader, Magisk, Bluetooth L
 ## Building from source
 
 - Host app, daemon and module: `host/release.sh` (needs the Android SDK and NDK and your own signing key in `host/signing/` as `release.jks` and `signing.properties`, gitignored, or the `HERMESSIM_SIGNING_*` environment variables), or the developer loop in [host/README.md](host/README.md).
+- Continuous integration: every push to `main` and every pull request runs [CI](.github/workflows/ci.yml): the host app's unit tests and debug build, and the daemon's tests.
 - Releases: push a tag `host-v<versionName>` (for example `host-v1.0.0`). The [Release host](.github/workflows/release.yml) workflow builds the signed Magisk zip and publishes the GitHub release. It needs the repository secrets `HERMESSIM_SIGNING_KEYSTORE_B64` (base64 of `release.jks`), `HERMESSIM_SIGNING_STORE_PASSWORD`, `HERMESSIM_SIGNING_KEY_ALIAS` and `HERMESSIM_SIGNING_KEY_PASSWORD`.
 - Protocols shared with the client apps: [protocol/](protocol/). Protocol 2, for the phones and the Macs, is specified in [protocol/v2/SPEC.md](protocol/v2/SPEC.md).
 - Device profiles and the support table: [profiles/](profiles/). Measuring a new phone: [tools/](tools/) (read-only dump and the four live-call experiments).
