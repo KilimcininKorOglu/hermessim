@@ -89,7 +89,11 @@ its next session. No clock of the other side is involved. Derived keys, all HKDF
 **Relay.** One WebSocket per phone, and one per host, at `wss://hermessim.keremgok.tr/api/v1/relay`. Every message
 is binary: `[u8 type][u8 room slot][body]`. A phone joins the room of each of its hosts on the same socket, each in a
 slot it picks (0-7, at most 8 rooms per socket); the server writes the recipient's own slot into what it forwards.
-Keep-alive is the WebSocket's own ping and pong. Vectors: `v2/vectors/relay.json`.
+Keep-alive is the WebSocket's own ping and pong. The phone opens its socket only while its Bluetooth link to
+the host is down, and the host keeps its socket only then too: it leaves the room when a phone link comes up and
+joins again the moment the last one ends, because each side's 25 s ping keeps the mobile radio awake. While the
+host is out of the room, `State.remote.host_online` is false and pushes go over HTTPS. Vectors:
+`v2/vectors/relay.json`.
 
 | type | direction | body |
 | --- | --- | --- |

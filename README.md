@@ -53,6 +53,7 @@ This repository is the **host side** (the Android app, its root daemon and Magis
 - **Charge limit.** The battery is held at 60 % or 80 % (100 % turns it off) through the kernel's standard power supply controls. See [host/README.md](host/README.md#battery-care).
 - **Host notices.** The client is told about a low or critical battery, a locked SIM and the hotspot data limit.
 - **Bluetooth that saves battery.** An idle link asks for the low-power connection interval (about 100-125 ms), so the client phone's and the Mac's radio sleep most of the time; a phone's link runs at the fast interval only during a call. While no phone is linked the host advertises every 100 ms, and every 250 ms once the phone has been away for 2 minutes.
+- **Internet mode only when it is used.** While the client phone is linked over Bluetooth the host leaves its relay room, so no ping wakes its mobile radio every 25 s; it joins the room again the moment the Bluetooth link ends.
 
 ### Updates and support
 
