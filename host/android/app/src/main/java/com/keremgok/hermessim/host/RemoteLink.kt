@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit
  * Internet mode (protocol/README.md "Relay", "Tunnel"): the host keeps one binary WebSocket to hermessim.keremgok.tr,
  * waits in its room, and runs the tunnel the phone opens there. The phone counts as present only once the tunnel is
  * open. The same socket carries the host's pushes. Runs only while a room key is set; the key arrives over Bluetooth
- * (SetRemote) and is kept in app-private prefs.
+ * (SetRemote) and is kept in app-private prefs. While a phone is on Bluetooth the socket stays closed (RemoteRoom).
  */
 object RemoteLink {
     private const val TAG = "HermesSimHost"
@@ -50,15 +50,32 @@ object RemoteLink {
 
     val enabled get() = crypto != null
 
+    /** A phone is linked over Bluetooth now (Relay): the room waits until that link ends. */
+    @Volatile private var phoneOnBluetooth = false
+    private val wanted get() = RemoteRoom.wanted(enabled, phoneOnBluetooth)
+
+    /** Relay, when a phone's Bluetooth link comes up or ends: leave the room, or join it again at once. */
+    fun phoneOnBluetooth(near: Boolean) = h.post {
+        if (phoneOnBluetooth == near) return@post
+        phoneOnBluetooth = near
+        if (near) {
+            if (ws != null) Log.i(TAG, "remote: the phone is on Bluetooth, leaving the room")
+            disconnect()
+        } else if (wanted) {
+            backoffMs = 2000
+            connect()
+        }
+    }
+
     fun start(ctx: Context, onFrames: (ByteArray) -> Unit, onPeer: (present: Boolean) -> Unit) {
         app = ctx.applicationContext
         this.onFrames = onFrames
         this.onPeer = onPeer
         prefs().getString("key", null)?.let { crypto = RemoteCrypto(Base64.decode(it, Base64.NO_WRAP)) }
         app.getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(n: Network) { h.post { if (enabled && !online) { backoffMs = 2000; connect() } } }
+            override fun onAvailable(n: Network) { h.post { if (wanted && !online) { backoffMs = 2000; connect() } } }
         })
-        h.post { if (enabled) connect() }
+        h.post { if (wanted) connect() }
     }
 
     /** SetRemote from the paired phone over Bluetooth: a new room key moves the host to its room. */
@@ -67,7 +84,7 @@ object RemoteLink {
             prefs().edit().putString("key", Base64.encodeToString(key, Base64.NO_WRAP)).apply()
             crypto = RemoteCrypto(key)
             Log.i(TAG, "remote mode on (room ${crypto!!.roomId.take(8)})")
-            connect()
+            if (wanted) connect()
         } else {
             prefs().edit().remove("key").apply()
             crypto = null
@@ -121,7 +138,7 @@ object RemoteLink {
 
     private fun retry() {
         val my = gen
-        h.postDelayed({ if (my == gen && enabled) connect() }, backoffMs)
+        h.postDelayed({ if (my == gen && wanted) connect() }, backoffMs)
         backoffMs = minOf(backoffMs * 2, 60_000)
     }
 

@@ -570,6 +570,7 @@ object Relay {
         link.claimed = null
         if (wasMac) { Log.i(TAG, "Mac ${d.address} gone"); touch(StateBook.PEERS); return@post }
         Log.i(TAG, "client ${d.address} gone")
+        RemoteLink.phoneOnBluetooth(bleNear())
         HostWifi.evaluate("Bluetooth gone")
         HotspotPause.transportChanged("Bluetooth gone")
         scheduleHeartbeat()
@@ -697,6 +698,7 @@ object Relay {
             main.postDelayed({ if (link.channel.serving) RadioLook.linkLook() }, 20_000)
             HostWifi.evaluate("Bluetooth up")
             HotspotPause.transportChanged("Bluetooth back")
+            RemoteLink.phoneOnBluetooth(bleNear())
             // Remembered so the same phone can pair again on its own after its system dropped the keys (see the receiver)
             edit.putString("client_mac", link.id)
             scheduleHeartbeat()
