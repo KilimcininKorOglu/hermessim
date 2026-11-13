@@ -96,7 +96,7 @@ const T = {
     rulesTitle: "Never supported", none: "Not in the list yet: Basic mode should work; Qualcomm and MediaTek phones can also try the call test.",
     footer: "Same table as the HermesSIM apps", updated: "updated" },
   tr: { title: "HermesSIM hangi telefonlarla çalışır?",
-    lead: "HermesSIM, root'lu yedek bir Android telefonu iPhone'unuz ya da Android telefonunuz için bir SIM kutusuna dönüştürür. Her telefonda arama sesi kısa bir arama testinden sonra açılır; root'lanabilen çoğu Android 11+ telefonda mesajlar, arama yönetimi ve erişim noktası Temel modda çalışır.",
+    lead: "HermesSIM, root'lu yedek bir Android telefonu iPhone'unuz ya da Android telefonunuz için bir SIM kutusuna dönüştürür. Her telefonda arama sesi kısa bir arama testinden sonra açılır; root'lanabilen çoğu Android 11+ telefonda mesajlar, arama yönetimi ve hotspot Temel modda çalışır.",
     search: "Model arayın, ör. A52 veya Redmi Note 10",
     tiers: { verified: "Doğrulandı", expected: "Çalışması bekleniyor", experimental: "Deneysel", not_yet: "Henüz değil", unsupported: "Desteklenmiyor", unknown: "Henüz incelenmedi" },
     legend: { verified: "Canlı aramada bizim tarafımızdan ölçüldü.", expected: "Kendi yazılımı doğrulanmış bir telefonun ses ailesiyle uyuşuyor.",

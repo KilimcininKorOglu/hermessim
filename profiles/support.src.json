@@ -16,7 +16,7 @@
       "tier": "verified",
       "profile": "qcom/sm8250-samsung-r8q",
       "note": "Measured 15 Oct 2026 on G780GXXSHEYJ1 (One UI 5.1, Android 13): calls, SMS, hotspot, two-way call audio.",
-      "note_tr": "15 Ekim 2026'da G780GXXSHEYJ1 (One UI 5.1, Android 13) üzerinde ölçüldü: aramalar, SMS, erişim noktası, iki yönlü arama sesi.",
+      "note_tr": "15 Ekim 2026'da G780GXXSHEYJ1 (One UI 5.1, Android 13) üzerinde ölçüldü: aramalar, SMS, hotspot, iki yönlü arama sesi.",
       "family": "qcom-legacy"
     },
     {
@@ -36,7 +36,7 @@
       "family": "mtk-afe",
       "profile": "mtk/mt6785-xiaomi-begonia",
       "note": "Measured 19 Oct 2026 on MIUI 12.5 (Android 11): calls both ways with two-way audio, SMS, hotspot, box mode.",
-      "note_tr": "19 Ekim 2026'da MIUI 12.5 (Android 11) üzerinde ölçüldü: iki yönlü sesle gelen/giden aramalar, SMS, erişim noktası, kutu modu."
+      "note_tr": "19 Ekim 2026'da MIUI 12.5 (Android 11) üzerinde ölçüldü: iki yönlü sesle gelen/giden aramalar, SMS, hotspot, kutu modu."
     },
     {
       "name": "Galaxy S20 FE 5G",
@@ -292,7 +292,7 @@
       "tier": "not_yet",
       "profile": null,
       "note": "Exynos 9611. Exynos call audio isn't supported yet; it's the next family we're working on. Basic mode (SMS, call control, hotspot) works.",
-      "note_tr": "Exynos 9611. Exynos arama sesi henüz desteklenmiyor; üzerinde çalıştığımız bir sonraki aile. Temel mod (SMS, arama yönetimi, erişim noktası) çalışır.",
+      "note_tr": "Exynos 9611. Exynos arama sesi henüz desteklenmiyor; üzerinde çalıştığımız bir sonraki aile. Temel mod (SMS, arama yönetimi, hotspot) çalışır.",
       "source": "docs/desk-study/galaxy-a51.md",
       "family": "exynos-abox"
     },
@@ -747,7 +747,7 @@
       "tier": "not_yet",
       "profile": null,
       "note": "Chip from the seller's specs (Unisoc T606): texts, call control and the hotspot work (Basic mode); call audio for Unisoc phones isn't built yet.",
-      "note_tr": "İşlemci satıcının teknik özelliklerinden (Unisoc T606): mesajlar, arama kontrolü ve erişim noktası çalışır (Temel mod); Unisoc telefonlar için arama sesi henüz hazır değil.",
+      "note_tr": "İşlemci satıcının teknik özelliklerinden (Unisoc T606): mesajlar, arama kontrolü ve hotspot çalışır (Temel mod); Unisoc telefonlar için arama sesi henüz hazır değil.",
       "source": "spec: https://www.turkcell.com.tr/pasaj/cep-telefonu/android-telefonlar/reeder-s19-max-pro-s-128-gb"
     },
     {
@@ -852,7 +852,7 @@
       "name_tr": "Samsung Exynos",
       "router": false,
       "about": "Galaxy phones with newer Exynos chips (2018 on). Samsung's own firmware has a digital call route (phone as call modem) on every Exynos Galaxy we checked; it needs a test phone before we turn it on. Until then: Basic mode (SMS, call control, hotspot) if the phone can be rooted.",
-      "about_tr": "Daha yeni Exynos işlemcili (2018 ve sonrası) Galaxy telefonlar. Samsung'un kendi yazılımında, incelediğimiz her Exynos Galaxy'de dijital bir arama yolu (telefonu arama modemi olarak kullanma) var; açmadan önce bir test telefonunda denememiz gerekiyor. O zamana kadar: telefon root'lanabiliyorsa Temel mod (SMS, arama kontrolü, erişim noktası).",
+      "about_tr": "Daha yeni Exynos işlemcili (2018 ve sonrası) Galaxy telefonlar. Samsung'un kendi yazılımında, incelediğimiz her Exynos Galaxy'de dijital bir arama yolu (telefonu arama modemi olarak kullanma) var; açmadan önce bir test telefonunda denememiz gerekiyor. O zamana kadar: telefon root'lanabiliyorsa Temel mod (SMS, arama kontrolü, hotspot).",
       "research": "tools/corpus/research/exynos-abox.md"
     },
     "exynos-audmixer": {
