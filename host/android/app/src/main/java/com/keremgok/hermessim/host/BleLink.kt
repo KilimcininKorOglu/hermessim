@@ -202,10 +202,11 @@ class BleLink(
     @SuppressLint("MissingPermission")
     fun connectedDevices(): List<BluetoothDevice> = runCatching { bt.getConnectedDevices(BluetoothProfile.GATT_SERVER) }.getOrDefault(emptyList())
 
-    // ---- Connection interval for calls ----
-    // As the peripheral, Android can only ask for a faster link through a GATT *client* on the same ACL link
-    // (BluetoothGatt.requestConnectionPriority). HIGH asks for ~11.25-15 ms; iOS grants within its own rules
-    // (15 ms steps). A short interval cuts audio transit time and burstiness; BALANCED saves battery when idle.
+    // ---- Connection interval ----
+    // As the peripheral, Android can only ask for a link's interval through a GATT *client* on the same ACL link
+    // (BluetoothGatt.requestConnectionPriority), opened when a peer subscribes. HIGH asks for ~11.25-15 ms during a
+    // call (iOS grants within its own rules, 15 ms steps): a short interval cuts audio transit time and burstiness.
+    // Otherwise LOW_POWER (~100-125 ms) keeps the peer's radio asleep most of the time (LinkPriority).
     private val clients = ConcurrentHashMap<String, BluetoothGatt>()
     @Volatile private var wantHigh = false
     /** Disconnects ignored because the stack still listed the link: looked at again when our client role goes. */
@@ -233,11 +234,13 @@ class BleLink(
         main.postDelayed({ runCatching { gatt?.readPhy(d) } }, 2_000)
     }
 
+    private fun priorityFor(d: BluetoothDevice): Int = LinkPriority.of(wantHigh, mac?.isMac(d.address) == true)
+
     private fun applyPriority(d: BluetoothDevice) {
-        val prio = if (wantHigh) BluetoothGatt.CONNECTION_PRIORITY_HIGH else BluetoothGatt.CONNECTION_PRIORITY_BALANCED
         val existing = clients[d.address]
         if (existing != null) {
-            Log.i(TAG, "connection priority ${if (wantHigh) "HIGH" else "BALANCED"} -> ${existing.requestConnectionPriority(prio)}")
+            val prio = priorityFor(d)
+            Log.i(TAG, "connection priority ${LinkPriority.name(prio)} -> ${existing.requestConnectionPriority(prio)}")
             return
         }
         // First use: attach a client role to the existing link; request priority once connected.
@@ -245,8 +248,8 @@ class BleLink(
         val g = runCatching { d.connectGatt(ctx, false, object : android.bluetooth.BluetoothGattCallback() {
             override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
-                    val p = if (wantHigh) BluetoothGatt.CONNECTION_PRIORITY_HIGH else BluetoothGatt.CONNECTION_PRIORITY_BALANCED
-                    Log.i(TAG, "client role up; connection priority ${if (wantHigh) "HIGH" else "BALANCED"} -> ${g.requestConnectionPriority(p)}")
+                    val p = priorityFor(d)
+                    Log.i(TAG, "client role up; connection priority ${LinkPriority.name(p)} -> ${g.requestConnectionPriority(p)}")
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                     clients.remove(d.address); g.close()
                     // Our own client role was what kept the link listed: the iPhone's disconnect was real. Ignored, it left
@@ -376,8 +379,8 @@ class BleLink(
                 Log.i(TAG, "down notify=$on for ${device.address}")
                 if (on) {
                     resetStream(device.address); onLink(device, true)
-                    // Subscribed during a call: the fast interval applies to it too (it was only asked for on a change)
-                    if (wantHigh && mac?.isMac(device.address) != true) applyPriority(device)
+                    // Every link asks for its interval at the start: LOW_POWER when idle, HIGH when a call is already up
+                    applyPriority(device)
                 }
             }
             if (responseNeeded) gatt?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
