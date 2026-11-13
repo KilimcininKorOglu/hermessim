@@ -149,6 +149,7 @@ class BleLink(
                     runCatching { gatt?.close() }; gatt = null
                     advSet = null; registered = false; starting = false; replacing = false; enableTries = 0; failures = 0; advDisabled = false   // the radio drops it
                     advStatus = null
+                    resetPace()
                     mac?.radioOff()
                     held.clear(); inFlight.clear(); mtu.clear(); notifyFails.clear()
                 }
@@ -182,6 +183,7 @@ class BleLink(
     fun stop() {
         runCatching { bt.adapter.bluetoothLeAdvertiser.stopAdvertisingSet(advCallback) }
         advSet = null; registered = false; starting = false; replacing = false
+        resetPace()
         mac?.stop()
         gatt?.close()
         gatt = null
@@ -320,6 +322,7 @@ class BleLink(
     }
 
     private fun linkDown(d: BluetoothDevice) {
+        if (mac?.isMac(d.address) != true) phoneDownAt = android.os.SystemClock.elapsedRealtime()
         resetStream(d.address)
         onLink(d, false)
         restartAdvertising()
@@ -433,7 +436,7 @@ class BleLink(
         override fun onAdvertisingSetStarted(set: AdvertisingSet?, txPower: Int, status: Int) {
             starting = false
             advStatus = status
-            if (status == ADVERTISE_SUCCESS) { advSet = set; registered = true; failures = 0; enableTries = 0; Log.i(TAG, "advertising"); return }
+            if (status == ADVERTISE_SUCCESS) { advSet = set; registered = true; failures = 0; enableTries = 0; Log.i(TAG, "advertising"); schedulePace(); return }
             failures++
             Log.w(TAG, "advertising failed $status (try $failures)")
             report(status)
@@ -446,13 +449,18 @@ class BleLink(
             }
         }
         override fun onAdvertisingEnabled(set: AdvertisingSet?, enable: Boolean, status: Int) {
-            if (!enable) return
+            if (!enable) { pacing?.let { paceParams(set, it) }; return }
             if (status == ADVERTISE_SUCCESS) { enableTries = 0; advStatus = status; Log.i(TAG, "advertising again (same address)"); return }
             // Right after a disconnect the controller can still refuse (status 18 on the Redmi, 19 Oct): retry the same
             // set a few times (its address is what an unbonded iPhone knows), then replace it.
             enableTries++
             Log.w(TAG, "advertising again failed $status (try $enableTries)")
             if (enableTries < 5) retry(400L * enableTries) else replaceSet()
+        }
+        override fun onAdvertisingParametersUpdated(set: AdvertisingSet?, txPower: Int, status: Int) {
+            val target = pacing ?: return
+            if (status != ADVERTISE_SUCCESS) Log.w(TAG, "advertising: interval not changed (status $status)")
+            finishPace(if (status == ADVERTISE_SUCCESS) target else null)
         }
         override fun onAdvertisingSetStopped(set: AdvertisingSet?) {
             if (advSet === set) advSet = null
@@ -485,6 +493,7 @@ class BleLink(
         val set = advSet ?: return@post
         val p = pairable()
         runCatching { set.setAdvertisingData(adData()) }.onSuccess { Log.i(TAG, "advertising: ${if (p) "ready to pair" else "paired"}") }
+        if (p && slowAdv) setPace(false) else schedulePace()
     }
 
     /** Drop the set; a new one (new address) starts once Android confirms it stopped, or after 2 s without a word. */
@@ -498,20 +507,17 @@ class BleLink(
     }
 
     private fun advertise() {
-        if (gatt == null || advDisabled || starting || replacing) return
+        if (gatt == null || advDisabled || starting || replacing || pacing != null) return
         val adv = bt.adapter?.bluetoothLeAdvertiser ?: run { Log.w(TAG, "no advertiser: Bluetooth is off"); return }
         advSet?.let { set ->
-            if (runCatching { set.enableAdvertising(true, 0, 0) }.isSuccess) return
+            if (slowAdv && !wantSlow()) { setPace(false); return }     // a phone came back: fast again (same set)
+            if (runCatching { set.enableAdvertising(true, 0, 0) }.isSuccess) { schedulePace(); return }
             advSet = null
         }
         if (registered) { replaceSet(); return }        // a set we lost track of still holds our callback
-        val params = AdvertisingSetParameters.Builder()
-            .setLegacyMode(true).setConnectable(true).setScannable(true)
-            .setInterval(AdvertisingSetParameters.INTERVAL_LOW)
-            .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_MEDIUM)
-            .build()
         starting = true
-        runCatching { adv.startAdvertisingSet(params, adData(), scanResponse(), null, null, advCallback) }.onFailure { e ->
+        slowAdv = false
+        runCatching { adv.startAdvertisingSet(params(false), adData(), scanResponse(), null, null, advCallback) }.onFailure { e ->
             starting = false
             Log.w(TAG, "advertising: $e")
             when {
@@ -524,4 +530,61 @@ class BleLink(
 
     /** Connectable advertising stops once a central connects; enable it again after every real disconnect. */
     private fun restartAdvertising() = main.post { advertise() }
+
+    // ---- Advertising pace (AdvertPace): the short interval while a phone may look for the host, the medium one once
+    // no phone has been linked for 2 minutes. The set stays the same, so its address does too (an unbonded iPhone
+    // knows the host by it).
+    private var phoneDownAt = android.os.SystemClock.elapsedRealtime()   // the host's start counts as a link's end
+    private var slowAdv = false                  // the running set advertises at the medium interval
+    private var pacing: Boolean? = null          // a pace change in flight: the interval it goes to (true = medium)
+    private val paceCheck = Runnable { if (!slowAdv && wantSlow()) setPace(true) }
+    private val paceTimeout = Runnable { if (pacing != null) { Log.w(TAG, "advertising: interval change got no answer"); finishPace(null) } }
+
+    private fun params(slow: Boolean): AdvertisingSetParameters = AdvertisingSetParameters.Builder()
+        .setLegacyMode(true).setConnectable(true).setScannable(true)
+        .setInterval(if (slow) AdvertisingSetParameters.INTERVAL_MEDIUM else AdvertisingSetParameters.INTERVAL_LOW)
+        .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_MEDIUM)
+        .build()
+
+    @SuppressLint("MissingPermission")
+    private fun phoneConnected(): Boolean = runCatching { bt.getConnectedDevices(BluetoothProfile.GATT) }
+        .getOrDefault(emptyList()).any { mac?.isMac(it.address) != true }
+
+    private fun sincePhoneDown(): Long = android.os.SystemClock.elapsedRealtime() - phoneDownAt
+
+    private fun wantSlow(): Boolean = AdvertPace.slow(pairable(), phoneConnected(), sincePhoneDown())
+
+    private fun schedulePace() {
+        main.removeCallbacks(paceCheck)
+        main.postDelayed(paceCheck, AdvertPace.waitMs(sincePhoneDown()))
+    }
+
+    private fun resetPace() {
+        main.removeCallbacks(paceCheck); main.removeCallbacks(paceTimeout)
+        slowAdv = false; pacing = null
+    }
+
+    /** Moves the running set to the other interval: Android changes it only while the set is off, so off, then
+     *  [paceParams] when that is confirmed, then on again in [finishPace]. */
+    private fun setPace(slow: Boolean) {
+        val set = advSet ?: return
+        if (pacing != null) return
+        pacing = slow
+        if (runCatching { set.enableAdvertising(false, 0, 0) }.isFailure) { finishPace(null); return }
+        main.postDelayed(paceTimeout, 2_000)
+    }
+
+    private fun paceParams(set: AdvertisingSet?, slow: Boolean) {
+        if (set == null || runCatching { set.setAdvertisingParameters(params(slow)) }.isFailure) finishPace(null)
+    }
+
+    /** The change ended: [slow] is the interval now in use, null when it stayed. Advertising goes on again, unless a
+     *  phone connected meanwhile (its disconnect starts it). */
+    private fun finishPace(slow: Boolean?) {
+        main.removeCallbacks(paceTimeout)
+        pacing = null
+        if (slow != null) { slowAdv = slow; Log.i(TAG, "advertising every ${if (slow) 250 else 100} ms") }
+        if (!phoneConnected()) runCatching { advSet?.enableAdvertising(true, 0, 0) }
+        if (!slowAdv) schedulePace()
+    }
 }
