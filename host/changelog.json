@@ -21,7 +21,7 @@
     "version": "1.0.0",
     "code": 63,
     "en": "On some phone pairs, calls lost part of the caller's sound: the host sent each 10 ms of sound as its own Bluetooth packet, more than such a link carries, and what didn't fit was dropped. It now sends everything waiting together. Hosts whose hotspot can only use 2.4 GHz, the band Bluetooth carries your calls on, get a new setting: the hotspot turns off while a call's sound is on Bluetooth and comes back when the call ends.",
-    "tr": "Bazı telefon çiftlerinde aramalarda karşı tarafın sesinin bir kısmı kayboluyordu: ana cihaz sesin her 10 ms'sini ayrı bir Bluetooth paketi olarak gönderiyordu, bu da böyle bir bağlantının taşıyabileceğinden fazlaydı ve sığmayanlar atılıyordu. Artık bekleyen her şeyi birlikte gönderiyor. Erişim noktası yalnızca 2,4 GHz kullanabilen ana cihazlara (aramalarınızı taşıyan Bluetooth'un bandı) yeni bir ayar geldi: bir aramanın sesi Bluetooth'tayken erişim noktası kapanır, arama bitince yeniden açılır."
+    "tr": "Bazı telefon çiftlerinde aramalarda karşı tarafın sesinin bir kısmı kayboluyordu: ana cihaz sesin her 10 ms'sini ayrı bir Bluetooth paketi olarak gönderiyordu, bu da böyle bir bağlantının taşıyabileceğinden fazlaydı ve sığmayanlar atılıyordu. Artık bekleyen her şeyi birlikte gönderiyor. Hotspot yalnızca 2,4 GHz kullanabilen ana cihazlara (aramalarınızı taşıyan Bluetooth'un bandı) yeni bir ayar geldi: bir aramanın sesi Bluetooth'tayken hotspot kapanır, arama bitince yeniden açılır."
   },
   {
     "version": "0.12.26",
@@ -93,7 +93,7 @@
     "version": "0.12.15",
     "code": 51,
     "en": "Steadier in your bag and in the drawer. What has to happen while the host sleeps now wakes it instead of waiting minutes: Wi-Fi when you're away, box mode after the escape gesture, and the push for a text when your iPhone is asleep. The host's Wi-Fi no longer switches on the moment Bluetooth drops for a second. Calls and texts arriving just as your iPhone moves from Bluetooth to the internet are no longer lost. Signal and roaming reach the iPhone as they change. A failed check of who is on the hotspot no longer turns it off under a laptop, and Samsung hotspots on default settings no longer turn off after one idle minute.",
-    "tr": "Çantanızda ve çekmecede daha istikrarlı. Ana cihaz uyurken olması gerekenler artık dakikalarca beklemek yerine onu uyandırıyor: uzaktayken Wi-Fi, kaçış hareketinden sonra kutu modu ve iPhone'unuz uyurken bir mesajın bildirimi. Ana cihazın Wi-Fi'ı artık Bluetooth bir anlığına koptuğunda hemen açılmıyor. iPhone'unuz Bluetooth'tan internete geçerken gelen aramalar ve mesajlar artık kaybolmuyor. Sinyal ve dolaşım değiştikçe iPhone'a ulaşıyor. Erişim noktasına kimin bağlı olduğunun kontrolü başarısız olursa erişim noktası artık bir dizüstünün altından kapanmıyor; varsayılan ayarlardaki Samsung erişim noktaları artık bir dakika boşta kalınca kapanmıyor."
+    "tr": "Çantanızda ve çekmecede daha istikrarlı. Ana cihaz uyurken olması gerekenler artık dakikalarca beklemek yerine onu uyandırıyor: uzaktayken Wi-Fi, kaçış hareketinden sonra kutu modu ve iPhone'unuz uyurken bir mesajın bildirimi. Ana cihazın Wi-Fi'ı artık Bluetooth bir anlığına koptuğunda hemen açılmıyor. iPhone'unuz Bluetooth'tan internete geçerken gelen aramalar ve mesajlar artık kaybolmuyor. Sinyal ve dolaşım değiştikçe iPhone'a ulaşıyor. Hotspot'a kimin bağlı olduğunun kontrolü başarısız olursa hotspot artık bir dizüstünün altından kapanmıyor; varsayılan ayarlardaki Samsung hotspot'lar artık bir dakika boşta kalınca kapanmıyor."
   },
   {
     "version": "0.12.14",
@@ -105,7 +105,7 @@
     "version": "0.12.13",
     "code": 49,
     "en": "Better at phones we haven't tested ourselves: a profile measured on another phone of the same family is used only if this phone's sound hardware has everything it needs (its audio streams looked up by name), otherwise the host builds one from the phone's own files; once it finds call audio paths, the phone shows as Expected to work. An active eSIM line now shows on the iPhone (data roaming and mobile data can be changed). The hotspot no longer offers 6 GHz or a device limit, which some phones accept but then never start the hotspot. VoLTE is switched on for a SIM whose carrier offers it if the phone's VoLTE switch was off or never set (Xiaomi and MediaTek phones), and the charge limit also works on newer Qualcomm phones.",
-    "tr": "Kendimiz denemediğimiz telefonlarda daha iyi: aynı ailedeki başka bir telefonda ölçülmüş profil yalnızca bu telefonun ses donanımında gereken her şey varsa kullanılıyor (ses akışları adıyla bulunuyor), yoksa ana cihaz telefonun kendi dosyalarından bir profil oluşturuyor; arama ses yollarını bulduğunda telefon Çalışması bekleniyor olarak görünüyor. Etkin bir eSIM hattı artık iPhone'da görünüyor (veri dolaşımı ve mobil veri değiştirilebiliyor). Erişim noktası artık 6 GHz ve cihaz sınırı sunmuyor: bazı telefonlar bunları kabul edip erişim noktasını hiç başlatmıyordu. Operatörü VoLTE sunan bir SIM'de telefonun VoLTE anahtarı kapalıysa ya da hiç ayarlanmamışsa (Xiaomi ve MediaTek telefonlar) VoLTE açılıyor; şarj sınırı yeni Qualcomm telefonlarda da çalışıyor."
+    "tr": "Kendimiz denemediğimiz telefonlarda daha iyi: aynı ailedeki başka bir telefonda ölçülmüş profil yalnızca bu telefonun ses donanımında gereken her şey varsa kullanılıyor (ses akışları adıyla bulunuyor), yoksa ana cihaz telefonun kendi dosyalarından bir profil oluşturuyor; arama ses yollarını bulduğunda telefon Çalışması bekleniyor olarak görünüyor. Etkin bir eSIM hattı artık iPhone'da görünüyor (veri dolaşımı ve mobil veri değiştirilebiliyor). Hotspot artık 6 GHz ve cihaz sınırı sunmuyor: bazı telefonlar bunları kabul edip hotspot'u hiç başlatmıyordu. Operatörü VoLTE sunan bir SIM'de telefonun VoLTE anahtarı kapalıysa ya da hiç ayarlanmamışsa (Xiaomi ve MediaTek telefonlar) VoLTE açılıyor; şarj sınırı yeni Qualcomm telefonlarda da çalışıyor."
   },
   {
     "version": "0.12.11",
@@ -129,7 +129,7 @@
     "version": "0.12.8",
     "code": 44,
     "en": "Automatic hotspot is more dependable while your iPhone sleeps: when your iPhone moves to another Wi-Fi, the host itself turns the hotspot off once nothing uses it for a minute, and the host checks in with your iPhone every few minutes even in deep sleep. On Samsung hosts, the phone's own 20-minute hotspot timer now follows HermesSIM's auto off setting.",
-    "tr": "Otomatik erişim noktası iPhone'unuz uykudayken daha güvenilir: iPhone'unuz başka bir Wi-Fi'a geçince ana cihaz, bir dakika boyunca hiçbir şey kullanmadığında erişim noktasını kendisi kapatıyor; ana cihaz derin uykuda da birkaç dakikada bir iPhone'unuzla haberleşiyor. Samsung ana cihazlarda telefonun kendi 20 dakikalık erişim noktası zamanlayıcısı artık HermesSIM'in otomatik kapatma ayarına uyuyor."
+    "tr": "Otomatik hotspot iPhone'unuz uykudayken daha güvenilir: iPhone'unuz başka bir Wi-Fi'a geçince ana cihaz, bir dakika boyunca hiçbir şey kullanmadığında hotspot'u kendisi kapatıyor; ana cihaz derin uykuda da birkaç dakikada bir iPhone'unuzla haberleşiyor. Samsung ana cihazlarda telefonun kendi 20 dakikalık hotspot zamanlayıcısı artık HermesSIM'in otomatik kapatma ayarına uyuyor."
   },
   {
     "version": "0.12.7",
@@ -213,7 +213,7 @@
     "version": "0.10.2",
     "code": 30,
     "en": "When you leave the host, an unused hotspot turns off by itself (so the host can use its Wi-Fi while you're away).\nNo hotspot start during an internet call.\nHermesSIM shows what the host's internet runs on: Wi-Fi or mobile data.",
-    "tr": "Ana cihazdan ayrıldığınızda kullanılmayan erişim noktası kendiliğinden kapanır (böylece siz uzaktayken ana cihaz Wi-Fi'ını kullanabilir).\nİnternet üzerinden arama sırasında erişim noktası açılmaz.\nHermesSIM, ana cihazın internetinin neyle çalıştığını gösterir: Wi-Fi veya mobil veri."
+    "tr": "Ana cihazdan ayrıldığınızda kullanılmayan hotspot kendiliğinden kapanır (böylece siz uzaktayken ana cihaz Wi-Fi'ını kullanabilir).\nİnternet üzerinden arama sırasında hotspot açılmaz.\nHermesSIM, ana cihazın internetinin neyle çalıştığını gösterir: Wi-Fi veya mobil veri."
   },
   {
     "version": "0.10.1",
@@ -225,7 +225,7 @@
     "version": "0.10.0",
     "code": 28,
     "en": "First MediaTek phone (Redmi Note 8 Pro), Android 11 and MIUI support.\nFixed: on Android 11 the phone restarted itself about 25 s after every boot.\nHost Wi-Fi: off while your iPhone is nearby or the hotspot is on; optionally on while you're away.\nHotspot: WPA2 only (WPA3 failed to start on some phones).\nThe setup screen no longer crashes on a fresh install.",
-    "tr": "İlk MediaTek telefon (Redmi Note 8 Pro), Android 11 ve MIUI desteği.\nDüzeltildi: Android 11'de telefon her açılıştan yaklaşık 25 sn sonra kendini yeniden başlatıyordu.\nAna cihazın Wi-Fi'ı: iPhone'unuz yakındayken veya erişim noktası açıkken kapalı; isterseniz siz uzaktayken açık.\nErişim noktası: yalnızca WPA2 (WPA3 bazı telefonlarda açılmıyordu).\nKurulum ekranı yeni kurulumda artık çökmüyor."
+    "tr": "İlk MediaTek telefon (Redmi Note 8 Pro), Android 11 ve MIUI desteği.\nDüzeltildi: Android 11'de telefon her açılıştan yaklaşık 25 sn sonra kendini yeniden başlatıyordu.\nAna cihazın Wi-Fi'ı: iPhone'unuz yakındayken veya hotspot açıkken kapalı; isterseniz siz uzaktayken açık.\nHotspot: yalnızca WPA2 (WPA3 bazı telefonlarda açılmıyordu).\nKurulum ekranı yeni kurulumda artık çökmüyor."
   },
   {
     "version": "0.9.9",
@@ -255,7 +255,7 @@
     "version": "0.9.5",
     "code": 23,
     "en": "The host reports changes faster: the hotspot shows \"Starting…\" at once, and the app and widgets update sooner.",
-    "tr": "Ana cihaz değişiklikleri daha hızlı bildiriyor: erişim noktası hemen \"Açılıyor…\" gösteriyor, uygulama ve widget'lar daha çabuk güncelleniyor."
+    "tr": "Ana cihaz değişiklikleri daha hızlı bildiriyor: hotspot hemen \"Açılıyor…\" gösteriyor, uygulama ve widget'lar daha çabuk güncelleniyor."
   },
   {
     "version": "0.9.4",
@@ -267,12 +267,12 @@
     "version": "0.9.3",
     "code": 21,
     "en": "Automatic hotspot recognises your iPhone on the host's hotspot more reliably, so turning the hotspot off yourself stays off.",
-    "tr": "Otomatik erişim noktası, iPhone'unuzun ana cihazın erişim noktasına bağlı olduğunu daha güvenilir anlıyor; erişim noktasını kendiniz kapattığınızda kapalı kalıyor."
+    "tr": "Otomatik hotspot, iPhone'unuzun ana cihazın hotspot'una bağlı olduğunu daha güvenilir anlıyor; hotspot'u kendiniz kapattığınızda kapalı kalıyor."
   },
   {
     "version": "0.9.2",
     "code": 20,
     "en": "Fixes robotic or choppy sound for the other caller on some calls; the host now repairs its audio output by itself if it ever stalls.\nMobile data switch: the hotspot turns it on, you can turn it off.\nThe hotspot shows \"Starting…\" while it comes up.\nUpdates: the host updates itself after asking your iPhone.",
-    "tr": "Bazı aramalarda karşı tarafın sesinizi robotik ya da kesik duyması düzeltildi; ana cihaz ses çıkışı takılırsa artık kendini onarıyor.\nMobil veri anahtarı: erişim noktası açar, siz kapatabilirsiniz.\nErişim noktası açılırken \"Açılıyor…\" gösterir.\nGüncellemeler: ana cihaz iPhone'unuza sorduktan sonra kendini günceller."
+    "tr": "Bazı aramalarda karşı tarafın sesinizi robotik ya da kesik duyması düzeltildi; ana cihaz ses çıkışı takılırsa artık kendini onarıyor.\nMobil veri anahtarı: hotspot açar, siz kapatabilirsiniz.\nHotspot açılırken \"Açılıyor…\" gösterir.\nGüncellemeler: ana cihaz iPhone'unuza sorduktan sonra kendini günceller."
   }
 ]
