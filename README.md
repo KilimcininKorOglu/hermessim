@@ -11,6 +11,7 @@ This repository is the **host side** (the Android app, its root daemon and Magis
 ### Calls
 
 - **Calls on your phone.** Incoming calls ring on the client phone and are answered, made and talked on there. The host relays the call audio digitally (Opus) over Bluetooth LE in 10 ms packets, or over the internet in 20 ms packets, directly between the two phones when their networks allow it and through one TURN relay otherwise. Each internet path has keys of its own. In internet mode the internet path waits ready during a Bluetooth call, so the audio moves to it without a break when Bluetooth fails.
+- **Lean audio on small-packet links.** A host whose Bluetooth record shows the smallest radio packets (27 bytes) sends the caller's voice at a lower bit rate, two frames per write, when its link falls behind during a call. With an internet path ready, the host first waits 5 seconds for the call to move there.
 - **A silent host.** The host phone never rings or plays a sound: a non-UI `InCallService` runs the call, and the module sets total silence, no haptics and zero ring, notification and system volume.
 - **Call audio per phone model.** Each supported phone has an audio profile (`profiles/`) that the root daemon applies at call start and restores at call end.
 - **Call test.** Call audio switches on only after a short test call with a friend passes on the client. Until then the host runs in Basic mode: texts, call control and the hotspot.
