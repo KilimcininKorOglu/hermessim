@@ -138,6 +138,7 @@ class HostService : Service() {
             "SIM_LOCK" to { i -> Sims.setLockEnabled(this, i.getIntExtra("slot", -1), i.getStringExtra("pin").orEmpty(),
                 i.getBooleanExtra("on", false)) },
             "LINK_RADIO" to { _ -> linkRadio() },
+            "AUDIO_LEAN" to { i -> audioLean(i) },
             // push a made-up call or text to the iPhone whatever the link. --es kind call|sms
             "PUSH_TEST" to { i -> Push.test(i.getStringExtra("kind") ?: "sms") },
             // relay a synthetic SMS through the normal path
@@ -182,6 +183,18 @@ class HostService : Service() {
         val l = RadioLook.look()
         Log.i(TAG, "LINK_RADIO: in use ${LinkRadio.inUse}, log [${LinkRadio.history()}], scans [${l.scans}], hci [${l.hci}], link [${l.link}]")
     }.start()
+
+    /**
+     * adb debug (root only), until the app restarts: --ez small true treats this host's link as one of small radio
+     * packets (it then goes lean when it struggles); --ez always true makes every Bluetooth audio channel lean from its
+     * start, to hear what lean sounds like on any host. Without extras: what holds now.
+     */
+    private fun audioLean(intent: Intent) {
+        if (intent.hasExtra("small")) SmallPackets.forced = intent.getBooleanExtra("small", false)
+        if (intent.hasExtra("always")) LeanAudio.always = intent.getBooleanExtra("always", false)
+        Log.i(TAG, "AUDIO_LEAN: small packets ${SmallPackets.text()}, lean from the start ${LeanAudio.always}, " +
+            "internet path ready ${AudioRouter.internetReady}")
+    }
 
     /**
      * adb debug (root only). SEND_SMS sends a text as the phone would (no client needed), e.g. to a short code:
