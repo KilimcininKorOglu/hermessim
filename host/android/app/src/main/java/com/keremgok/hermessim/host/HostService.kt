@@ -112,58 +112,76 @@ class HostService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            "STATUS" -> {
-                Daemon.status()
-                val h = Hotspot.info(this)
-                val limits = Hotspot.limits(this)
-                Log.i(TAG, "hotspot: available=${h.available} on=${h.on} band=${h.band} sec=${h.security} hidden=${h.hidden} " +
-                        "idleOff=${h.idleOff}/${h.idleOffMinutes}min clients=${h.clients.size} " +
-                        "offered bands=${limits.bandsList} sec=${limits.securitiesList}")
-                Log.i(TAG, "bluetooth: advertising status ${Relay.advertisingStatus()} (0 = works), client connected ${Relay.clientConnected()}")
-            }
-            "PAIR" -> Relay.openPairing()          // adb: re-pair a (new) client within 5 min
-            "BOX" -> Box.set(intent.getBooleanExtra("on", false))   // adb debug: --ez on true|false
-            // adb debug: --ez on true|false, exactly what a SetHotspot from the iPhone does
-            "REPORT" -> Api.sendCompatReport(this) { ok, d -> Log.i(TAG, "REPORT -> ok=$ok $d") }   // adb debug: same as the button
-            // adb debug, the host's own Wi-Fi: -a WIFI --es op scan|add|forget|away [--es ssid S --es pass P | --ei id N | --ez on B]
-            "WIFI" -> when (intent.getStringExtra("op")) {
-                "scan" -> HostWifi.scan { r, why -> Log.i(TAG, "WIFI scan -> ${r?.networksList?.map { "${it.level}${if (it.secure) "*" else ""}${if (it.saved) "S" else ""}" } ?: why}") }
-                "add" -> HostWifi.add(intent.getStringExtra("ssid").orEmpty(), intent.getStringExtra("pass").orEmpty()) { code -> Log.i(TAG, "WIFI add -> $code") }
-                "forget" -> HostWifi.forget(intent.getIntExtra("id", -1)) { Log.i(TAG, "WIFI forget done") }
-                "away" -> HostWifi.setUseWhenAway(intent.getBooleanExtra("on", false), remote = false)
-                // test rig: --es state away|near|real
-                "client" -> { HostWifi.clientOverride = when (intent.getStringExtra("state")) { "away" -> false; "near" -> true; else -> null }
-                              HostWifi.evaluate("rig: client ${intent.getStringExtra("state")}") }
-                else -> Log.i(TAG, "WIFI status: ${HostWifi.status().let { "on=${it.on} rule=${it.rule} away=${it.useWhenAway} saved=${it.savedCount} connected=${it.joined.isNotEmpty()}" }} " +
-                    "hotspot=${Hotspot.isOn(this)} uplink=${HostWifi.uplinkKind()} override=${HostWifi.clientOverride}")
-            }
-            "HOTSPOT" -> switchHotspot(intent.getBooleanExtra("on", false))
-            "PAUSE_TEST" -> pauseTest(intent)
-            // adb debug: build the automatic profile even if a shipped one exists, and log it
-            // adb debug: one raw daemon command, e.g. -a DAEMON --es cmd "TUNE 2 1 240"; the answer goes to the log
-            "DAEMON" -> intent.getStringExtra("cmd")?.let { c -> Daemon.query(c) { r -> Log.i(TAG, "DAEMON $c -> $r") } }
-            // adb debug: set the remote-mode key (hex) without the iPhone, or turn remote mode off (no extra)
-            "REMOTE" -> RemoteLink.configure(intent.hasExtra("key"),
-                intent.getStringExtra("key")?.chunked(2)?.map { it.toInt(16).toByte() }?.toByteArray())
-            "AUTOPROFILE" -> Daemon.tryAutoProfile { p -> Log.i(TAG, "AUTOPROFILE -> ${p?.json?.toString() ?: "none"}") }
-            // adb debug (root only): turn a SIM's PIN lock on/off. --ei slot N --es pin PIN --ez on true|false
-            "SIM_LOCK" -> Sims.setLockEnabled(this, intent.getIntExtra("slot", -1), intent.getStringExtra("pin").orEmpty(),
-                                              intent.getBooleanExtra("on", false))
-            // adb debug: what a call's numbers would say about the Bluetooth radio now (mode in use, scans, the chip's record)
-            "LINK_RADIO" -> Thread {
-                val l = RadioLook.look()
-                Log.i(TAG, "LINK_RADIO: in use ${LinkRadio.inUse}, log [${LinkRadio.history()}], scans [${l.scans}], hci [${l.hci}], link [${l.link}]")
-            }.start()
-            // adb debug (root only): push a made-up call or text to the iPhone whatever the link. --es kind call|sms
-            "PUSH_TEST" -> Push.test(intent.getStringExtra("kind") ?: "sms")
-            // Debug (root only: this service is not exported): relay a synthetic SMS through the normal path.
-            "INJECT_SMS" -> injectSms(intent.getStringExtra("from") ?: "+905550000000",
-                                      intent.getStringExtra("body") ?: "Test")
-            "SEND_SMS", "SHORT_CODES" -> textTest(intent)
-        }
+        intent?.action?.let { a -> commands[a]?.invoke(intent) }
         return START_STICKY
     }
+
+    /** The adb commands by action (root only: this service is not exported), each given the intent with its extras. */
+    private val commands: Map<String, (Intent) -> Unit> by lazy {
+        mapOf(
+            "STATUS" to { _ -> logStatus() },
+            "PAIR" to { _ -> Relay.openPairing() },                         // re-pair a (new) client within 5 min
+            "BOX" to { i -> Box.set(i.getBooleanExtra("on", false)) },     // --ez on true|false
+            "REPORT" to { _ -> Api.sendCompatReport(this) { ok, d -> Log.i(TAG, "REPORT -> ok=$ok $d") } },   // same as the button
+            "WIFI" to { i -> wifiCommand(i) },
+            // --ez on true|false, exactly what a SetHotspot from the iPhone does
+            "HOTSPOT" to { i -> switchHotspot(i.getBooleanExtra("on", false)) },
+            "PAUSE_TEST" to { i -> pauseTest(i) },
+            // one raw daemon command, e.g. -a DAEMON --es cmd "TUNE 2 1 240"; the answer goes to the log
+            "DAEMON" to { i -> i.getStringExtra("cmd")?.let { c -> Daemon.query(c) { r -> Log.i(TAG, "DAEMON $c -> $r") } } },
+            // set the remote-mode key (hex) without the iPhone, or turn remote mode off (no extra)
+            "REMOTE" to { i -> RemoteLink.configure(i.hasExtra("key"),
+                i.getStringExtra("key")?.chunked(2)?.map { it.toInt(16).toByte() }?.toByteArray()) },
+            // build the automatic profile even if a shipped one exists, and log it
+            "AUTOPROFILE" to { _ -> Daemon.tryAutoProfile { p -> Log.i(TAG, "AUTOPROFILE -> ${p?.json?.toString() ?: "none"}") } },
+            // turn a SIM's PIN lock on/off. --ei slot N --es pin PIN --ez on true|false
+            "SIM_LOCK" to { i -> Sims.setLockEnabled(this, i.getIntExtra("slot", -1), i.getStringExtra("pin").orEmpty(),
+                i.getBooleanExtra("on", false)) },
+            "LINK_RADIO" to { _ -> linkRadio() },
+            // push a made-up call or text to the iPhone whatever the link. --es kind call|sms
+            "PUSH_TEST" to { i -> Push.test(i.getStringExtra("kind") ?: "sms") },
+            // relay a synthetic SMS through the normal path
+            "INJECT_SMS" to { i -> injectSms(i.getStringExtra("from") ?: "+905550000000", i.getStringExtra("body") ?: "Test") },
+            "SEND_SMS" to { i -> textTest(i) },
+            "SHORT_CODES" to { i -> textTest(i) },
+        )
+    }
+
+    /** adb STATUS: the daemon's state, the hotspot's and the Bluetooth advertising's, to the log. */
+    private fun logStatus() {
+        Daemon.status()
+        val h = Hotspot.info(this)
+        val limits = Hotspot.limits(this)
+        Log.i(TAG, "hotspot: available=${h.available} on=${h.on} band=${h.band} sec=${h.security} hidden=${h.hidden} " +
+                "idleOff=${h.idleOff}/${h.idleOffMinutes}min clients=${h.clients.size} " +
+                "offered bands=${limits.bandsList} sec=${limits.securitiesList}")
+        Log.i(TAG, "bluetooth: advertising status ${Relay.advertisingStatus()} (0 = works), client connected ${Relay.clientConnected()}")
+    }
+
+    /** adb debug, the host's own Wi-Fi: -a WIFI --es op scan|add|forget|away|client [--es ssid S --es pass P | --ei id N | --ez on B]. */
+    private fun wifiCommand(intent: Intent) {
+        when (intent.getStringExtra("op")) {
+            "scan" -> HostWifi.scan { r, why -> Log.i(TAG, "WIFI scan -> ${r?.networksList?.map { "${it.level}${if (it.secure) "*" else ""}${if (it.saved) "S" else ""}" } ?: why}") }
+            "add" -> HostWifi.add(intent.getStringExtra("ssid").orEmpty(), intent.getStringExtra("pass").orEmpty()) { code -> Log.i(TAG, "WIFI add -> $code") }
+            "forget" -> HostWifi.forget(intent.getIntExtra("id", -1)) { Log.i(TAG, "WIFI forget done") }
+            "away" -> HostWifi.setUseWhenAway(intent.getBooleanExtra("on", false), remote = false)
+            "client" -> wifiClientRig(intent.getStringExtra("state"))
+            else -> Log.i(TAG, "WIFI status: ${HostWifi.status().let { "on=${it.on} rule=${it.rule} away=${it.useWhenAway} saved=${it.savedCount} connected=${it.joined.isNotEmpty()}" }} " +
+                "hotspot=${Hotspot.isOn(this)} uplink=${HostWifi.uplinkKind()} override=${HostWifi.clientOverride}")
+        }
+    }
+
+    /** Test rig: --es state away|near|real, the phone's distance as the host's Wi-Fi rule sees it. */
+    private fun wifiClientRig(state: String?) {
+        HostWifi.clientOverride = when (state) { "away" -> false; "near" -> true; else -> null }
+        HostWifi.evaluate("rig: client $state")
+    }
+
+    /** adb debug: what a call's numbers would say about the Bluetooth radio now (mode in use, scans, the chip's record). */
+    private fun linkRadio() = Thread {
+        val l = RadioLook.look()
+        Log.i(TAG, "LINK_RADIO: in use ${LinkRadio.inUse}, log [${LinkRadio.history()}], scans [${l.scans}], hci [${l.hci}], link [${l.link}]")
+    }.start()
 
     /**
      * adb debug (root only). SEND_SMS sends a text as the phone would (no client needed), e.g. to a short code:
