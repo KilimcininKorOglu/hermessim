@@ -151,6 +151,16 @@ object Daemon {
     /** The encoder's expected loss in percent, from the phone's AudioReport. */
     fun loss(percent: Int) = exec.execute { request("LOSS $percent") }
 
+    /**
+     * The most Opus bytes one caller packet may take from now on, 0 = no cap again ([LeanAudio]). [done] hears whether
+     * the daemon took it, on the daemon thread. The daemon lifts a cap by itself for a new audio client, a new call and
+     * 20 ms packets.
+     */
+    fun frameMax(bytes: Int, done: (Boolean) -> Unit = {}) = exec.execute {
+        if (activeSession == 0) return@execute                             // the call is over: nothing left to cap
+        done(request("FRAME_MAX $bytes")?.startsWith("OK") == true)
+    }
+
     fun screenOff() = exec.execute { request("SCREEN_OFF") }
     fun powerKey(block: Boolean) = exec.execute { request("POWERKEY ${if (block) 1 else 0}") }
     fun netblock(uid: Int, on: Boolean) = exec.execute { request("NETBLOCK $uid ${if (on) 1 else 0}") }

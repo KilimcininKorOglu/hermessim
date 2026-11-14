@@ -17,11 +17,20 @@ import java.util.concurrent.atomic.AtomicLong
 object CallAudioCheck {
     /** One call's bridge numbers (AudioBridge, any thread). */
     data class Bridge(val sessions: Long, val framesIn: Long, val framesOut: Long, val writes: Long, val dropped: Long,
-                      val slowestMs: Long, val stalls: Long, val bytesOut: Long = 0, val blockedMs: Long = 0)
+                      val slowestMs: Long, val stalls: Long, val bytesOut: Long = 0, val blockedMs: Long = 0,
+                      val leanFromIn: Long = -1, val leanFromDropped: Long = 0) {
+        /**
+         * What going lean ([LeanAudio]) did, for a call's numbers: "no", or the frames dropped before it and after
+         * ("after 412 frames: 96 dropped before, 14 of 2600 after"). Pure (LeanAudioTest).
+         */
+        fun lean(): String = if (leanFromIn < 0) "no" else
+            "after $leanFromIn frames: $leanFromDropped dropped before, ${dropped - leanFromDropped} of ${framesIn - leanFromIn} after"
+    }
 
     private val sessions = AtomicLong(); private val framesIn = AtomicLong(); private val framesOut = AtomicLong()
     private val writes = AtomicLong(); private val dropped = AtomicLong(); private val slowest = AtomicLong(); private val stalls = AtomicLong()
     private val bytesOut = AtomicLong(); private val blockedMs = AtomicLong()
+    private val leanFromIn = AtomicLong(-1); private val leanFromDropped = AtomicLong()
     @Volatile private var internet = false
     @Volatile private var held = false
     @Volatile private var hotspotAtStart = "off"
@@ -45,8 +54,12 @@ object CallAudioCheck {
     /** A call's audio starts (CALL_START: the daemon's totals restart too). */
     fun begin(hotspot: String) {
         listOf(sessions, framesIn, framesOut, writes, dropped, slowest, stalls, bytesOut, blockedMs).forEach { it.set(0) }
+        leanFromIn.set(-1); leanFromDropped.set(0)
         internet = false; held = false; hotspotAtStart = hotspot
     }
+
+    /** The call's Bluetooth audio went lean now ([LeanAudio]); the first time counts. */
+    fun leanOn() { if (leanFromIn.compareAndSet(-1, framesIn.get())) leanFromDropped.set(dropped.get()) }
 
     fun bridgeUp() { sessions.incrementAndGet() }
     fun frameIn() { framesIn.incrementAndGet() }
@@ -63,7 +76,7 @@ object CallAudioCheck {
     fun held() { held = true }
 
     fun bridge() = Bridge(sessions.get(), framesIn.get(), framesOut.get(), writes.get(), dropped.get(), slowest.get(), stalls.get(),
-        bytesOut.get(), blockedMs.get())
+        bytesOut.get(), blockedMs.get(), leanFromIn.get(), leanFromDropped.get())
 
     /**
      * What went wrong, or null: "both", "to_phone" (caller audio lost on its way to the phone), "from_phone" (the
@@ -127,6 +140,8 @@ object CallAudioCheck {
             // How big a frame went out on average and how long writes waited for the link in all: a limit in bytes shows
             // in the first (quiet stretches would pass), one in packets doesn't (a Galaxy A13, 11 Nov 2026)
             .put("bytes_per_frame", if (b.framesOut > 0) b.bytesOut / b.framesOut else -1).put("blocked_ms", b.blockedMs)
+            // Whether the link sends in small radio packets, and what going lean for it did ([LeanAudio])
+            .put("link_small", SmallPackets.text()).put("lean", b.lean())
     }
 
     /**

@@ -7,6 +7,7 @@ import android.util.Log
 import com.keremgok.hermessim.host.AudioPathCore.Via
 import com.keremgok.hermessim.wire.AudioReport
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -36,6 +37,16 @@ object AudioRouter {
 
     /** The caller's audio goes over the internet right now (a hotspot paused for the call comes back: HotspotPause). */
     val overInternet: Boolean get() = active == Via.INTERNET
+
+    /** An internet audio path is ready for this call: the phone can move the call's audio there by itself. */
+    val internetReady: Boolean get() = senders.containsKey(Via.INTERNET)
+
+    /**
+     * Counts the moments the daemon drops a frame cap by itself ([LeanAudio]): a move to the internet (FRAME 20) and a
+     * new daemon connection. A lean Bluetooth channel that sees it change is no longer lean.
+     */
+    val capEpoch: Int get() = capDrops.get()
+    private val capDrops = AtomicInteger()
 
     /** A path is ready to carry the caller's audio with [send]. */
     fun attach(via: Via, send: (ByteArray, Int) -> Unit) {
@@ -84,7 +95,7 @@ object AudioRouter {
         now ?: return
         Log.i(TAG, "call audio to the phone over ${now.name.lowercase()}")
         Daemon.frame(if (now == Via.INTERNET) 20 else 10)
-        if (now == Via.INTERNET) CallAudioCheck.internetUsed()
+        if (now == Via.INTERNET) { capDrops.incrementAndGet(); CallAudioCheck.internetUsed() }
         HotspotPause.transportChanged("call audio over ${now.name.lowercase()}")
     }
 
@@ -95,6 +106,7 @@ object AudioRouter {
             synchronized(this) { if (senders.isEmpty()) { pump = null; Log.i(TAG, "call audio router stopped"); return } }
             val s = connect()
             if (s != null) {
+                capDrops.incrementAndGet()
                 active?.let { Daemon.frame(if (it == Via.INTERNET) 20 else 10) }
                 runCatching { forward(s, buf) }
                 synchronized(daemonLock) { if (daemon === s) daemon = null }
