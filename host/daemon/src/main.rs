@@ -281,6 +281,7 @@ mod daemon {
             b"TUNE" => cmd_tune(t),
             b"FRAME" => ok_or(crate::audio::frame(t.next().map(c_atoi).unwrap_or(0)), "ERR bad value"),
             b"LOSS" => ok_or(crate::audio::loss(t.next().map(c_atoi).unwrap_or(-1)), "ERR bad value"),
+            b"FRAME_MAX" => ok_or(crate::audio::frame_max(t.next().map(c_atoi).unwrap_or(-1)), "ERR bad value"),
             _ => return None,
         })
     }

@@ -325,6 +325,25 @@ pub fn loss_percent(percent: i32) -> Option<i32> {
     (0..=100).contains(&percent).then_some(percent)
 }
 
+/// FRAME_MAX's least cap: under 8 kbit/s a 10 ms frame of wideband speech has nothing left to say.
+pub const FRAME_MAX_LEAST: i32 = 10;
+
+/// FRAME_MAX's value: the most Opus bytes one caller packet may take, 0 = no cap, up to `most`.
+pub fn frame_max_bytes(bytes: i32, most: i32) -> Option<i32> {
+    (bytes == 0 || (FRAME_MAX_LEAST..=most).contains(&bytes)).then_some(bytes)
+}
+
+/// The encoder's bit rate, in-band FEC and expected loss for a frame cap. A cap is a bit rate too (bytes x 8 x 100
+/// frames a second); it leaves no room for FEC, and the link it is for delays frames rather than losing them. Without
+/// a cap: `bitrate` with FEC and the phone's `loss`.
+pub fn capped_encoder(cap: i32, bitrate: i32, loss: i32) -> (i32, i32, i32) {
+    if cap > 0 {
+        (cap * 800, 0, 0)
+    } else {
+        (bitrate, 1, loss)
+    }
+}
+
 /// One call's audio totals (AUDIO? and the "audio call end:" log line): the call test and the host app's
 /// end-of-call check read these keys.
 #[derive(Default)]
@@ -724,6 +743,21 @@ mod tests {
     fn frame_and_loss_take_only_their_values() {
         assert_eq!([10, 20, 15, 0].map(frame_ticks), [Some(1), Some(2), None, None]);
         assert_eq!([0, 30, 101, -1].map(loss_percent), [Some(0), Some(30), None, None]);
+    }
+
+    #[test]
+    fn frame_max_takes_no_cap_or_a_cap_a_frame_can_keep() {
+        assert_eq!(
+            [0, 10, 20, 250, 9, 251, -1].map(|b| frame_max_bytes(b, 250)),
+            [Some(0), Some(10), Some(20), Some(250), None, None, None]
+        );
+    }
+
+    #[test]
+    fn a_cap_lowers_the_bit_rate_and_drops_fec_and_lifting_it_restores_the_phones_loss() {
+        // 20 bytes every 10 ms is 16 kbit/s, under the normal 24
+        let set = [20, 0].map(|cap| capped_encoder(cap, 24000, 15));
+        assert_eq!(set, [(16000, 0, 0), (24000, 1, 15)]);
     }
 
     #[test]

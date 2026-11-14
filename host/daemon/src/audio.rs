@@ -382,6 +382,10 @@ static CALL_RUNNING: AtomicBool = AtomicBool::new(false);
 /// Set by the host app (FRAME, LOSS) when the call's audio changes path or the phone reports its loss.
 static FRAME_TICKS: AtomicI32 = AtomicI32::new(1);
 static LOSS: AtomicI32 = AtomicI32::new(LOSS_DEFAULT);
+/// The most Opus bytes one caller packet may take (FRAME_MAX), 0 = no cap: for a Bluetooth link of 27-byte radio
+/// packets that falls behind. It belongs to the audio client that asked: a new client, a new call and 20 ms packets
+/// start without it.
+static FRAME_MAX: AtomicI32 = AtomicI32::new(0);
 
 fn jb_reset() {
     lock(&JB).reset();
@@ -706,6 +710,7 @@ fn accept_client(ls: RawFd, fd: RawFd) -> Option<RawFd> {
         }
     );
     client_set(nfd);
+    FRAME_MAX.store(0, Ordering::Relaxed); // the cap was the previous client's link's
     jb_reset();
     Some(nfd)
 }
@@ -786,6 +791,7 @@ fn capture_main() {
         gathered: [0i16; 480 * 2],
         have: 0,
         loss: LOSS_DEFAULT,
+        capped: 0,
         pkt: [0u8; HDR + MAX_OPUS],
         tick: 0,
         t0: crate::platform::now_ns(libc::CLOCK_MONOTONIC),
@@ -848,6 +854,8 @@ struct Capture {
     have: usize,
     /// The expected loss the encoder has now.
     loss: i32,
+    /// The frame cap (FRAME_MAX) the encoder is set for, 0 = none.
+    capped: i32,
     pkt: [u8; HDR + MAX_OPUS],
     tick: u16,
     t0: i64,
@@ -904,13 +912,39 @@ impl Capture {
         if self.have < want {
             return;
         }
+        self.follow_cap();
         self.follow_loss();
         self.send_packet();
         self.have = 0;
     }
 
-    /// The expected loss the phone's last report asked for (LOSS), set on the encoder when it changed.
+    /// The frame cap the host app asked for (FRAME_MAX), set on the encoder when it changed: with a cap the bit rate
+    /// follows it and FEC is off; without one the normal bit rate, FEC and the phone's last loss come back.
+    fn follow_cap(&mut self) {
+        let want = FRAME_MAX.load(Ordering::Relaxed);
+        if want == self.capped {
+            return;
+        }
+        let (bitrate, fec, loss) =
+            crate::protocol::capped_encoder(want, BITRATE, LOSS.load(Ordering::Relaxed));
+        self.enc.ctl(opus::SET_BITRATE, bitrate);
+        self.enc.ctl(opus::SET_INBAND_FEC, fec);
+        self.enc.ctl(opus::SET_PACKET_LOSS_PERC, loss);
+        self.capped = want;
+        self.loss = loss;
+        if want > 0 {
+            crate::logi!("audio: caller frames capped at {} bytes", want);
+        } else {
+            crate::logi!("audio: caller frames uncapped");
+        }
+    }
+
+    /// The expected loss the phone's last report asked for (LOSS), set on the encoder when it changed. While a frame
+    /// cap holds, the report waits: its loss would turn FEC back on, and the frame would no longer fit the cap.
     fn follow_loss(&mut self) {
+        if self.capped > 0 {
+            return;
+        }
         let want = LOSS.load(Ordering::Relaxed);
         if want != self.loss {
             self.enc.ctl(opus::SET_PACKET_LOSS_PERC, want);
@@ -993,10 +1027,15 @@ impl Capture {
     /// its ticks.
     fn send_packet(&mut self) {
         let samples = self.have * self.frame as usize;
+        let room = if self.capped > 0 {
+            HDR + self.capped as usize
+        } else {
+            self.pkt.len()
+        };
         let len = self.enc.encode(
             &self.gathered[..samples],
             samples as i32,
-            &mut self.pkt[HDR..],
+            &mut self.pkt[HDR..room],
         );
         if len < 0 {
             crate::logw!("opus encode: {}", len);
@@ -1424,14 +1463,30 @@ pub fn frame(ms: i32) -> bool {
     if FRAME_TICKS.swap(ticks, Ordering::Relaxed) != ticks {
         crate::logi!("audio frame: {} ms", ms);
     }
+    if ticks == 2 {
+        FRAME_MAX.store(0, Ordering::Relaxed); // the cap is for 10 ms Bluetooth packets only
+    }
     true
 }
 
-/// LOSS: the encoder's expected loss in percent (0..100), from the phone's AudioReport.
+/// LOSS: the encoder's expected loss in percent (0..100), from the phone's AudioReport. Kept, not applied, while a
+/// FRAME_MAX cap holds.
 pub fn loss(percent: i32) -> bool {
-    crate::protocol::loss_percent(percent)
-        .map(|p| LOSS.store(p, Ordering::Relaxed))
-        .is_some()
+    store_valid(crate::protocol::loss_percent(percent), &LOSS)
+}
+
+/// FRAME_MAX: the most Opus bytes one caller packet may take, 0 = no cap, until the next audio client or call.
+/// False for a value no packet can keep.
+pub fn frame_max(bytes: i32) -> bool {
+    store_valid(
+        crate::protocol::frame_max_bytes(bytes, MAX_OPUS as i32),
+        &FRAME_MAX,
+    )
+}
+
+/// Stores a command's checked value; false when the check refused it.
+fn store_valid(value: Option<i32>, into: &AtomicI32) -> bool {
+    value.map(|v| into.store(v, Ordering::Relaxed)).is_some()
 }
 
 pub fn totals() -> String {
@@ -1479,6 +1534,7 @@ pub fn call_begin(cfg: AudioCfg) {
     }
     *lock(&CFG) = cfg;
     LOSS.store(LOSS_DEFAULT, Ordering::Relaxed); // a new call starts without the phone's report
+    FRAME_MAX.store(0, Ordering::Relaxed); // and without the last call's frame cap
     jb_reset();
     CALL_RUNNING.store(true, Ordering::Relaxed);
     let cap = std::thread::Builder::new()
