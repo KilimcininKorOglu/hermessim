@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.2.3",
+    "code": 68,
+    "en": "Some hosts send over Bluetooth only in the smallest radio packets (the host's own Bluetooth record shows it; a Galaxy A13 is one). On such a host, a call over Bluetooth could reach your phone in broken pieces when the link fell behind. When such a host sees this during a call, it now sends the caller's voice at a lower bit rate, two audio frames per Bluetooth write, while the call stays on Bluetooth. The voice is a little less crisp and arrives 10 ms later.\nOther hosts work as before: there a link that falls behind means your phone is leaving Bluetooth range, and the call moves to the internet. When the call can move to the internet, the host first waits 5 seconds for that move.",
+    "tr": "Bazı ana cihazlar Bluetooth üzerinden yalnızca en küçük radyo paketleriyle gönderir (ana cihazın kendi Bluetooth kaydında görülür; Galaxy A13 bunlardan biridir). Böyle bir ana cihazda bağlantı geride kaldığında Bluetooth üzerindeki arama telefonunuza kesik kesik ulaşabiliyordu. Böyle bir ana cihaz arama sırasında bunu görürse artık arama Bluetooth'ta kaldığı sürece arayanın sesini daha düşük bit hızında ve her Bluetooth yazmasında iki ses karesiyle gönderir. Ses biraz daha az net olur ve 10 ms daha geç gelir.\nDiğer ana cihazlar eskisi gibi çalışır: onlarda geride kalan bağlantı, telefonunuzun Bluetooth menzilinden çıktığı anlamına gelir ve arama internete geçer. Arama internete geçebiliyorsa ana cihaz önce bu geçiş için 5 saniye bekler."
+  },
+  {
     "version": "1.2.2",
     "code": 67,
     "en": "Internet mode uses less battery: while your phone is connected over Bluetooth, the host leaves the HermesSIM server, so its mobile data no longer wakes up every few seconds. It goes back the moment your phone leaves Bluetooth range.",

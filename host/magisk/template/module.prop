@@ -1,6 +1,6 @@
 id=hermessim-host
 name=HermesSIM Host
-version=1.2.2
-versionCode=67
+version=1.2.3
+versionCode=68
 author=HermesSIM
 description=Turns this phone into a HermesSIM host: its SIM's calls, texts and data reach your phone (iPhone or Android). Silent; starts by itself after a restart.
