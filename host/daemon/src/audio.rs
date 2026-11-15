@@ -383,8 +383,8 @@ static CALL_RUNNING: AtomicBool = AtomicBool::new(false);
 static FRAME_TICKS: AtomicI32 = AtomicI32::new(1);
 static LOSS: AtomicI32 = AtomicI32::new(LOSS_DEFAULT);
 /// The most Opus bytes one caller packet may take (FRAME_MAX), 0 = no cap: for a Bluetooth link of 27-byte radio
-/// packets that falls behind. It belongs to the audio client that asked: a new client, a new call and 20 ms packets
-/// start without it.
+/// packets. It belongs to the audio client that asked, whose link it is for: a new client and 20 ms packets start
+/// without it. A call's start leaves it alone, so a second call on the same client keeps it.
 static FRAME_MAX: AtomicI32 = AtomicI32::new(0);
 
 fn jb_reset() {
@@ -1475,7 +1475,7 @@ pub fn loss(percent: i32) -> bool {
     store_valid(crate::protocol::loss_percent(percent), &LOSS)
 }
 
-/// FRAME_MAX: the most Opus bytes one caller packet may take, 0 = no cap, until the next audio client or call.
+/// FRAME_MAX: the most Opus bytes one caller packet may take, 0 = no cap, until the next audio client.
 /// False for a value no packet can keep.
 pub fn frame_max(bytes: i32) -> bool {
     store_valid(
@@ -1534,7 +1534,6 @@ pub fn call_begin(cfg: AudioCfg) {
     }
     *lock(&CFG) = cfg;
     LOSS.store(LOSS_DEFAULT, Ordering::Relaxed); // a new call starts without the phone's report
-    FRAME_MAX.store(0, Ordering::Relaxed); // and without the last call's frame cap
     jb_reset();
     CALL_RUNNING.store(true, Ordering::Relaxed);
     let cap = std::thread::Builder::new()
