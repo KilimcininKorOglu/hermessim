@@ -38,9 +38,6 @@ object AudioRouter {
     /** The caller's audio goes over the internet right now (a hotspot paused for the call comes back: HotspotPause). */
     val overInternet: Boolean get() = active == Via.INTERNET
 
-    /** An internet audio path is ready for this call: the phone can move the call's audio there by itself. */
-    val internetReady: Boolean get() = senders.containsKey(Via.INTERNET)
-
     /**
      * Counts the moments the daemon drops a frame cap by itself ([LeanAudio]): a move to the internet (FRAME 20) and a
      * new daemon connection. A lean Bluetooth channel that sees it change is no longer lean.

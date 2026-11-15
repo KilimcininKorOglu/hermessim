@@ -10,13 +10,15 @@ package com.keremgok.hermessim.host
  * in two radio packets: each frame capped at [FRAME] Opus bytes by the daemon (FRAME_MAX, 16 kbit/s, still wideband),
  * two of them a write ([WRITE] bytes), 50 writes a second.
  *
- * This is for that kind of link only, and only when it struggles:
- *  - the chip's record must have shown the small packets ([SmallPackets]). On every other host a link that
- *    stops taking audio means the phone is leaving Bluetooth range, and nothing here runs;
- *  - the internet goes first. With an internet audio path ready for the call, the phone moves a fading call there by
- *    itself within seconds; the host then waits [PATIENCE_S] of trouble before it goes lean.
+ * This is for that kind of link only: the chip's record must have shown the small packets ([SmallPackets]), and on every
+ * other host nothing here runs. On such a host a Bluetooth audio channel is lean from its first frame. Waiting for the
+ * link to fall behind (frames dropped from the bridge's backlog) came far too late: Android's Bluetooth takes about 500
+ * frames into its own queue before a write ever blocks, so the host saw nothing for the first 12 s of a call while the
+ * phone got 58 frames of 100 a second, and the queued audio then had to drain before lean helped (14 Nov 2026).
+ *
  * Lean lasts while the call's audio stays on that Bluetooth channel: a move to the internet or a new daemon connection
- * ends it (the daemon lifts the cap then), and the next call starts normal.
+ * ends it (the daemon lifts the cap then), and the channel asks again when the audio comes back to it. The phone's own
+ * rule still moves a fading call to the internet, lean or not.
  */
 object LeanAudio {
     /** A frame's Opus bytes when lean. */
@@ -25,13 +27,6 @@ object LeanAudio {
     const val WRITE = 2 * (2 + 2 + FRAME)
     /** How long a write waits for its second frame (one comes every 10 ms; a hold must not keep a frame back). */
     const val PAIR_WAIT_MS = 15L
-
-    /** A second in which this many frames fell out of the bridge's backlog is a troubled one (50 ms of the caller gone). */
-    const val TROUBLED = 5
-    /** Trouble is two troubled seconds within this many. */
-    const val WINDOW_S = 6
-    /** With an internet path ready: how long the trouble must have lasted, the phone's move to the internet coming first. */
-    const val PATIENCE_S = 5
     /** L2CAP's header (4 bytes) and SDU length (2) in front of every write. */
     const val L2CAP_HEADER = 6
 
@@ -40,34 +35,13 @@ object LeanAudio {
         check(WRITE + L2CAP_HEADER <= 2 * HciRing.SMALLEST)
     }
 
-    /** adb debug (AUDIO_LEAN --ez always true): every Bluetooth audio channel goes lean from its start, on any host. */
+    /** adb debug (AUDIO_LEAN --ez always true): every Bluetooth audio channel is lean, on any host. */
     @Volatile var always = false
 
-    /** Why a channel goes lean now, or null: [troubled] is [Watch]'s verdict, [small] the link's packets. Pure. */
-    fun why(troubled: Boolean, small: Boolean): String? = when {
-        always -> "lean from the start (debug)"
-        troubled && small -> "this link sends in small radio packets and isn't keeping up"
+    /** Why a Bluetooth audio channel is lean, for the log; null: it is not. [small]: [SmallPackets.small]. Pure. */
+    fun why(small: Boolean, always: Boolean = this.always): String? = when {
+        always -> "lean on every host (debug)"
+        small -> "this host's Bluetooth sends in small radio packets"
         else -> null
-    }
-
-    /**
-     * When a Bluetooth audio channel goes lean: fed once a second with the frames dropped in it, true once trouble holds.
-     * `patient`: an internet audio path is ready, so the phone's own move comes first. Pure (LeanAudioTest).
-     */
-    class Watch {
-        private val recent = ArrayDeque<Boolean>()
-        private var second = 0
-        private var since = -1                       // the second this trouble began; -1 when the window is clear
-
-        fun second(dropped: Int, patient: Boolean): Boolean {
-            second++
-            val troubled = dropped >= TROUBLED
-            recent.addLast(troubled)
-            if (recent.size > WINDOW_S) recent.removeFirst()
-            if (recent.none { it }) since = -1
-            if (!troubled) return false
-            if (since < 0) since = second
-            return recent.count { it } >= 2 && (!patient || second - since >= PATIENCE_S)
-        }
     }
 }

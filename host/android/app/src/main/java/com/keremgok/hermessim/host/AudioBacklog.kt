@@ -77,38 +77,36 @@ internal class AudioBacklog {
 }
 
 /**
- * Asks the daemon for lean frames once a Bluetooth channel's link needs them ([LeanAudio]); fed every caller frame on the
- * router thread. When the daemon drops the cap by itself ([AudioRouter.capEpoch]: the call moved to the internet, or a
- * new daemon connection), the channel is no longer lean, and new trouble asks again.
+ * Asks the daemon for lean frames on a Bluetooth channel whose host sends in small radio packets ([LeanAudio]); fed every
+ * caller frame on the router thread. It asks at the first frame (the daemon has its audio client by then), then once a
+ * second until it has asked: the host may learn what its link is during a call. When the daemon drops the cap by itself
+ * ([AudioRouter.capEpoch]: the call moved to the internet, or a new daemon connection), the channel is no longer lean,
+ * and its next frame asks again.
  */
 internal class LeanAsk(private val backlog: AudioBacklog, private val alive: AtomicBoolean) {
     private companion object {
         const val TAG = "HermesSimHost"
+        const val LOOK_MS = 1000L
     }
 
-    private var watch = LeanAudio.Watch()
-    private var secondFrom = SystemClock.elapsedRealtime()
-    private var dropped = 0
+    private var lookedAt = 0L
     private var epoch = AudioRouter.capEpoch
     private var pending = false
 
     /** The daemon was asked on this channel: the cap is lifted when the channel ends. */
     @Volatile var asked = false; private set
 
-    fun frame(drop: Boolean, now: Long) {
+    fun frame(now: Long) {
         if (AudioRouter.capEpoch != epoch) restart()
-        if (drop) dropped++
-        if (now - secondFrom < 1000) return
-        val troubled = watch.second(dropped, AudioRouter.internetReady)
-        secondFrom = now; dropped = 0
-        if (pending) return
-        LeanAudio.why(troubled, SmallPackets.small)?.let(::ask)
+        if (pending || now - lookedAt < LOOK_MS) return
+        lookedAt = now
+        LeanAudio.why(SmallPackets.small)?.let(::ask)
     }
 
     private fun restart() {
         epoch = AudioRouter.capEpoch
         if (pending) Log.i(TAG, "audio to the phone: the daemon dropped the frame cap, no longer lean")
-        backlog.lean = false; pending = false; watch = LeanAudio.Watch()
+        backlog.lean = false; pending = false; lookedAt = 0L
     }
 
     private fun ask(why: String) {

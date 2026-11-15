@@ -153,11 +153,11 @@ object Daemon {
 
     /**
      * The most Opus bytes one caller packet may take from now on, 0 = no cap again ([LeanAudio]). [done] hears whether
-     * the daemon took it, on the daemon thread. The daemon lifts a cap by itself for a new audio client, a new call and
-     * 20 ms packets.
+     * the daemon took it, on the daemon thread. The daemon lifts a cap by itself for a new audio client and 20 ms
+     * packets; a new call keeps it, so lifting it (0) goes out after the call too.
      */
     fun frameMax(bytes: Int, done: (Boolean) -> Unit = {}) = exec.execute {
-        if (activeSession == 0) return@execute                             // the call is over: nothing left to cap
+        if (bytes != 0 && activeSession == 0) return@execute               // the call is over: nothing left to cap
         done(request("FRAME_MAX $bytes")?.startsWith("OK") == true)
     }
 

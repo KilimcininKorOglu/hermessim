@@ -186,14 +186,13 @@ class HostService : Service() {
 
     /**
      * adb debug (root only), until the app restarts: --ez small true treats this host's link as one of small radio
-     * packets (it then goes lean when it struggles); --ez always true makes every Bluetooth audio channel lean from its
-     * start, to hear what lean sounds like on any host. Without extras: what holds now.
+     * packets (its Bluetooth call audio is then lean); --ez always true makes every Bluetooth audio channel lean, to
+     * hear what lean sounds like on any host. Without extras: what holds now.
      */
     private fun audioLean(intent: Intent) {
         if (intent.hasExtra("small")) SmallPackets.forced = intent.getBooleanExtra("small", false)
         if (intent.hasExtra("always")) LeanAudio.always = intent.getBooleanExtra("always", false)
-        Log.i(TAG, "AUDIO_LEAN: small packets ${SmallPackets.text()}, lean from the start ${LeanAudio.always}, " +
-            "internet path ready ${AudioRouter.internetReady}")
+        Log.i(TAG, "AUDIO_LEAN: small packets ${SmallPackets.text()}, lean on every host ${LeanAudio.always}")
     }
 
     /**

@@ -100,7 +100,7 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
             AudioPacket.frame(packet, n, framed, 0)
             val dropped = backlog.add(framed)
             val now = SystemClock.elapsedRealtime()
-            lean.frame(dropped, now)
+            lean.frame(now)
             if (!dropped) return@attach
             AudioRouter.droppedSent.incrementAndGet()
             // A write that never returns logs nothing itself: say so from here, with what the radios were doing (a
