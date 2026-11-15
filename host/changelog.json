@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.2.4",
+    "code": 69,
+    "en": "A host whose Bluetooth sends only in the smallest radio packets (a Galaxy A13 is one) now sends the caller's voice at the lower bit rate from the first moment of a call's Bluetooth audio. 1.2.3 waited until it saw the link fall behind. That sign came too late: Android's Bluetooth holds several seconds of audio in its own queue before the host can notice, so a call came through in broken pieces for about 20 seconds and then arrived late.\nThis still happens only on hosts whose Bluetooth record shows the small packets. Other hosts work as before. A call whose Bluetooth fades still moves to the internet when it can.",
+    "tr": "Bluetooth'u yalnızca en küçük radyo paketleriyle gönderen ana cihazlar (Galaxy A13 bunlardan biridir) artık arayanın sesini, aramanın Bluetooth sesinin ilk anından başlayarak düşük bit hızında gönderir. 1.2.3, bağlantının geride kaldığını görene kadar bekliyordu. Bu işaret çok geç geliyordu: Android'in Bluetooth'u, ana cihaz fark etmeden önce birkaç saniyelik sesi kendi kuyruğunda tutuyor. Bu yüzden arama yaklaşık 20 saniye kesik kesik geliyor, sonra da gecikmeyle ulaşıyordu.\nBu yine yalnızca Bluetooth kaydı küçük paketleri gösteren ana cihazlarda olur. Diğer ana cihazlar eskisi gibi çalışır. Bluetooth'u zayıflayan bir arama, mümkün olduğunda yine internete geçer."
+  },
+  {
     "version": "1.2.3",
     "code": 68,
     "en": "Some hosts send over Bluetooth only in the smallest radio packets (the host's own Bluetooth record shows it; a Galaxy A13 is one). On such a host, a call over Bluetooth could reach your phone in broken pieces when the link fell behind. When such a host sees this during a call, it now sends the caller's voice at a lower bit rate, two audio frames per Bluetooth write, while the call stays on Bluetooth. The voice is a little less crisp and arrives 10 ms later.\nOther hosts work as before: there a link that falls behind means your phone is leaving Bluetooth range, and the call moves to the internet. When the call can move to the internet, the host first waits 5 seconds for that move.",
