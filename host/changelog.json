@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.2.7",
+    "code": 72,
+    "en": "The host screen has been redesigned and its English and Turkish texts rewritten. Buttons you can't use yet look clearly disabled in light and dark mode. The battery care slider and the diagnostics switch use the app's green. The fix card lists each problem as a separate line. While HermesSIM is being removed, a progress indicator is shown.\nWhen you rename the host's Bluetooth name, the screen shows how many characters you have left as you type. If the name is too long, Save turns off.\nThe screen no longer turns grey when a keyboard or remote control is used.\nWhen the paired phone's model is unknown, the screen names it in its own language instead of in English.\nPermission checks were tightened so that a missing permission can no longer stop the host. Pairing no longer uses a feature that Android 11 and 12 don't have.",
+    "tr": "Ana cihaz ekranı yeniden tasarlandı ve ekrandaki İngilizce ve Türkçe metinler baştan yazıldı. Henüz kullanılamayan düğmeler artık açık ve koyu modda belirgin şekilde devre dışı görünür. Pil koruması kaydırıcısı ve tanılama anahtarı uygulamanın yeşil rengini kullanır. Düzeltme kartında her sorun ayrı bir satırda gösterilir. HermesSIM kaldırılırken bir ilerleme göstergesi görünür.\nAna cihazın Bluetooth adını değiştirirken kaç karakter hakkınız kaldığı siz yazdıkça gösterilir. Ad çok uzunsa Kaydet düğmesi kapanır.\nKlavye veya uzaktan kumanda kullanıldığında ekran artık griye dönmez.\nEşleştirilmiş telefonun modeli bilinmiyorsa ekranda İngilizce bir ad yerine ekranın dilinde bir ad gösterilir.\nİzin kontrolleri sıkılaştırıldı. Böylece eksik bir izin artık ana cihazın durmasına yol açmaz. Eşleştirme artık Android 11 ve 12'de bulunmayan bir özelliği kullanmaz."
+  },
+  {
     "version": "1.2.6",
     "code": 71,
     "en": "The pairing code now appears in its own centred box on the host screen, in large digits, with the time left shown below it.\nWhen you opened the host screen, the background service could briefly show in red as not running, even though it was running. It now shows as running from the start. While the check is still in progress, it says Starting… instead of Not running.",
