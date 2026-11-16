@@ -41,17 +41,21 @@ import java.util.concurrent.Executors
  * while visible, derives one [Model] and redraws only when it changes (no flicker, TalkBack focus kept).
  */
 class SetupActivity : Activity() {
-    private enum class Mark(val glyph: String) { OK("✓"), WARN("!"), FAIL("✗"), WAIT("…") }
-    private data class Check(val title: String, val mark: Mark, val detail: String)
-    private enum class Act { CHECK_ROOT, INSTALL, RESTART, REINSTALL, DEV_OPTIONS, MAGISK_GUIDE, FIX, OPEN_PAIRING, PAIR_OTHER, LOCK_SETTINGS,
+    // Internal, not private: the debug build's SetupDemo builds every state from them.
+    internal enum class Mark(val glyph: String) { OK("✓"), WARN("!"), FAIL("✗"), WAIT("…") }
+    internal data class Check(val title: String, val mark: Mark, val detail: String)
+    internal enum class Act { CHECK_ROOT, INSTALL, RESTART, REINSTALL, DEV_OPTIONS, MAGISK_GUIDE, FIX, OPEN_PAIRING, PAIR_OTHER, LOCK_SETTINGS,
         OPEN_MAGISK, RETIRE, RETIRE_DISMISS }
-    private data class Btn(val label: String, val act: Act?, val enabled: Boolean = true)
-    private data class Card(val title: String, val body: String, val mark: Mark, val primary: Btn? = null, val secondary: Btn? = null,
-                            val countdown: Boolean = false)
+    internal data class Btn(val label: String, val act: Act?, val enabled: Boolean = true)
+    internal data class Card(val title: String, val body: String, val mark: Mark, val primary: Btn? = null, val secondary: Btn? = null,
+                             val countdown: Boolean = false)
     // [report]: part of the model so its progress redraws the screen, also after a rotation
     // [btName]: the host's Bluetooth name (null before root), so a rename redraws its card
-    private data class Model(val subtitle: String, val step: Int, val steps: Int, val card: Card, val checks: List<Check>,
-                             val report: Diag.Report = Diag.report, val btName: String? = null)
+    internal data class Model(val subtitle: String, val step: Int, val steps: Int, val card: Card, val checks: List<Check>,
+                              val report: Diag.Report = Diag.report, val btName: String? = null)
+
+    /** A fixed state from the debug build's SetupDemo (`--es demo <state>`); always null in a release build. */
+    private val demo: String? by lazy { SetupDemo.key(intent) }
 
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "setup-facts").apply { isDaemon = true } }
@@ -89,7 +93,8 @@ class SetupActivity : Activity() {
         window.statusBarColor = c.bg
         window.navigationBarColor = c.bg
         root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(28), dp(20), dp(28)) }
-        setContentView(ScrollView(this).apply { setBackgroundColor(c.bg); addView(root) })
+        // No focus highlight on the scroller itself: with a keyboard it greyed the whole screen (the buttons keep theirs)
+        setContentView(ScrollView(this).apply { setBackgroundColor(c.bg); defaultFocusHighlightEnabled = false; addView(root) })
         // after setContentView: the window has no decor (and no insets controller) before it
         val light = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_YES
         window.insetsController?.setSystemBarsAppearance(
@@ -140,6 +145,7 @@ class SetupActivity : Activity() {
     // ------------------------------------------------------------------ the journey
 
     private fun model(): Model {
+        demo?.let { SetupDemo.model(this, it) }?.let { return it }
         if (host && Retire.givenBack(this)) return givenBackModel()
         val m = if (host) hostModel().copy(btName = btName(getSystemService(BluetoothManager::class.java).adapter)) else setupModel()
         if (Retire.failed == 0) return m
@@ -160,7 +166,7 @@ class SetupActivity : Activity() {
     }
 
     /** Strings that name the root manager and its menus: Magisk, APatch or KernelSU ([Compat.rootKind]). */
-    private fun rs(id: Int): String = Compat.rootKind(this).let { k -> getString(id, k.label, getString(k.modulesTab)) }
+    internal fun rs(id: Int): String = Compat.rootKind(this).let { k -> getString(id, k.label, getString(k.modulesTab)) }
 
     /** The root manager's own app, when it can be opened (a hidden Magisk has another package name). */
     private fun magiskIntent(): Intent? = Compat.rootManagerIntent(this)
@@ -302,8 +308,8 @@ class SetupActivity : Activity() {
             privMissing.isNotEmpty() -> at(5, Card(getString(R.string.fix_title), getString(R.string.fix_privileged, names(privMissing)), Mark.FAIL,
                 Btn(getString(R.string.btn_reinstall), Act.REINSTALL), Btn(getString(R.string.btn_restart), Act.RESTART)))
             !permsOk || !btOn -> at(5, Card(getString(R.string.fix_title),
-                (problems(runtimeMissing, sms, dialer, battery, silent, btOn) +
-                    rs(if (Onboarding.fixRootRefused) R.string.fix_root_refused else R.string.fix_hint)).joinToString("\n"), Mark.WARN,
+                fixBody(problems(runtimeMissing, sms, dialer, battery, silent, btOn),
+                    rs(if (Onboarding.fixRootRefused) R.string.fix_root_refused else R.string.fix_hint)), Mark.WARN,
                 Btn(getString(if (fixing) R.string.btn_fixing else R.string.btn_fix), if (fixing) null else Act.FIX, !fixing)))
             // Unpaired: ready for the first iPhone, nothing to open.
             locked -> at(5, Card(getString(R.string.lock_title), getString(R.string.lock_body), Mark.WARN,
@@ -333,7 +339,7 @@ class SetupActivity : Activity() {
         }
     }
 
-    private fun cant(why: String) = Card(getString(R.string.cant_title), "$why\n\n${getString(R.string.cant_alt)}", Mark.FAIL)
+    internal fun cant(why: String) =Card(getString(R.string.cant_title), "$why\n\n${getString(R.string.cant_alt)}", Mark.FAIL)
 
     /** The background service row: still being checked reads as starting, never as not running. */
     private fun serviceCheck(v: DaemonHealth.Verdict): Check {
@@ -383,7 +389,7 @@ class SetupActivity : Activity() {
         return Card(getString(R.string.inactive_title), why, Mark.FAIL, primary, secondary)
     }
 
-    private fun problems(runtime: List<String>, sms: Boolean, dialer: Boolean, battery: Boolean, silent: Boolean, bt: Boolean) = listOfNotNull(
+    internal fun problems(runtime: List<String>, sms: Boolean, dialer: Boolean, battery: Boolean, silent: Boolean, bt: Boolean) = listOfNotNull(
         if (!bt) getString(R.string.fix_bluetooth) else null,
         if (runtime.isNotEmpty()) getString(R.string.fix_permissions, names(runtime)) else null,
         if (!sms) getString(R.string.fix_sms) else null,
@@ -392,8 +398,26 @@ class SetupActivity : Activity() {
         if (!silent) getString(R.string.fix_silence) else null,
     )
 
+    /** One bullet per problem, then what Fix now does as its own paragraph (it read as one more problem). */
+    internal fun fixBody(problems: List<String>, hint: String) = problems.joinToString("\n") { "$BULLET$it" } + "\n\n" + hint
+
+    /** [body] with each bullet line's wrapped lines indented under its text, not under the bullet. */
+    private fun hangingBullets(body: String, indent: Int): CharSequence {
+        if (BULLET !in body) return body
+        val out = android.text.SpannableString(body)
+        var start = 0
+        for (line in body.split('\n')) {
+            if (line.startsWith(BULLET)) {
+                out.setSpan(android.text.style.LeadingMarginSpan.Standard(0, indent), start, start + line.length,
+                    android.text.Spanned.SPAN_INCLUSIVE_EXCLUSIVE)
+            }
+            start += line.length + 1
+        }
+        return out
+    }
+
     /** What a missing permission is for, in words (not "READ_PHONE_STATE"). */
-    private fun names(perms: List<String>) = perms.map {
+    internal fun names(perms: List<String>) = perms.map {
         when (it.substringAfterLast('.')) {
             "READ_PHONE_STATE", "CALL_PHONE" -> R.string.perm_phone
             "RECEIVE_SMS", "SEND_SMS", "READ_SMS" -> R.string.perm_sms
@@ -439,7 +463,7 @@ class SetupActivity : Activity() {
         Onboarding.Root.DENIED -> R.string.root_denied; Onboarding.Root.UNKNOWN -> R.string.root_unknown
     })
 
-    private fun simLine(s: SimLine) = getString(R.string.sim_line, s.slot + 1, when {
+    internal fun simLine(s: SimLine) = getString(R.string.sim_line, s.slot + 1, when {
         s.lock == LineLock.LINE_LOCK_PIN -> getString(R.string.sim_pin)
         s.lock == LineLock.LINE_LOCK_PUK -> getString(R.string.sim_puk)
         s.lock == LineLock.LINE_LOCK_DEAD -> getString(R.string.sim_perm_disabled)
@@ -503,18 +527,26 @@ class SetupActivity : Activity() {
 
     // ------------------------------------------------------------------ views
 
-    private companion object { const val CHARGE_STEP = 5 }   // the charge limit moves in steps of 5 (as in the clients)
+    private companion object {
+        const val CHARGE_STEP = 5   // the charge limit moves in steps of 5 (as in the clients)
+        const val BULLET = "•  "    // starts each problem line of the fix card
+    }
 
     /** Battery-care control on the host itself; the client app has the same target slider. */
     private fun batteryCareCard(): View {
         val card = batteryCare ?: LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = rounded(c.card, 16)
-            setPadding(dp(16), dp(14), dp(16), dp(10))
-            addView(text(getString(R.string.battery_care), 18f, c.text, bold = true))
+            setPadding(dp(18), dp(14), dp(18), dp(14))      // as the other cards below the checks
+            addView(text(getString(R.string.battery_care), 15f, c.text, bold = true))
             batteryTarget = text("", 15f, c.accent, bold = true).apply { setPadding(0, dp(4), 0, 0) }
             addView(batteryTarget)
             batterySeek = SeekBar(this@SetupActivity).apply {
+                // The app's green, not the system's blue; no side padding, so the track lines up with the text
+                progressTintList = ColorStateList.valueOf(c.accent)
+                thumbTintList = ColorStateList.valueOf(c.accent)
+                progressBackgroundTintList = ColorStateList.valueOf(c.track)
+                setPadding(0, dp(10), 0, dp(10))
                 max = (100 - 50) / CHARGE_STEP                 // 50..100 in steps of 5: 100 turns the limit off
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(seek: SeekBar, progress: Int, fromUser: Boolean) {
@@ -546,13 +578,15 @@ class SetupActivity : Activity() {
 
     private fun show(m: Model) {
         if (Retire.running) { showRetire(); return }    // the removal's own progress screen, also after a rotation
+        SetupDemo.retireStep(demo)?.let { showRetire(it); return }
         retireStatus = null
         if (m != shown) {
             shown = m
             root.removeAllViews()
             root.addView(text(getString(R.string.app_name), 28f, c.text, bold = true))
             root.addView(text(m.subtitle, 15f, c.secondary).apply { setPadding(0, dp(2), 0, dp(14)) })
-            if (m.steps > 0) root.addView(progress(m.step, m.steps))
+            // No bar before the first step (a phone that can't be a host): an empty bar with no label says nothing
+            if (m.steps > 0 && m.step > 0) root.addView(progress(m.step, m.steps))
             root.addView(card(m.card))
             if (m.checks.isNotEmpty()) {
                 root.addView(text(getString(R.string.checks_title), 13f, c.secondary, bold = true).apply { setPadding(dp(4), dp(22), 0, dp(6)) })
@@ -563,12 +597,13 @@ class SetupActivity : Activity() {
                     m.checks.forEach { addView(row(it)) }
                 })
             }
-            if (host && Box.chargeSupported) root.addView(batteryCareCard(), lp(top = 14))
+            if ((host && Box.chargeSupported) || SetupDemo.isHost(demo)) root.addView(batteryCareCard(), lp(top = 14))
             m.btName?.let { root.addView(btNameCard(it), lp(top = 14)) }
             root.addView(diagnostics(), lp(top = 14))
             // Whenever root works, a broken host too (module turned off, service down): it must be removable. Not once
             // the removal ran: only its restart is left.
-            if ((host || Onboarding.root == Onboarding.Root.OK) && !Retire.givenBack(this)) root.addView(retireCard(), lp(top = 14))
+            if ((host || SetupDemo.isHost(demo) || Onboarding.root == Onboarding.Root.OK) && !Retire.givenBack(this))
+                root.addView(retireCard(), lp(top = 14))
             root.addView(text(getString(R.string.host_version, BuildConfigInfo.version(this)), 12f, c.secondary).apply { setPadding(dp(4), dp(16), 0, 0) })
         }
         updateCountdown()
@@ -577,7 +612,7 @@ class SetupActivity : Activity() {
     private fun progress(step: Int, steps: Int) = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(4), 0, 0, dp(10))
-        if (step > 0) addView(text(getString(R.string.progress, step, steps), 13f, c.secondary))
+        addView(text(getString(R.string.progress, step, steps), 13f, c.secondary))
         addView(LinearLayout(this@SetupActivity).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, dp(6), 0, 0)
@@ -599,7 +634,10 @@ class SetupActivity : Activity() {
             addView(badge(k.mark, 30).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES; contentDescription = markName(k.mark) })
             addView(text(k.title, 20f, c.text, bold = true).apply { setPadding(dp(12), 0, 0, 0); isFocusable = true })
         })
-        addView(text(k.body, 15.5f, c.text).apply { setPadding(0, dp(12), 0, 0); setLineSpacing(0f, 1.15f) })
+        addView(text(k.body, 15.5f, c.text).apply {
+            setPadding(0, dp(12), 0, 0); setLineSpacing(0f, 1.15f)
+            text = hangingBullets(k.body, paint.measureText(BULLET).toInt())
+        })
         if (k.countdown) addView(pairingBlock(), lp(top = 16)) else { countdown = null; pairCode = null; pairLabel = null }
         k.primary?.let { addView(button(it, primary = true), lp(top = 16)) }
         k.secondary?.let { addView(button(it, primary = false), lp(top = 8)) }
@@ -623,11 +661,12 @@ class SetupActivity : Activity() {
 
     private fun updateCountdown() {
         val t = countdown ?: return
-        val left = Relay.pairingSecondsLeft()
+        val shownDemo = SetupDemo.pairing(demo)
+        val left = shownDemo?.second ?: Relay.pairingSecondsLeft()
         // With TalkBack on, whole minutes: a live region that changes every 2 s would talk over everything else
         val spoken = getSystemService(android.view.accessibility.AccessibilityManager::class.java)?.isTouchExplorationEnabled == true
         // The code is on this screen only: a phone pairs by typing it. Without a paired phone it stays until one pairs.
-        val code = Relay.pairingCode()
+        val code = if (shownDemo != null) shownDemo.first else Relay.pairingCode()
         val open = when {
             code == null -> getString(R.string.pair_closed)
             left > 0 && spoken -> getString(R.string.pair_open_minutes, (left + 59) / 60)
@@ -670,6 +709,10 @@ class SetupActivity : Activity() {
         addView(Switch(this@SetupActivity).apply {
             text = getString(R.string.diag_switch); setTextColor(c.text); setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f)
             isChecked = Diag.enabled
+            // The app's green when on, a visible grey track when off (the system's blue track faded into the card)
+            val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
+            thumbTintList = ColorStateList(states, intArrayOf(c.accent, c.secondary))
+            trackTintList = ColorStateList(states, intArrayOf(Color.argb(110, Color.red(c.accent), Color.green(c.accent), Color.blue(c.accent)), c.track))
             setOnCheckedChangeListener { _, on -> Diag.enabled = on }
         }, lp(top = 6))
         addView(text(getString(R.string.diag_note), 12.5f, c.secondary).apply { setPadding(0, dp(4), 0, 0) })
@@ -697,7 +740,7 @@ class SetupActivity : Activity() {
         setPadding(dp(18), dp(14), dp(18), dp(14))
         addView(text(getString(R.string.bt_name_title), 15f, c.text, bold = true))
         addView(text(name, 15f, c.accent, bold = true).apply { setPadding(0, dp(4), 0, 0) })
-        addView(text(getString(R.string.bt_name_note, BtName.MAX_BYTES), 12.5f, c.secondary).apply { setPadding(0, dp(4), 0, 0) })
+        addView(text(getString(R.string.bt_name_note), 12.5f, c.secondary).apply { setPadding(0, dp(4), 0, 0) })
         addView(button(Btn(getString(R.string.bt_name_btn), null), primary = false).apply {
             setOnClickListener { unlocked { renameBluetooth() } }
         }, lp(top = 10))
@@ -707,19 +750,46 @@ class SetupActivity : Activity() {
     private fun renameBluetooth() {
         val bt = getSystemService(BluetoothManager::class.java).adapter ?: return
         val field = android.widget.EditText(this).apply { setText(btName(bt)); setSingleLine(); selectAll() }
-        val frame = android.widget.FrameLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(field) }
+        val counter = android.widget.TextView(this).apply { textSize = 13f; setPadding(dp(4), dp(4), 0, 0) }
+        val frame = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+            addView(field)
+            addView(counter)
+        }
         val dialog = AlertDialog.Builder(this).setTitle(R.string.bt_name_title).setView(frame)
             .setPositiveButton(R.string.btn_save, null).setNegativeButton(R.string.btn_cancel, null).show()
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            val error = applyBtName(bt, BtName.check(field.text.toString()))
+        val save = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+        // Updated on every keystroke: how many characters still fit, or how many are too many
+        val count = {
+            val left = BtName.left(field.text.toString())
+            counter.text = btNameLeftText(left)
+            counter.setTextColor(if (left < 0) c.fail else c.secondary)
+            save.isEnabled = left >= 0
+        }
+        field.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, n: Int) = Unit
+            override fun afterTextChanged(s: android.text.Editable?) = count()
+        })
+        count()
+        save.setOnClickListener {
+            val error = applyBtName(bt, field.text.toString())
             if (error == null) { dialog.dismiss(); shown = null; tick.run() } else field.error = error
         }
     }
 
+    /** The counter under the name field, in characters (nobody counts bytes). */
+    private fun btNameLeftText(left: Int): String = when {
+        left > 0 -> resources.getQuantityString(R.plurals.bt_name_left, left, left)
+        left == 0 -> getString(R.string.bt_name_full)
+        else -> resources.getQuantityString(R.plurals.bt_name_over, -left, -left)
+    }
+
     /** Sets a valid name; returns why it was not set, or null once Android took it. */
-    private fun applyBtName(bt: android.bluetooth.BluetoothAdapter, check: BtName.Check): String? = when (check) {
+    private fun applyBtName(bt: android.bluetooth.BluetoothAdapter, input: String): String? = when (val check = BtName.check(input)) {
         BtName.Check.Empty -> getString(R.string.bt_name_empty)
-        BtName.Check.TooLong -> getString(R.string.bt_name_too_long, BtName.MAX_BYTES)
+        BtName.Check.TooLong -> btNameLeftText(BtName.left(input))
         is BtName.Check.Ok -> if (setBtName(bt, check.name)) null else getString(R.string.bt_name_failed)
     }
 
@@ -755,24 +825,34 @@ class SetupActivity : Activity() {
     }
 
     /** The removal's progress, from [Retire.step] (process-level: a rotation finds it again). */
-    private fun showRetire() {
+    private fun showRetire(step: Int = Retire.step) {
         val status = retireStatus ?: text("", 16f, c.text).apply {
             setPadding(0, dp(14), 0, 0); setLineSpacing(0f, 1.15f)
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }.also { t ->
             root.removeAllViews()
             root.addView(text(getString(R.string.app_name), 28f, c.text, bold = true))
-            root.addView(t)
+            // A spinner next to the step, so the screen shows the removal is still running
+            root.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(android.widget.ProgressBar(this@SetupActivity).apply {
+                    isIndeterminate = true
+                    indeterminateTintList = ColorStateList.valueOf(c.accent)
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }, LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginEnd = dp(12); topMargin = dp(14) })
+                addView(t, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            })
             retireStatus = t
         }
-        val s = Retire.step.takeIf { it != 0 }?.let { getString(it) }.orEmpty()
+        val s = step.takeIf { it != 0 }?.let { getString(it) }.orEmpty()
         if (status.text.toString() != s) status.text = s
     }
 
     private fun badge(m: Mark, size: Int) = TextView(this).apply {
         text = m.glyph; gravity = Gravity.CENTER; typeface = Typeface.DEFAULT_BOLD
         setTextSize(TypedValue.COMPLEX_UNIT_SP, size * 0.5f)
-        setTextColor(Color.WHITE)
+        setTextColor(c.onBadge)
         background = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(when (m) { Mark.OK -> c.accent; Mark.WARN -> c.warn; Mark.FAIL -> c.fail; Mark.WAIT -> c.secondary })
@@ -784,7 +864,8 @@ class SetupActivity : Activity() {
     private fun button(b: Btn, primary: Boolean) = Button(this).apply {
         text = b.label; isAllCaps = false; isEnabled = b.enabled
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-        setTextColor(if (primary) Color.WHITE else if (b.enabled) c.accent else c.secondary)
+        // A disabled button reads as disabled in both modes: grey text on the grey fill, never white
+        setTextColor(if (!b.enabled) c.secondary else if (primary) Color.WHITE else c.accent)
         minHeight = dp(52); stateListAnimator = null
         val shape = if (primary) rounded(if (b.enabled) c.button else c.track, 14)
         else GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setStroke(dp(1), c.track); setColor(Color.TRANSPARENT) }
@@ -808,18 +889,19 @@ class SetupActivity : Activity() {
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     /** Light and dark, following the system. [button]: the primary button's fill under white text, at least 4.5:1
-     *  (dark mode's bright green gave about 2:1; audit, 20 Oct 2026). */
+     *  (dark mode's bright green gave about 2:1; audit, 20 Oct 2026). [onBadge]: the ✓ ! ✗ … glyph on a badge; dark mode's
+     *  bright fills take a dark glyph (white on its green was 2:1). */
     private data class Palette(val bg: Int, val card: Int, val text: Int, val secondary: Int, val accent: Int, val warn: Int,
-                               val fail: Int, val track: Int, val ripple: Int, val button: Int) {
+                               val fail: Int, val track: Int, val ripple: Int, val button: Int, val onBadge: Int) {
         companion object {
             fun of(cfg: Configuration) = if ((cfg.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES)
                 Palette(Color.rgb(12, 12, 14), Color.rgb(28, 28, 32), Color.rgb(242, 242, 247), Color.rgb(160, 160, 168),
                     Color.rgb(48, 209, 88), Color.rgb(255, 159, 10), Color.rgb(255, 69, 58), Color.rgb(58, 58, 64), Color.argb(60, 255, 255, 255),
-                    Color.rgb(26, 127, 55))                     // 5.1:1
+                    Color.rgb(26, 127, 55), Color.rgb(12, 12, 14))   // 5.1:1
             else
                 Palette(Color.rgb(242, 242, 247), Color.WHITE, Color.rgb(20, 20, 24), Color.rgb(98, 98, 108),
                     Color.rgb(36, 138, 61), Color.rgb(199, 110, 0), Color.rgb(215, 0, 21), Color.rgb(222, 222, 228), Color.argb(40, 0, 0, 0),
-                    Color.rgb(30, 126, 52))                     // 5.2:1 (the accent is 4.4:1)
+                    Color.rgb(30, 126, 52), Color.WHITE)        // 5.2:1 (the accent is 4.4:1)
         }
     }
 }

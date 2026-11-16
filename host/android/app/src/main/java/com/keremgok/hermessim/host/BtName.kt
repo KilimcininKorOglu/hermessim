@@ -20,8 +20,15 @@ object BtName {
         val name = input.trim()
         return when {
             name.isEmpty() -> Check.Empty
-            name.toByteArray(Charsets.UTF_8).size > MAX_BYTES -> Check.TooLong
+            left(name) < 0 -> Check.TooLong
             else -> Check.Ok(name)
         }
     }
+
+    /**
+     * How many more plain characters (letters a-z, digits, spaces, punctuation: one byte each) fit after [input];
+     * negative by how many the name is too long. Shown as "characters", because nobody counts bytes: a Turkish
+     * letter simply uses up two of them.
+     */
+    fun left(input: String): Int = MAX_BYTES - input.trim().toByteArray(Charsets.UTF_8).size
 }
