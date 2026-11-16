@@ -2,307 +2,307 @@
   {
     "version": "1.2.6",
     "code": 71,
-    "en": "The pairing code now stands in its own centred box on the host screen, in large digits, with the time left below it.\nThe host screen could show the background service as not running in red for a moment when you opened it, although the service was running. It now shows the service as running from the start. While the check is still in progress it says Starting… instead of Not running.",
-    "tr": "Eşleştirme kodu artık ana cihaz ekranında kendi ortalı kutusunda, büyük rakamlarla durur. Kalan süre kodun altında yazar.\nAna cihaz ekranı açıldığında arka plan hizmeti çalıştığı hâlde bir an kırmızı renkte \"Çalışmıyor\" gösterebiliyordu. Artık hizmeti baştan çalışıyor olarak gösterir. Kontrol sürerken \"Çalışmıyor\" yerine \"Başlatılıyor…\" yazar."
+    "en": "The pairing code now appears in its own centred box on the host screen, in large digits, with the time left shown below it.\nWhen you opened the host screen, the background service could briefly show in red as not running, even though it was running. It now shows as running from the start. While the check is still in progress, it says Starting… instead of Not running.",
+    "tr": "Eşleştirme kodu artık ana cihaz ekranında ayrı ve ortalanmış bir kutuda, büyük rakamlarla gösterilir. Kalan süre kodun altında yazar.\nAna cihaz ekranı açıldığında, arka plan hizmeti çalıştığı hâlde kısa bir süre kırmızı renkte \"Çalışmıyor\" olarak görünebiliyordu. Hizmet artık en baştan çalışıyor olarak gösterilir. Kontrol devam ederken \"Çalışmıyor\" yerine \"Başlatılıyor…\" yazar."
   },
   {
     "version": "1.2.5",
     "code": 70,
-    "en": "The host screen could show the background service as not running in red for a moment when you opened it, although the service was running. It now shows the service as running from the start. While the check is still in progress it says Starting… instead of Not running.",
-    "tr": "Ana cihaz ekranı açıldığında arka plan hizmeti çalıştığı hâlde bir an kırmızı renkte \"Çalışmıyor\" gösterebiliyordu. Artık hizmeti baştan çalışıyor olarak gösterir. Kontrol sürerken \"Çalışmıyor\" yerine \"Başlatılıyor…\" yazar."
+    "en": "When you opened the host screen, the background service could briefly show in red as not running, even though it was running. It now shows as running from the start. While the check is still in progress, it says Starting… instead of Not running.",
+    "tr": "Ana cihaz ekranı açıldığında, arka plan hizmeti çalıştığı hâlde kısa bir süre kırmızı renkte \"Çalışmıyor\" olarak görünebiliyordu. Hizmet artık en baştan çalışıyor olarak gösterilir. Kontrol devam ederken \"Çalışmıyor\" yerine \"Başlatılıyor…\" yazar."
   },
   {
     "version": "1.2.4",
     "code": 69,
-    "en": "A host whose Bluetooth sends only in the smallest radio packets (a Galaxy A13 is one) now sends the caller's voice at the lower bit rate from the first moment of a call's Bluetooth audio. 1.2.3 waited until it saw the link fall behind. That sign came too late: Android's Bluetooth holds several seconds of audio in its own queue before the host can notice, so a call came through in broken pieces for about 20 seconds and then arrived late.\nThis still happens only on hosts whose Bluetooth record shows the small packets. Other hosts work as before. A call whose Bluetooth fades still moves to the internet when it can.",
-    "tr": "Bluetooth'u yalnızca en küçük radyo paketleriyle gönderen ana cihazlar (Galaxy A13 bunlardan biridir) artık arayanın sesini, aramanın Bluetooth sesinin ilk anından başlayarak düşük bit hızında gönderir. 1.2.3, bağlantının geride kaldığını görene kadar bekliyordu. Bu işaret çok geç geliyordu: Android'in Bluetooth'u, ana cihaz fark etmeden önce birkaç saniyelik sesi kendi kuyruğunda tutuyor. Bu yüzden arama yaklaşık 20 saniye kesik kesik geliyor, sonra da gecikmeyle ulaşıyordu.\nBu yine yalnızca Bluetooth kaydı küçük paketleri gösteren ana cihazlarda olur. Diğer ana cihazlar eskisi gibi çalışır. Bluetooth'u zayıflayan bir arama, mümkün olduğunda yine internete geçer."
+    "en": "Some hosts can only send Bluetooth data in the smallest radio packets (the Galaxy A13 is one of them). These hosts now send the caller's voice at the lower bit rate from the very start of a call's Bluetooth audio. Version 1.2.3 waited until it saw the connection fall behind. That sign came too late, because Android's Bluetooth holds several seconds of audio in its own queue before the host can notice. As a result, the caller's voice broke up for about 20 seconds and then arrived late.\nThis change only applies to hosts whose Bluetooth record shows the small packets. Other hosts work as before. If Bluetooth weakens during a call, the call still moves to the internet when it can.",
+    "tr": "Bazı ana cihazlar Bluetooth üzerinden yalnızca en küçük radyo paketleriyle veri gönderebilir (Galaxy A13 bunlardan biridir). Bu ana cihazlar artık arayan kişinin sesini, aramanın Bluetooth sesi başladığı andan itibaren düşük bit hızıyla gönderir. 1.2.3 sürümünde ana cihaz, bağlantının geride kaldığını görene kadar bekliyordu. Ancak bu işaret çok geç geliyordu, çünkü Android'in Bluetooth sistemi ana cihaz fark etmeden önce birkaç saniyelik sesi kendi kuyruğunda tutuyor. Bu nedenle arayan kişinin sesi yaklaşık 20 saniye boyunca kesik kesik geliyor, ardından gecikmeyle ulaşıyordu.\nBu değişiklik yalnızca Bluetooth kaydında küçük paketler görünen ana cihazlar için geçerlidir. Diğer ana cihazlar eskisi gibi çalışır. Arama sırasında Bluetooth bağlantısı zayıflarsa arama mümkün olduğunda yine internete geçer."
   },
   {
     "version": "1.2.3",
     "code": 68,
-    "en": "Some hosts send over Bluetooth only in the smallest radio packets (the host's own Bluetooth record shows it; a Galaxy A13 is one). On such a host, a call over Bluetooth could reach your phone in broken pieces when the link fell behind. When such a host sees this during a call, it now sends the caller's voice at a lower bit rate, two audio frames per Bluetooth write, while the call stays on Bluetooth. The voice is a little less crisp and arrives 10 ms later.\nOther hosts work as before: there a link that falls behind means your phone is leaving Bluetooth range, and the call moves to the internet. When the call can move to the internet, the host first waits 5 seconds for that move.",
-    "tr": "Bazı ana cihazlar Bluetooth üzerinden yalnızca en küçük radyo paketleriyle gönderir (ana cihazın kendi Bluetooth kaydında görülür; Galaxy A13 bunlardan biridir). Böyle bir ana cihazda bağlantı geride kaldığında Bluetooth üzerindeki arama telefonunuza kesik kesik ulaşabiliyordu. Böyle bir ana cihaz arama sırasında bunu görürse artık arama Bluetooth'ta kaldığı sürece arayanın sesini daha düşük bit hızında ve her Bluetooth yazmasında iki ses karesiyle gönderir. Ses biraz daha az net olur ve 10 ms daha geç gelir.\nDiğer ana cihazlar eskisi gibi çalışır: onlarda geride kalan bağlantı, telefonunuzun Bluetooth menzilinden çıktığı anlamına gelir ve arama internete geçer. Arama internete geçebiliyorsa ana cihaz önce bu geçiş için 5 saniye bekler."
+    "en": "Some hosts can only send Bluetooth data in the smallest radio packets (the host's own Bluetooth record shows this; the Galaxy A13 is one of them). On these hosts, a call over Bluetooth could reach your phone in broken pieces when the connection fell behind. When such a host now sees this during a call, it sends the caller's voice at a lower bit rate, with two audio frames in each Bluetooth packet, and the call stays on Bluetooth. The voice is slightly less clear and arrives 10 ms later.\nOther hosts work as before. On them, a connection that falls behind means your phone is leaving Bluetooth range, and the call moves to the internet. When the call can move to the internet, the host first waits 5 seconds for the switch.",
+    "tr": "Bazı ana cihazlar Bluetooth üzerinden yalnızca en küçük radyo paketleriyle veri gönderebilir (bu durum ana cihazın Bluetooth kaydında görünür; Galaxy A13 bunlardan biridir). Bu ana cihazlarda bağlantı geride kaldığında, Bluetooth üzerinden yapılan arama telefonunuza kesik kesik ulaşabiliyordu. Böyle bir ana cihaz arama sırasında bu durumu fark ettiğinde artık arayan kişinin sesini daha düşük bit hızıyla ve her Bluetooth paketinde iki ses karesiyle gönderir. Arama Bluetooth üzerinden devam eder. Ses biraz daha az net olur ve 10 ms daha geç ulaşır.\nDiğer ana cihazlar eskisi gibi çalışır. Bu ana cihazlarda bağlantının geride kalması, telefonunuzun Bluetooth menzilinden çıktığı anlamına gelir ve arama internete geçer. Arama internete geçebilecekse ana cihaz önce bu geçiş için 5 saniye bekler."
   },
   {
     "version": "1.2.2",
     "code": 67,
-    "en": "Internet mode uses less battery: while your phone is connected over Bluetooth, the host leaves the HermesSIM server, so its mobile data no longer wakes up every few seconds. It goes back the moment your phone leaves Bluetooth range.",
-    "tr": "İnternet modu daha az pil harcar: telefonunuz Bluetooth ile bağlıyken ana cihaz HermesSIM sunucusundan ayrılır, böylece mobil verisi artık birkaç saniyede bir uyanmaz. Telefonunuz Bluetooth menzilinden çıktığı anda sunucuya geri döner."
+    "en": "Internet mode uses less battery. While your phone is connected over Bluetooth, the host disconnects from the HermesSIM server, so its mobile data no longer wakes up every few seconds. The host reconnects to the server as soon as your phone leaves Bluetooth range.",
+    "tr": "İnternet modu artık daha az pil tüketir. Telefonunuz Bluetooth üzerinden bağlıyken ana cihazın HermesSIM sunucusuyla bağlantısı kesilir. Böylece ana cihazın mobil verisi artık birkaç saniyede bir uyanmaz. Telefonunuz Bluetooth menzilinden çıktığı anda ana cihaz sunucuya yeniden bağlanır."
   },
   {
     "version": "1.2.1",
     "code": 66,
-    "en": "Bluetooth uses less battery: when no call is up, the link to your phone and your Mac runs at the low-power interval, and the host looks for your phone less often once it has been away for 2 minutes.",
-    "tr": "Bluetooth daha az pil harcar: arama yokken telefonunuz ve Mac'inizle bağlantı düşük güç aralığında çalışır, telefonunuz 2 dakikadır uzaktaysa ana cihaz onu daha seyrek arar."
+    "en": "Bluetooth uses less battery. When there's no call in progress, the connection to your phone and your Mac runs at the low-power interval. Once your phone has been away for 2 minutes, the host looks for it less often.",
+    "tr": "Bluetooth artık daha az pil tüketir. Devam eden bir arama yokken telefonunuz ve Mac'inizle kurulan bağlantı düşük güç aralığında çalışır. Telefonunuz 2 dakika boyunca uzakta kalırsa ana cihaz telefonunuzu daha seyrek arar."
   },
   {
     "version": "1.2.0",
     "code": 65,
-    "en": "Scheduled texts: the host keeps a text you scheduled on your phone and sends it at its time, even while your phone is off or far away. Update the HermesSIM app on your phone to 1.2.0 to schedule texts.",
-    "tr": "Zamanlanmış mesajlar: telefonda zamanladığınız mesajı ana cihaz saklar ve zamanı gelince gönderir, telefonunuz kapalı veya uzaktayken de. Mesaj zamanlamak için telefondaki HermesSIM uygulamasını da 1.2.0 sürümüne güncelleyin."
+    "en": "Scheduled texts: the host keeps a text you schedule on your phone and sends it at the scheduled time, even if your phone is off or far away. To schedule texts, also update the HermesSIM app on your phone to 1.2.0.",
+    "tr": "Zamanlanmış mesajlar: Telefonunuzda zamanladığınız mesaj ana cihazda saklanır ve telefonunuz kapalı ya da uzakta olsa bile zamanı geldiğinde gönderilir. Mesaj zamanlayabilmek için telefonunuzdaki HermesSIM uygulamasını da 1.2.0 sürümüne güncelleyin."
   },
   {
     "version": "1.1.0",
     "code": 64,
-    "en": "The host speaks a new protocol with the phone and the Mac: a link that drops picks up where it stopped, requests are answered one by one, and call audio over the internet goes straight between the two phones when it can, with a relay over TCP or TLS when a network blocks UDP. A Mac now pairs with a 6-digit code shown on the phone. The host's root service was rewritten. Update the HermesSIM app on your phone and Mac to 1.1.0 too: older apps can't connect to this host.",
-    "tr": "Ana cihaz telefonla ve Mac'le yeni bir protokol konuşuyor: kopan bir bağlantı kaldığı yerden devam ediyor, istekler tek tek yanıtlanıyor ve internet üzerinden arama sesi mümkün olduğunda iki telefon arasında doğrudan gidiyor; UDP'yi engelleyen ağlarda TCP veya TLS üzerinden bir aktarıcı kullanılıyor. Mac artık telefonda görünen 6 haneli bir kodla eşleşiyor. Ana cihazın root servisi yeniden yazıldı. Telefonunuzdaki ve Mac'inizdeki HermesSIM uygulamasını da 1.1.0'a güncelleyin: eski uygulamalar bu ana cihaza bağlanamaz."
+    "en": "The host now uses a new protocol with your phone and Mac. A dropped connection picks up where it left off, and each request gets its own answer. When possible, call audio over the internet goes directly between the two phones. If a network blocks UDP, a relay over TCP or TLS is used. A Mac now pairs with a 6-digit code shown on the phone. The host's root service has been rewritten. Also update the HermesSIM app on your phone and Mac to 1.1.0, because older apps can't connect to this host.",
+    "tr": "Ana cihaz artık telefonunuz ve Mac'inizle yeni bir protokol kullanır. Kesilen bir bağlantı kaldığı yerden devam eder ve her istek ayrı ayrı yanıtlanır. İnternet üzerinden arama sesi, mümkün olduğunda iki telefon arasında doğrudan iletilir. UDP'yi engelleyen ağlarda TCP veya TLS üzerinden bir aktarma sunucusu kullanılır. Mac artık telefonda gösterilen 6 haneli bir kodla eşleştirilir. Ana cihazın root hizmeti baştan yazıldı. Telefonunuzdaki ve Mac'inizdeki HermesSIM uygulamasını da 1.1.0 sürümüne güncelleyin. Eski uygulamalar bu ana cihaza bağlanamaz."
   },
   {
     "version": "1.0.0",
     "code": 63,
-    "en": "On some phone pairs, calls lost part of the caller's sound: the host sent each 10 ms of sound as its own Bluetooth packet, more than such a link carries, and what didn't fit was dropped. It now sends everything waiting together. Hosts whose hotspot can only use 2.4 GHz, the band Bluetooth carries your calls on, get a new setting: the hotspot turns off while a call's sound is on Bluetooth and comes back when the call ends.",
-    "tr": "Bazı telefon çiftlerinde aramalarda karşı tarafın sesinin bir kısmı kayboluyordu: ana cihaz sesin her 10 ms'sini ayrı bir Bluetooth paketi olarak gönderiyordu, bu da böyle bir bağlantının taşıyabileceğinden fazlaydı ve sığmayanlar atılıyordu. Artık bekleyen her şeyi birlikte gönderiyor. Hotspot yalnızca 2,4 GHz kullanabilen ana cihazlara (aramalarınızı taşıyan Bluetooth'un bandı) yeni bir ayar geldi: bir aramanın sesi Bluetooth'tayken hotspot kapanır, arama bitince yeniden açılır."
+    "en": "With some phone pairs, part of the caller's voice was lost during calls. The host sent every 10 ms of sound as a separate Bluetooth packet, which was more than such a connection can carry, and whatever didn't fit was dropped. The host now sends all waiting sound together. Hosts whose hotspot can only use 2.4 GHz, the same band Bluetooth uses for your calls, get a new setting: the hotspot turns off while a call's audio is on Bluetooth and turns back on when the call ends.",
+    "tr": "Bazı telefon eşleşmelerinde aramalar sırasında arayan kişinin sesinin bir kısmı kayboluyordu. Ana cihaz sesin her 10 ms'lik bölümünü ayrı bir Bluetooth paketi olarak gönderiyordu. Bu, böyle bir bağlantının taşıyabileceğinden fazlaydı ve sığmayan ses atılıyordu. Ana cihaz artık bekleyen tüm sesi birlikte gönderir. Hotspot'u yalnızca 2,4 GHz kullanabilen ana cihazlara yeni bir ayar eklendi. Aramalarınızı taşıyan Bluetooth da aynı bandı kullanır. Bu ayar açıkken, arama sesi Bluetooth üzerinden iletildiği sürece hotspot kapatılır ve arama bittiğinde yeniden açılır."
   },
   {
     "version": "0.12.26",
     "code": 62,
-    "en": "Battery care: choose a charge target from 50% to 100% on the host screen or in the client's Host tab. At 60% the host charges below 57%, holds at 60% and tries to drain above 62%; on phones whose kernel exposes charge_behaviour it keeps the charger input on without charging the battery, otherwise it cycles the charger safely. 100% turns it off, and the phone's own threshold is restored when it is turned off.",
-    "tr": "Pil koruması: ana cihaz ekranında veya istemcinin Ana Cihaz sekmesinde %50–%100 arasında bir şarj hedefi seçin. %60'ta ana cihaz %57 altında şarj eder, %60'ta tutar, %62 üstünde deşarj etmeye çalışır; çekirdeği charge_behaviour sunan telefonlarda şarj girişini açık tutup pili şarj etmez, diğerlerinde şarjı güvenli biçimde döngüye alır. %100 kapatır; kapatıldığında telefonun kendi eşiği geri yüklenir."
+    "en": "Battery care: choose a charge target from 50% to 100% on the host screen or in the Host tab of the app. At 60%, the host charges below 57%, holds the battery at 60% and tries to drain it above 62%. On phones whose kernel offers charge_behaviour, the charger stays connected without charging the battery. On other phones, charging is switched on and off safely. Choosing 100% turns battery care off, and the phone's own charge limit is restored.",
+    "tr": "Pil koruması: Ana cihaz ekranında veya uygulamanın Ana cihaz sekmesinde %50 ile %100 arasında bir şarj hedefi seçin. Hedef %60 olduğunda ana cihaz, pil %57'nin altına düşünce şarj olur, pili %60'ta tutar ve %62'nin üstünde pili boşaltmaya çalışır. Çekirdeği charge_behaviour özelliğini sunan telefonlarda şarj cihazı bağlı kalır ancak pil şarj edilmez. Diğer telefonlarda şarj güvenli bir şekilde açılıp kapatılır. %100 seçildiğinde pil koruması kapanır ve telefonun kendi şarj sınırı geri yüklenir."
   },
   {
     "version": "0.12.25",
     "code": 61,
-    "en": "A host whose HermesSIM data was cleared (in Android's app settings) no longer stops working until the next restart: it gets its Bluetooth permission back by itself and starts again. Problem reports leave out the phone's repetitive call-account messages, so they show more of what HermesSIM itself did.",
-    "tr": "HermesSIM verileri (Android'in uygulama ayarlarından) silinen bir ana cihaz artık bir sonraki yeniden başlatmaya kadar çalışmaz hale gelmiyor: Bluetooth iznini kendisi geri alıyor ve yeniden başlıyor. Sorun raporları telefonun tekrarlayan arama hesabı mesajlarını dışarıda bırakıyor; böylece HermesSIM'in kendi yaptıklarını daha uzun bir süre gösteriyor."
+    "en": "If HermesSIM's data is cleared on a host (in Android's app settings), the host no longer stops working until the next restart. It gets its Bluetooth permission back on its own and starts again. Problem reports leave out the phone's repeated call account messages, so they show more of what HermesSIM itself did.",
+    "tr": "Ana cihazda HermesSIM'in verileri (Android'in uygulama ayarlarından) silinirse ana cihaz artık bir sonraki yeniden başlatmaya kadar çalışmaz durumda kalmaz. Bluetooth izni kendiliğinden geri alınır ve HermesSIM yeniden başlar. Sorun raporlarında telefonun sürekli tekrarlanan arama hesabı mesajları yer almaz. Böylece raporlarda HermesSIM'in kendi yaptığı işlemler daha geniş bir zaman aralığında görünür."
   },
   {
     "version": "0.12.24",
     "code": 60,
-    "en": "HermesSIM now works on phones rooted with APatch: it gets root by itself, as with Magisk, and its screens name APatch's own menus. On APatch or KernelSU without a mount metamodule, the install now stops and says what is missing, instead of leaving no app. \"Stop using this phone as a host\" keeps HermesSIM out of the way until it is really gone, also if a restart left it installed, and keeps a note if the phone didn't restart.",
-    "tr": "HermesSIM artık APatch ile rootlanmış telefonlarda da çalışıyor: root iznini Magisk'teki gibi kendisi alıyor ve ekranlarında APatch'in kendi menülerinin adı geçiyor. Bağlama metamodülü olmayan APatch veya KernelSU'da kurulum artık uygulamasız kalmak yerine durup neyin eksik olduğunu söylüyor. \"Bu telefonu ana cihaz olarak kullanmayı bırak\" HermesSIM gerçekten kaldırılana kadar, yeniden başlatmadan sonra kurulu kalsa bile devreye girmiyor ve telefon yeniden başlamazsa bunu kaydediyor."
+    "en": "HermesSIM now works on phones rooted with APatch. It gets root access on its own, as it does with Magisk, and its screens use APatch's own menu names. On APatch or KernelSU without a mount metamodule, the installation now stops and tells you what's missing, instead of finishing without the app. \"Stop using this phone as a host\" keeps HermesSIM inactive until it has really been removed, even if it's still installed after a restart, and keeps a note if the phone didn't restart.",
+    "tr": "HermesSIM artık APatch ile root'lanmış telefonlarda da çalışır. Root izni, Magisk'te olduğu gibi kendiliğinden alınır ve ekranlarda APatch'in kendi menü adları kullanılır. Bağlama metamodülü olmayan APatch veya KernelSU kurulumlarında, kurulum artık uygulama yüklenmeden tamamlanmaz. Bunun yerine kurulum durur ve neyin eksik olduğu gösterilir. \"Bu telefonu ana cihaz olarak kullanmayı bırak\" seçildiğinde HermesSIM tamamen kaldırılana kadar devre dışı kalır. Bu durum, yeniden başlatmadan sonra HermesSIM hâlâ yüklü kalsa bile geçerlidir. Telefon yeniden başlatılmadıysa bu bilgi kaydedilir."
   },
   {
     "version": "0.12.23",
     "code": 59,
-    "en": "\"Stop using this phone as a host\" can no longer leave HermesSIM half-removed: if the phone doesn't restart at the end, HermesSIM stays out of the way until it does (no Do Not Disturb, no taking back the phone and messaging apps, no muted calls). A call answered on the host phone itself with another phone app is never muted. Older Galaxy phones with an Exynos 7870 or 7570 chip are now expected to work: a Galaxy J7 Prime passed the call test.",
-    "tr": "\"Bu telefonu ana cihaz olarak kullanmayı bırak\" artık HermesSIM'i yarım kaldırılmış bırakmaz: telefon sonunda yeniden başlamazsa HermesSIM o zamana kadar devreye girmez (Rahatsız Etmeyin'i açmaz, telefon ve mesaj uygulamalarını geri almaz, aramaları sessize almaz). Ana cihazın kendisinde başka bir telefon uygulamasıyla açılan bir arama hiç sessize alınmaz. Exynos 7870 ya da 7570 işlemcili eski Galaxy telefonların artık çalışması bekleniyor: bir Galaxy J7 Prime arama testini geçti."
+    "en": "\"Stop using this phone as a host\" can no longer leave HermesSIM half removed. If the phone doesn't restart at the end, HermesSIM stays inactive until it does: it doesn't turn on Do Not Disturb, take back the phone and messaging apps, or mute calls. A call answered on the host phone itself with another phone app is never muted. Older Galaxy phones with an Exynos 7870 or 7570 chip are now expected to work, because a Galaxy J7 Prime passed the call test.",
+    "tr": "\"Bu telefonu ana cihaz olarak kullanmayı bırak\" seçeneği artık HermesSIM'i yarım kaldırılmış durumda bırakmaz. İşlemin sonunda telefon yeniden başlatılmazsa HermesSIM, telefon yeniden başlatılana kadar devre dışı kalır. Bu sürede Rahatsız Etmeyin açılmaz, telefon ve mesaj uygulamaları geri alınmaz ve aramaların sesi kapatılmaz. Ana cihazın kendisinde başka bir telefon uygulamasıyla yanıtlanan aramaların sesi hiçbir zaman kapatılmaz. Exynos 7870 veya 7570 işlemcili eski Galaxy telefonların artık çalışması bekleniyor, çünkü bir Galaxy J7 Prime arama testini başarıyla tamamladı."
   },
   {
     "version": "0.12.22",
     "code": 58,
-    "en": "Older Galaxy phones with an Exynos 7870 or 7570 chip are now expected to work: a Galaxy J7 Prime passed the call test. Every phone still runs its own test before full voice.",
-    "tr": "Exynos 7870 ya da 7570 işlemcili eski Galaxy telefonların artık çalışması bekleniyor: bir Galaxy J7 Prime arama testini geçti. Her telefon tam sesten önce yine kendi testini yapar."
+    "en": "Older Galaxy phones with an Exynos 7870 or 7570 chip are now expected to work, because a Galaxy J7 Prime passed the call test. Every phone still runs its own test before full voice turns on.",
+    "tr": "Exynos 7870 veya 7570 işlemcili eski Galaxy telefonların artık çalışması bekleniyor, çünkü bir Galaxy J7 Prime arama testini başarıyla tamamladı. Tam ses açılmadan önce her telefon yine kendi testinden geçer."
   },
   {
     "version": "0.12.21",
     "code": 57,
-    "en": "Newer Qualcomm phones that keep their audio files in a per-chip folder (e.g. Xiaomi 11T Pro on Android 13) can now take the call test.",
-    "tr": "Ses dosyalarını işlemciye özel bir klasörde tutan yeni Qualcomm telefonlar (ör. Android 13'teki Xiaomi 11T Pro) artık arama testini yapabiliyor."
+    "en": "Newer Qualcomm phones that keep their audio files in a separate folder for each chip (for example, the Xiaomi 11T Pro on Android 13) can now take the call test.",
+    "tr": "Ses dosyalarını her işlemci için ayrı bir klasörde tutan yeni Qualcomm telefonlarda (örneğin Android 13 yüklü Xiaomi 11T Pro) artık arama testi yapılabilir."
   },
   {
     "version": "0.12.20",
     "code": 56,
     "en": "After an update, older Galaxy phones with an Exynos 7870 or 7570 chip offer the call test right away, without a restart.",
-    "tr": "Exynos 7870 ya da 7570 işlemcili eski Galaxy telefonlar, güncellemeden sonra yeniden başlatmaya gerek kalmadan arama testini hemen sunuyor."
+    "tr": "Exynos 7870 veya 7570 işlemcili eski Galaxy telefonlarda güncellemeden sonra arama testi, yeniden başlatmaya gerek kalmadan hemen yapılabilir."
   },
   {
     "version": "0.12.19",
     "code": 55,
-    "en": "Older Galaxy phones with an Exynos 7870 or 7570 chip (J7 Prime, J7 Pro, J6, J4, A6, M10…) running a custom ROM can now try the call test for full voice. It is experimental: no one has passed it on these phones yet.",
-    "tr": "Exynos 7870 ya da 7570 işlemcili, özel ROM kullanan eski Galaxy telefonlar (J7 Prime, J7 Pro, J6, J4, A6, M10…) artık tam ses için arama testini deneyebilir. Bu deneysel: bu telefonlarda henüz kimse testi geçmedi."
+    "en": "Older Galaxy phones with an Exynos 7870 or 7570 chip (J7 Prime, J7 Pro, J6, J4, A6, M10 and others) running a custom ROM can now try the call test for full voice. This is experimental: no one has passed the test on these phones yet.",
+    "tr": "Özel ROM yüklü, Exynos 7870 veya 7570 işlemcili eski Galaxy telefonlarda (J7 Prime, J7 Pro, J6, J4, A6, M10 ve diğerleri) artık tam ses için arama testi denenebilir. Bu özellik deneyseldir. Bu telefonlarda henüz hiç kimse testi başarıyla tamamlamadı."
   },
   {
     "version": "0.12.18",
     "code": 54,
-    "en": "HermesSIM now has an Android app too: this phone's screens and messages speak of your phone, iPhone or Android, instead of only an iPhone.",
-    "tr": "HermesSIM'in artık bir Android uygulaması da var: bu telefonun ekranları ve mesajları yalnızca iPhone'dan değil, iPhone ya da Android telefonunuzdan söz ediyor."
+    "en": "HermesSIM now has an Android app too. The screens and messages on this phone now refer to your phone, iPhone or Android, instead of only an iPhone.",
+    "tr": "HermesSIM'in artık bir Android uygulaması da var. Bu telefondaki ekranlarda ve mesajlarda artık yalnızca iPhone yerine telefonunuzdan (iPhone veya Android) söz edilir."
   },
   {
     "version": "0.12.17",
     "code": 53,
-    "en": "A small security improvement in how internet calls get their relay.",
-    "tr": "İnternet aramalarının aktarma sunucusunu nasıl aldığına küçük bir güvenlik iyileştirmesi."
+    "en": "A small security improvement in how internet calls get their relay server.",
+    "tr": "İnternet aramalarında aktarma sunucusunun alınma şeklinde küçük bir güvenlik iyileştirmesi yapıldı."
   },
   {
     "version": "0.12.16",
     "code": 52,
-    "en": "HermesSIM Host now also installs on phones with 32-bit Android: cheaper models, and older phones on custom firmware. Setup also stops turning away phones whose older Bluetooth chip can host. And a call over Bluetooth now lets go of its audio the moment it ends.",
-    "tr": "HermesSIM Host artık 32 bit Android çalıştıran telefonlara da kuruluyor: daha uygun fiyatlı modeller ve özel yazılımlı eski telefonlar. Kurulum, eski Bluetooth yongası ana cihaz olmaya yeten telefonları da artık geri çevirmiyor. Bluetooth üzerinden bir arama da artık biter bitmez sesini bırakıyor."
+    "en": "HermesSIM Host can now also be installed on phones with 32-bit Android, such as lower-priced models and older phones with custom software. Setup no longer turns away phones whose older Bluetooth chip is good enough for a host. A call over Bluetooth now releases its audio as soon as it ends.",
+    "tr": "HermesSIM Host artık 32 bit Android yüklü telefonlara da yüklenebilir. Bu telefonlar arasında daha uygun fiyatlı modeller ve özel yazılım yüklü eski telefonlar bulunur. Bluetooth yongası eski olsa da ana cihaz olarak kullanılabilen telefonlar artık kurulum sırasında reddedilmez. Bluetooth üzerinden yapılan bir aramanın ses bağlantısı artık arama biter bitmez serbest bırakılır."
   },
   {
     "version": "0.12.15",
     "code": 51,
-    "en": "Steadier in your bag and in the drawer. What has to happen while the host sleeps now wakes it instead of waiting minutes: Wi-Fi when you're away, box mode after the escape gesture, and the push for a text when your iPhone is asleep. The host's Wi-Fi no longer switches on the moment Bluetooth drops for a second. Calls and texts arriving just as your iPhone moves from Bluetooth to the internet are no longer lost. Signal and roaming reach the iPhone as they change. A failed check of who is on the hotspot no longer turns it off under a laptop, and Samsung hotspots on default settings no longer turn off after one idle minute.",
-    "tr": "Çantanızda ve çekmecede daha istikrarlı. Ana cihaz uyurken olması gerekenler artık dakikalarca beklemek yerine onu uyandırıyor: uzaktayken Wi-Fi, kaçış hareketinden sonra kutu modu ve iPhone'unuz uyurken bir mesajın bildirimi. Ana cihazın Wi-Fi'ı artık Bluetooth bir anlığına koptuğunda hemen açılmıyor. iPhone'unuz Bluetooth'tan internete geçerken gelen aramalar ve mesajlar artık kaybolmuyor. Sinyal ve dolaşım değiştikçe iPhone'a ulaşıyor. Hotspot'a kimin bağlı olduğunun kontrolü başarısız olursa hotspot artık bir dizüstünün altından kapanmıyor; varsayılan ayarlardaki Samsung hotspot'lar artık bir dakika boşta kalınca kapanmıyor."
+    "en": "More reliable in your bag or in a drawer. Tasks that must run while the host sleeps now wake it instead of waiting for minutes: Wi-Fi when you're away, Box mode after the escape gesture, and the notification for a text while your iPhone is asleep. The host's Wi-Fi no longer turns on as soon as Bluetooth drops for a second. Calls and texts that arrive just as your iPhone moves from Bluetooth to the internet are no longer lost. Signal and roaming changes reach the iPhone as they happen. If the check of devices on the hotspot fails, the hotspot no longer turns off while a laptop is using it. Samsung hotspots on default settings no longer turn off after one idle minute.",
+    "tr": "Ana cihaz artık çantanızda veya bir çekmecede daha güvenilir şekilde çalışır. Ana cihaz uykudayken yapılması gereken işlemler artık dakikalarca beklemez ve ana cihazı uyandırır. Bu işlemler şunlardır: uzaktayken Wi-Fi'a bağlanma, kaçış hareketinden sonra Kutu modunun açılması ve iPhone'unuz uykudayken gelen bir mesajın bildirimi. Bluetooth bağlantısı bir anlığına kesildiğinde ana cihazın Wi-Fi bağlantısı artık hemen açılmaz. iPhone'unuz Bluetooth'tan internete geçerken gelen aramalar ve mesajlar artık kaybolmaz. Şebeke ve yurt dışı dolaşım değişiklikleri iPhone'a anında iletilir. Hotspot'a bağlı cihazların kontrolü başarısız olursa, bir dizüstü bilgisayar kullanırken hotspot artık kapanmaz. Varsayılan ayarlardaki Samsung hotspot'ları artık bir dakika kullanılmadığında kapanmaz."
   },
   {
     "version": "0.12.14",
     "code": 50,
-    "en": "Calls you make sound as they do on a phone: your iPhone stays quiet until the other phone actually rings, then plays the network's own ringing tone, or its own if the network sends none (now Turkey's real one: 450 Hz, 2 seconds on). Before, it rang from the moment you dialled and then switched to the network's tone, so a call could ring in two different tones. Needs the latest HermesSIM on the iPhone.",
-    "tr": "Yaptığınız aramalar bir telefondaki gibi duyuluyor: iPhone'unuz karşı taraftaki telefon gerçekten çalana kadar sessiz kalıyor, sonra şebekenin kendi çalma sesini, şebeke göndermezse kendi sesini çalıyor (artık Türkiye'nin gerçek sesi: 450 Hz, 2 saniye). Önceden aradığınız anda çalmaya başlıyor, sonra şebekenin sesine geçiyordu; bir arama iki farklı sesle çalabiliyordu. iPhone'da HermesSIM'in son sürümü gerekir."
+    "en": "Calls you make now sound the way they do on a regular phone. Your iPhone stays quiet until the other phone actually rings. It then plays the network's own ringing tone, or its own tone if the network doesn't send one (now the real Turkish tone: 450 Hz, 2 seconds on). Before, it rang from the moment you dialled and then switched to the network's tone, so a call could ring with two different tones. This needs the latest version of HermesSIM on the iPhone.",
+    "tr": "Yaptığınız aramalar artık normal bir telefondaki gibi duyulur. Karşı taraftaki telefon gerçekten çalmaya başlayana kadar iPhone'unuz sessiz kalır. Ardından şebekenin kendi çalma sesi duyulur. Şebeke bir çalma sesi göndermezse HermesSIM'in kendi çalma sesi kullanılır (artık Türkiye'de kullanılan gerçek ses: 450 Hz, 2 saniye). Önceden çalma sesi numarayı aradığınız anda başlıyor, ardından şebekenin sesine geçiyordu. Bu nedenle bir aramada iki farklı çalma sesi duyulabiliyordu. Bu özellik için iPhone'da HermesSIM'in en son sürümü gerekir."
   },
   {
     "version": "0.12.13",
     "code": 49,
-    "en": "Better at phones we haven't tested ourselves: a profile measured on another phone of the same family is used only if this phone's sound hardware has everything it needs (its audio streams looked up by name), otherwise the host builds one from the phone's own files; once it finds call audio paths, the phone shows as Expected to work. An active eSIM line now shows on the iPhone (data roaming and mobile data can be changed). The hotspot no longer offers 6 GHz or a device limit, which some phones accept but then never start the hotspot. VoLTE is switched on for a SIM whose carrier offers it if the phone's VoLTE switch was off or never set (Xiaomi and MediaTek phones), and the charge limit also works on newer Qualcomm phones.",
-    "tr": "Kendimiz denemediğimiz telefonlarda daha iyi: aynı ailedeki başka bir telefonda ölçülmüş profil yalnızca bu telefonun ses donanımında gereken her şey varsa kullanılıyor (ses akışları adıyla bulunuyor), yoksa ana cihaz telefonun kendi dosyalarından bir profil oluşturuyor; arama ses yollarını bulduğunda telefon Çalışması bekleniyor olarak görünüyor. Etkin bir eSIM hattı artık iPhone'da görünüyor (veri dolaşımı ve mobil veri değiştirilebiliyor). Hotspot artık 6 GHz ve cihaz sınırı sunmuyor: bazı telefonlar bunları kabul edip hotspot'u hiç başlatmıyordu. Operatörü VoLTE sunan bir SIM'de telefonun VoLTE anahtarı kapalıysa ya da hiç ayarlanmamışsa (Xiaomi ve MediaTek telefonlar) VoLTE açılıyor; şarj sınırı yeni Qualcomm telefonlarda da çalışıyor."
+    "en": "Better support for phones we haven't tested ourselves. A profile measured on another phone of the same family is only used if this phone's sound hardware has everything it needs (its audio streams are looked up by name). Otherwise, the host builds a profile from the phone's own files. Once it finds the call audio paths, the phone shows as Expected to work. An active eSIM line now appears on the iPhone, and its data roaming and mobile data can be changed. The hotspot no longer offers 6 GHz or a device limit, because some phones accept these settings but then never start the hotspot. VoLTE is turned on for a SIM whose carrier offers it if the phone's VoLTE switch was off or never set (Xiaomi and MediaTek phones). The charge limit also works on newer Qualcomm phones.",
+    "tr": "Kendi test etmediğimiz telefonlar artık daha iyi desteklenir. Aynı ailedeki başka bir telefonda ölçülmüş bir profil, yalnızca bu telefonun ses donanımında gereken her şey varsa kullanılır (ses akışları adlarıyla bulunur). Aksi takdirde ana cihaz, telefonun kendi dosyalarından bir profil oluşturur. Arama ses yolları bulunduğunda telefon \"Çalışması bekleniyor\" olarak gösterilir. Etkin bir eSIM hattı artık iPhone'da görünür. Bu hattın veri dolaşımı ve mobil verisi değiştirilebilir. Hotspot ayarlarında artık 6 GHz ve cihaz sınırı seçenekleri bulunmaz, çünkü bazı telefonlar bu ayarları kabul edip hotspot'u hiç başlatmıyordu. Operatörü VoLTE sunan bir SIM kartta, telefonun VoLTE anahtarı kapalıysa veya hiç ayarlanmamışsa (Xiaomi ve MediaTek telefonlar) VoLTE açılır. Şarj sınırı yeni Qualcomm telefonlarda da çalışır."
   },
   {
     "version": "0.12.11",
     "code": 47,
-    "en": "Updates install in seconds again: the host keeps itself awake while it downloads and installs an update (one paused for most of a minute while the phone slept).",
-    "tr": "Güncellemeler yeniden saniyeler içinde kuruluyor: ana cihaz, bir güncellemeyi indirip kurarken uykuya geçmiyor (telefon uyurken bir güncelleme neredeyse bir dakika beklemişti)."
+    "en": "Updates install in seconds again. The host now stays awake while it downloads and installs an update (one update had paused for almost a minute while the phone slept).",
+    "tr": "Güncellemeler yeniden saniyeler içinde yüklenir. Ana cihaz artık bir güncellemeyi indirip yüklerken uyku moduna geçmez (telefon uykudayken bir güncellemenin yüklenmesi neredeyse bir dakika beklemişti)."
   },
   {
     "version": "0.12.10",
     "code": 46,
-    "en": "Calls and texts wake your iPhone even with Internet mode off: push wake-ups now have their own encrypted key, handed over Bluetooth. Needs HermesSIM 0.9.5 on the iPhone.",
-    "tr": "İnternet modu kapalıyken bile aramalar ve mesajlar iPhone'unuzu uyandırıyor: uyandırma bildirimlerinin artık Bluetooth ile verilen kendi şifreli anahtarı var. iPhone'da HermesSIM 0.9.5 gerekir."
+    "en": "Calls and texts now wake your iPhone even when Internet mode is off. Push notifications now have their own encrypted key, which is passed over Bluetooth. This needs HermesSIM 0.9.5 on the iPhone.",
+    "tr": "İnternet modu kapalı olsa bile gelen aramalar ve mesajlar artık iPhone'unuzu uyandırır. Uyandırma bildirimleri artık kendi şifreli anahtarlarıyla gönderilir. Bu anahtar Bluetooth üzerinden aktarılır. Bu özellik için iPhone'da HermesSIM 0.9.5 gerekir."
   },
   {
     "version": "0.12.9",
     "code": 45,
-    "en": "With Internet mode on, calls and texts now reach your iPhone even when iOS has closed HermesSIM: the host has Apple wake your iPhone with an end-to-end encrypted push (our server and Apple see only ciphertext). Needs HermesSIM 0.9 on the iPhone.",
-    "tr": "İnternet modu açıkken aramalar ve mesajlar, iOS HermesSIM'i kapatmış olsa bile artık iPhone'unuza ulaşıyor: ana cihaz, uçtan uca şifreli bir bildirimle Apple'a iPhone'unuzu uyandırtıyor (sunucumuz ve Apple yalnızca şifreli veriyi görür). iPhone'da HermesSIM 0.9 gerekir."
+    "en": "With Internet mode on, calls and texts now reach your iPhone even when iOS has closed HermesSIM. The host has Apple wake your iPhone with an end-to-end encrypted push notification (our server and Apple only see encrypted data). This needs HermesSIM 0.9 on the iPhone.",
+    "tr": "İnternet modu açıkken gelen aramalar ve mesajlar, HermesSIM iOS tarafından kapatılmış olsa bile artık iPhone'unuza ulaşır. Ana cihaz, uçtan uca şifreli bir bildirimle iPhone'unuzun Apple tarafından uyandırılmasını sağlar (sunucumuz ve Apple yalnızca şifreli verileri görebilir). Bu özellik için iPhone'da HermesSIM 0.9 gerekir."
   },
   {
     "version": "0.12.8",
     "code": 44,
-    "en": "Automatic hotspot is more dependable while your iPhone sleeps: when your iPhone moves to another Wi-Fi, the host itself turns the hotspot off once nothing uses it for a minute, and the host checks in with your iPhone every few minutes even in deep sleep. On Samsung hosts, the phone's own 20-minute hotspot timer now follows HermesSIM's auto off setting.",
-    "tr": "Otomatik hotspot iPhone'unuz uykudayken daha güvenilir: iPhone'unuz başka bir Wi-Fi'a geçince ana cihaz, bir dakika boyunca hiçbir şey kullanmadığında hotspot'u kendisi kapatıyor; ana cihaz derin uykuda da birkaç dakikada bir iPhone'unuzla haberleşiyor. Samsung ana cihazlarda telefonun kendi 20 dakikalık hotspot zamanlayıcısı artık HermesSIM'in otomatik kapatma ayarına uyuyor."
+    "en": "The automatic hotspot is more reliable while your iPhone sleeps. When your iPhone moves to another Wi-Fi network, the host itself turns the hotspot off once nothing has used it for a minute. The host also checks in with your iPhone every few minutes, even in deep sleep. On Samsung hosts, the phone's own 20-minute hotspot timer now follows HermesSIM's automatic turn-off setting.",
+    "tr": "Otomatik hotspot, iPhone'unuz uykudayken artık daha güvenilir şekilde çalışır. iPhone'unuz başka bir Wi-Fi ağına geçtiğinde, hotspot bir dakika boyunca kullanılmazsa ana cihaz hotspot'u kendisi kapatır. Ana cihaz, derin uyku modundayken bile birkaç dakikada bir iPhone'unuzla iletişim kurar. Samsung ana cihazlarda telefonun kendi 20 dakikalık hotspot zamanlayıcısı artık HermesSIM'in otomatik kapatma ayarına göre çalışır."
   },
   {
     "version": "0.12.7",
     "code": 43,
-    "en": "Calls that start while your iPhone is reconnecting no longer go silent half-way: when Bluetooth comes back, the call's audio moves to it cleanly.\nSafer and sturdier: a restart right after a call no longer leaves the host unprotected; call audio settings are put back even if the background service is stopped mid-call; one rejected report can no longer block diagnostics.\n\"Stop using this phone as a host\" checks everything first and puts the host back as it was if it can't finish; it waits until a call is over.\nClearer setup screen: Magisk-zip instructions, PUK and carrier-lock messages, box mode \"paused until\", better contrast and screen-reader support.\nThe charge limit holds even if the phone switches charging back on by itself.",
-    "tr": "iPhone'unuz yeniden bağlanırken başlayan aramalar artık yarı yolda sessizleşmiyor: Bluetooth geri gelince arama sesi temiz bir şekilde ona geçiyor.\nDaha güvenli ve sağlam: bir aramanın hemen ardından yeniden başlatma artık ana cihazı korumasız bırakmıyor; arka plan hizmeti arama sırasında durdurulsa bile arama sesi ayarları geri alınıyor; reddedilen tek bir rapor artık tanılamayı engelleyemiyor.\n\"Bu telefonu ana cihaz olarak kullanmayı bırak\" önce her şeyi kontrol ediyor, bitiremezse ana cihazı eski hâline getiriyor; arama bitene kadar bekliyor.\nDaha anlaşılır kurulum ekranı: Magisk zip talimatları, PUK ve operatör kilidi mesajları, kutu modu \"şu saate kadar duraklatıldı\", daha iyi kontrast ve ekran okuyucu desteği.\nŞarj sınırı, telefon şarjı kendiliğinden yeniden açsa bile korunuyor."
+    "en": "Calls that start while your iPhone is reconnecting no longer go silent halfway through. When Bluetooth comes back, the call's audio moves to it smoothly.\nSafer and more reliable: a restart right after a call no longer leaves the host unprotected. Call audio settings are restored even if the background service stops during a call. A single rejected report can no longer block diagnostics.\n\"Stop using this phone as a host\" now checks everything first. If it can't finish, it puts the host back the way it was. It also waits until a call has ended.\nA clearer setup screen: instructions for the Magisk zip, messages for the PUK code and carrier lock, a \"paused until\" time for Box mode, and better contrast and screen reader support.\nThe charge limit stays in place even if the phone turns charging back on by itself.",
+    "tr": "iPhone'unuz yeniden bağlanırken başlayan aramalar artık yarıda sessizleşmez. Bluetooth bağlantısı geri geldiğinde arama sesi sorunsuz şekilde Bluetooth'a geçer.\nDaha güvenli ve güvenilir: Bir aramanın hemen ardından yapılan yeniden başlatma artık ana cihazı korumasız bırakmaz. Arka plan hizmeti arama sırasında dursa bile arama sesi ayarları geri yüklenir. Reddedilen tek bir rapor artık tanılama verilerinin gönderilmesini engellemez.\n\"Bu telefonu ana cihaz olarak kullanmayı bırak\" seçeneği artık önce her şeyi kontrol eder. İşlem tamamlanamazsa ana cihaz eski hâline getirilir. Ayrıca devam eden bir arama varsa arama bitene kadar beklenir.\nDaha anlaşılır bir kurulum ekranı: Magisk zip talimatları, PUK kodu ve operatör kilidi mesajları, Kutu modu için \"şu saate kadar duraklatıldı\" bilgisi, daha iyi kontrast ve ekran okuyucu desteği.\nTelefon şarjı kendiliğinden yeniden başlatsa bile şarj sınırı korunur."
   },
   {
     "version": "0.12.6",
     "code": 42,
-    "en": "Installing is now one step: the HermesSIM Host Magisk zip, installed from the Magisk app (Play Protect blocks a downloaded app). After the restart the host opens its screen by itself, ready to pair.\nHermesSIM is the phone app from the start and keeps the host silent through every call, box mode or not.\nThe host repairs itself if an update or Android takes away a permission, the battery exemption or the SMS role.\nNew: \"Stop using this phone as a host\" gives the phone back as an ordinary phone (sounds, screen and button settings, Wi-Fi, its own phone and messaging apps), your iPhone forgets it, and HermesSIM removes itself and restarts the phone.",
-    "tr": "Kurulum artık tek adım: HermesSIM Host Magisk zip dosyası, Magisk uygulamasından kurulur (Play Protect indirilen uygulamayı engelliyor). Yeniden başladıktan sonra ana cihaz ekranını kendiliğinden açar, eşleşmeye hazırdır.\nHermesSIM baştan telefon uygulamasıdır ve kutu modu açık olsun olmasın her aramada ana cihazı sessiz tutar.\nBir güncelleme veya Android bir izni, pil muafiyetini ya da SMS rolünü alırsa ana cihaz kendini onarır.\nYeni: \"Bu telefonu ana cihaz olarak kullanmayı bırak\" telefonu sıradan bir telefon olarak geri verir (sesler, ekran ve tuş ayarları, Wi-Fi, kendi telefon ve mesaj uygulamaları), iPhone'unuz onu unutur, HermesSIM kendini kaldırıp telefonu yeniden başlatır."
+    "en": "Installation now takes one step: install the HermesSIM Host Magisk zip from the Magisk app (Play Protect blocks a downloaded app). After the restart, the host opens its screen on its own, ready to pair.\nHermesSIM is the phone app from the start and keeps the host silent during every call, whether Box mode is on or not.\nThe host repairs itself if an update or Android takes away a permission, the battery exemption or the SMS role.\nNew: \"Stop using this phone as a host\" returns the phone to normal use. Sounds, screen and button settings, Wi-Fi, and the phone's own phone and messaging apps are restored. Your iPhone forgets the host, and HermesSIM removes itself and restarts the phone.",
+    "tr": "Kurulum artık tek adımda yapılır: HermesSIM Host Magisk zip dosyasını Magisk uygulamasından yükleyin (Play Protect, indirilen uygulamaları engeller). Yeniden başlatmanın ardından ana cihaz ekranı kendiliğinden açılır ve eşleştirmeye hazır olur.\nHermesSIM en baştan telefon uygulaması olarak ayarlanır ve Kutu modu açık olsun ya da olmasın her aramada ana cihazı sessiz tutar.\nBir güncelleme veya Android bir izni, pil kısıtlaması muafiyetini ya da SMS rolünü kaldırırsa ana cihaz bu ayarları kendiliğinden onarır.\nYeni: \"Bu telefonu ana cihaz olarak kullanmayı bırak\" seçeneği telefonu normal kullanıma döndürür. Sesler, ekran ve tuş ayarları, Wi-Fi ve telefonun kendi telefon ve mesaj uygulamaları geri yüklenir. Ana cihaz iPhone'unuzdan kaldırılır. Ardından HermesSIM kendini kaldırır ve telefon yeniden başlatılır."
   },
   {
     "version": "0.12.5",
     "code": 41,
-    "en": "Calls answered on the host phone itself are now left alone: only calls your iPhone made or answered go through HermesSIM. Before, a call taken on the host's own screen lost its microphone.\nCall audio no longer drops if a diagnostic tool checks on the host during a call.\nA call where the caller's voice never arrives is now reported (with diagnostics on), so it can be fixed.",
-    "tr": "Ana cihazın kendisinde yanıtlanan aramalara artık dokunulmuyor: yalnızca iPhone'unuzun yaptığı veya yanıtladığı aramalar HermesSIM üzerinden geçer. Önceden ana cihazın kendi ekranından açılan bir aramanın mikrofonu kesiliyordu.\nArama sırasında bir tanılama aracı ana cihazı yoklarsa arama sesi artık kesilmiyor.\nArayanın sesinin hiç gelmediği bir arama artık bildiriliyor (tanılama açıksa), böylece düzeltilebiliyor."
+    "en": "Calls answered on the host phone itself are no longer affected. Only calls your iPhone made or answered go through HermesSIM. Before, a call answered on the host's own screen lost its microphone.\nCall audio no longer drops if a diagnostic tool checks the host during a call.\nA call where the caller's voice never arrives is now reported (when diagnostics are on), so the problem can be fixed.",
+    "tr": "Ana cihazın kendisinde yanıtlanan aramalar artık etkilenmez. Yalnızca iPhone'unuzdan yapılan veya yanıtlanan aramalar HermesSIM üzerinden iletilir. Önceden ana cihazın kendi ekranından yanıtlanan bir aramada mikrofon çalışmıyordu.\nArama sırasında bir tanılama aracı ana cihazı kontrol ederse arama sesi artık kesilmez.\nArayan kişinin sesinin hiç ulaşmadığı aramalar artık bildirilir (tanılama açıksa). Böylece sorun giderilebilir."
   },
   {
     "version": "0.12.4",
     "code": 40,
-    "en": "Helps more phones get full voice: with diagnostics on, the host sends a one-time description of its sound chip (the names and ranges of its audio settings; nothing is changed, and nothing about you or your calls is included), so call audio can be made to work on phones we have never had in hand.",
-    "tr": "Daha fazla telefonun tam sese kavuşmasına yardım eder: tanılama açıksa ana cihaz, ses çipinin bir defalık tanımını gönderir (ses ayarlarının adları ve aralıkları; hiçbir şey değiştirilmez, sizinle ya da aramalarınızla ilgili hiçbir bilgi yoktur). Böylece elimize hiç geçmemiş telefonlarda da arama sesi çalıştırılabilir."
+    "en": "Helps more phones get full voice. When diagnostics are on, the host sends a one-time description of its sound chip: the names and value ranges of its audio settings. Nothing is changed, and no information about you or your calls is included. This lets us make call audio work on phones we've never had in hand.",
+    "tr": "Daha fazla telefonda tam ses kullanılabilmesine yardımcı olur. Tanılama açıksa ana cihaz, ses yongasının tanımını bir kez gönderir: ses ayarlarının adları ve değer aralıkları. Hiçbir ayar değiştirilmez ve gönderilen bilgilerde sizinle veya aramalarınızla ilgili hiçbir bilgi yer almaz. Böylece hiç elimize geçmemiş telefonlarda da arama sesini çalıştırabiliriz."
   },
   {
     "version": "0.12.3",
     "code": 39,
-    "en": "Newer phones: the host's background service now also runs on Android 15+ phones whose kernel uses 16 KB memory pages (before, it couldn't start there, so call audio, box mode and the charge limit were missing).\nBox mode's app blocking no longer holds up the host while Android's network settings are busy.",
-    "tr": "Yeni telefonlar: ana cihazın arka plan hizmeti artık çekirdeği 16 KB bellek sayfası kullanan Android 15 ve üstü telefonlarda da çalışıyor (önceden orada başlayamıyordu; arama sesi, kutu modu ve şarj sınırı eksik kalıyordu).\nKutu modunun uygulama engellemesi, Android'in ağ ayarları meşgulken ana cihazı artık bekletmiyor."
+    "en": "Newer phones: the host's background service now also runs on phones with Android 15 or later whose kernel uses 16 KB memory pages. Before, it couldn't start on these phones, so call audio, Box mode and the charge limit didn't work.\nBox mode's app blocking no longer holds up the host while Android's network settings are busy.",
+    "tr": "Yeni telefonlar: Ana cihazın arka plan hizmeti artık çekirdeği 16 KB bellek sayfaları kullanan Android 15 veya üzeri telefonlarda da çalışır. Önceden hizmet bu telefonlarda başlatılamıyordu. Bu nedenle arama sesi, Kutu modu ve şarj sınırı çalışmıyordu.\nKutu modunun uygulama engelleme özelliği, Android'in ağ ayarları meşgulken artık ana cihazı bekletmez."
   },
   {
     "version": "0.12.2",
     "code": 38,
-    "en": "Pairing is simpler: \"Add host\" on the iPhone lists only hosts ready to pair, and a host with no iPhone is always ready. Hosts keep one Bluetooth address, so a host just picked can't vanish, and Android 13+ hosts accept pairing on their own.\nMuch harder to break: audio settings are checked before they are written, and after a crash while writing them the host stays safe for that boot; the host restarts itself if it ever stops; Bluetooth switched off comes back on; the power button is only blocked when the escape gesture works; the charge limit can never leave the battery draining.\nA screen-lock warning: with a PIN, the host can't start after a restart.",
-    "tr": "Eşleştirme daha kolay: iPhone'daki \"Ana cihaz ekle\" yalnızca eşleştirmeye hazır ana cihazları listeler; iPhone'u olmayan bir ana cihaz her zaman hazırdır. Ana cihazlar tek bir Bluetooth adresi kullanır, bu yüzden yeni seçilen bir ana cihaz kaybolmaz; Android 13 ve üstü ana cihazlar eşleştirmeyi kendiliğinden kabul eder.\nÇok daha dayanıklı: ses ayarları yazılmadan önce denetlenir ve yazarken bir çökme olursa ana cihaz o açılışta güvenli modda kalır; ana cihaz durursa kendini yeniden başlatır; kapatılan Bluetooth yeniden açılır; güç düğmesi yalnızca kaçış hareketi çalışıyorsa engellenir; şarj sınırı pili asla boşaltmaz.\nEkran kilidi uyarısı: PIN varken ana cihaz yeniden başlatmadan sonra çalışamaz."
+    "en": "Pairing is simpler. \"Add host\" on the iPhone only lists hosts that are ready to pair, and a host with no iPhone is always ready. Hosts keep a single Bluetooth address, so a host you've just chosen can't disappear. Hosts with Android 13 or later accept pairing on their own.\nMuch harder to break: audio settings are checked before they're written. If a crash happens while they're being written, the host stays in safe mode until the next restart. The host restarts itself if it ever stops. Bluetooth turns back on if it's switched off. The power button is only blocked when the escape gesture works. The charge limit can never leave the battery draining.\nA screen lock warning: with a PIN, the host can't start after a restart.",
+    "tr": "Eşleştirme artık daha kolay. iPhone'daki \"Ana cihaz ekle\" listesinde yalnızca eşleştirmeye hazır ana cihazlar gösterilir. iPhone ile eşleştirilmemiş bir ana cihaz her zaman eşleştirmeye hazırdır. Ana cihazlar tek bir Bluetooth adresi kullanır. Bu nedenle seçtiğiniz bir ana cihaz listeden kaybolmaz. Android 13 veya üzeri yüklü ana cihazlar eşleştirme isteğini kendiliğinden kabul eder.\nÇok daha dayanıklı: Ses ayarları yazılmadan önce kontrol edilir. Ayarlar yazılırken bir çökme olursa ana cihaz, bir sonraki yeniden başlatmaya kadar güvenli modda kalır. Ana cihaz durursa kendini yeniden başlatır. Bluetooth kapatılırsa yeniden açılır. Güç düğmesi yalnızca kaçış hareketi çalışıyorsa engellenir. Şarj sınırı hiçbir durumda pilin boşalmasına yol açmaz.\nEkran kilidi uyarısı: Ekran kilidi PIN olarak ayarlıysa ana cihaz yeniden başladıktan sonra çalışamaz."
   },
   {
     "version": "0.12.1",
     "code": 37,
-    "en": "Forgetting this host on the iPhone now unpairs it here too, so it can be paired again (or to another iPhone) without leftovers. The paired iPhone can pair again on its own after iOS lost its Bluetooth keys.\nSetup: \"Pair a different iPhone\" is available until setup ends. Android 11 phones no longer show a Fix card that could never clear.\nThe saved log restarts by itself if it stops being written.",
-    "tr": "iPhone'da bu ana cihazı unutmak artık eşleştirmeyi burada da kaldırıyor; böylece yeniden (ya da başka bir iPhone ile) sorunsuz eşleştirilebilir. Eşli iPhone, iOS Bluetooth anahtarlarını kaybettiğinde kendiliğinden yeniden eşleşebilir.\nKurulum: \"Başka bir iPhone eşleştir\" kurulum bitene kadar kullanılabilir. Android 11 telefonlarda artık hiç kapanmayan bir Düzelt kartı görünmüyor.\nKayıt dosyası yazılmayı bırakırsa kendiliğinden yeniden başlıyor."
+    "en": "When you forget this host on the iPhone, it's now unpaired here as well. This means it can be paired again, or with another iPhone, without anything left over. The paired iPhone can pair again on its own after iOS loses its Bluetooth keys.\nSetup: \"Pair a different iPhone\" is available until setup is finished. Android 11 phones no longer show a Fix card that could never be cleared.\nThe saved log restarts on its own if it stops being written.",
+    "tr": "iPhone'da bu ana cihazı unuttuğunuzda eşleştirme artık burada da kaldırılır. Böylece ana cihaz, yeniden veya başka bir iPhone ile sorunsuz şekilde eşleştirilebilir. iOS, Bluetooth anahtarlarını kaybettiğinde eşli iPhone kendiliğinden yeniden eşleşebilir.\nKurulum: \"Başka bir iPhone eşleştir\" seçeneği kurulum tamamlanana kadar kullanılabilir. Android 11 telefonlarda artık hiç kapanmayan bir Düzelt kartı görünmez.\nKayıt dosyasına yazma durursa kayıt kendiliğinden yeniden başlatılır."
   },
   {
     "version": "0.12.0",
     "code": 36,
-    "en": "Setup, step by step: the screen shows one next step at a time (root, install, restart, pairing), remembers where you were, and tells apart \"restart needed\" from a module that didn't start. Fix puts back missing permissions without a restart.\nAnonymous diagnostics: setup steps, failures and call-test results are sent with the phone's model and a log with numbers, names and addresses removed, so we can tell which phones work. One switch on the setup screen turns them off.\nThe iPhone's Report a problem can include this phone's log.",
-    "tr": "Adım adım kurulum: ekran her seferinde tek bir sonraki adımı gösterir (root, kurulum, yeniden başlatma, eşleştirme), kaldığınız yeri hatırlar ve \"yeniden başlatma gerekli\" ile başlamayan bir modülü birbirinden ayırır. Düzelt, eksik izinleri yeniden başlatmadan geri verir.\nAnonim tanılama: kurulum adımları, hatalar ve arama testi sonuçları, telefonun modeli ve numaralar, adlar ve adresler çıkarılmış bir kayıtla gönderilir; böylece hangi telefonların çalıştığını görebiliriz. Kurulum ekranındaki tek bir anahtarla kapatılabilir.\niPhone'daki sorun bildirimi bu telefonun kaydını da içerebilir."
+    "en": "Step-by-step setup: the screen shows one next step at a time (root, installation, restart, pairing), remembers where you left off, and tells \"restart needed\" apart from a module that didn't start. Fix restores missing permissions without a restart.\nAnonymous diagnostics: setup steps, failures and call test results are sent along with the phone's model and a log with numbers, names and addresses removed. This shows us which phones work. A single switch on the setup screen turns this off.\nReport a problem on the iPhone can include this phone's log.",
+    "tr": "Adım adım kurulum: Ekranda her seferinde yalnızca bir sonraki adım gösterilir (root, kurulum, yeniden başlatma, eşleştirme). Kaldığınız adım hatırlanır. \"Yeniden başlatma gerekli\" durumu ile başlatılamayan bir modül birbirinden ayırt edilir. Düzelt, eksik izinleri yeniden başlatmaya gerek kalmadan geri verir.\nAnonim tanılama: Kurulum adımları, hatalar ve arama testi sonuçları; telefonun modeli ve numaraları, adları ve adresleri çıkarılmış bir kayıtla birlikte gönderilir. Bu bilgiler hangi telefonların çalıştığını görmemizi sağlar. Bu gönderim, kurulum ekranındaki tek bir anahtarla kapatılabilir.\niPhone'daki sorun bildirimine bu telefonun kaydı da eklenebilir."
   },
   {
     "version": "0.11.3",
     "code": 35,
-    "en": "Older Snapdragon phones (such as 625, 660, 710, 820, 835): the host now sets up their call audio too.\nYour voice no longer arrives garbled after a long ring on outgoing calls.\nThe host stays silent during its own updates and holds every audio link that keeps it silent in a call.\nMore robust: Bluetooth switched off and on, slow system commands, numbers from UK SIMs.",
-    "tr": "Eski Snapdragon telefonlar (625, 660, 710, 820, 835 gibi): ana cihaz artık bunların arama sesini de kuruyor.\nGiden aramalarda uzun çalmadan sonra sesiniz artık bozuk gitmiyor.\nAna cihaz kendi güncellemeleri sırasında sessiz kalıyor ve aramada onu sessiz tutan tüm ses bağlantılarını tutuyor.\nDaha sağlam: Bluetooth kapatılıp açıldığında, yavaş sistem komutlarında, İngiltere SIM'lerinden gelen numaralarda."
+    "en": "Older Snapdragon phones (such as the 625, 660, 710, 820 and 835): the host now sets up their call audio too.\nOn outgoing calls, your voice no longer arrives garbled after a long ring.\nThe host stays silent during its own updates and keeps every audio connection that keeps it silent during a call.\nMore reliable when Bluetooth is turned off and on, when system commands are slow, and with numbers from UK SIMs.",
+    "tr": "Eski Snapdragon telefonlar (625, 660, 710, 820 ve 835 gibi): Ana cihaz artık bu telefonların arama sesini de ayarlar.\nGiden aramalarda uzun süre çaldıktan sonra sesiniz artık bozuk iletilmez.\nAna cihaz kendi güncellemeleri sırasında sessiz kalır ve arama sırasında sessiz kalmasını sağlayan tüm ses bağlantılarını korur.\nBluetooth kapatılıp açıldığında, sistem komutları yavaş çalıştığında ve İngiltere SIM kartlarından gelen numaralarda artık daha güvenilir şekilde çalışır."
   },
   {
     "version": "0.11.2",
     "code": 34,
-    "en": "After the host restarts (an update, for example), your iPhone reconnects within seconds instead of minutes, even when it's locked.",
-    "tr": "Ana cihaz yeniden başladıktan sonra (örneğin bir güncellemede) iPhone'unuz, kilitliyken bile dakikalar yerine saniyeler içinde yeniden bağlanıyor."
+    "en": "After the host restarts (for example, after an update), your iPhone reconnects within seconds instead of minutes, even when it's locked.",
+    "tr": "Ana cihaz yeniden başladıktan sonra (örneğin bir güncellemenin ardından) iPhone'unuz, kilitli olsa bile dakikalar yerine saniyeler içinde yeniden bağlanır."
   },
   {
     "version": "0.11.1",
     "code": 33,
-    "en": "Call audio sets itself up on many more phones: the host builds its own audio profile on MediaTek phones and on more Qualcomm phones, and adjusts audio settings to what the phone accepts.\nSupport check: phones show their audio family, including families not supported yet.",
-    "tr": "Arama sesi çok daha fazla telefonda kendini kuruyor: ana cihaz MediaTek telefonlarda ve daha fazla Qualcomm telefonda kendi ses profilini oluşturuyor ve ses ayarlarını telefonun kabul ettiğine göre uyarlıyor.\nUyumluluk kontrolü: telefonlar, henüz desteklenmeyenler dahil ses ailesini gösteriyor."
+    "en": "Call audio now sets itself up on many more phones. The host builds its own audio profile on MediaTek phones and on more Qualcomm phones, and adjusts the audio settings to what the phone accepts.\nSupport check: phones now show their audio family, including families that aren't supported yet.",
+    "tr": "Arama sesi artık çok daha fazla telefonda kendiliğinden ayarlanır. Ana cihaz, MediaTek telefonlarda ve daha fazla Qualcomm telefonda kendi ses profilini oluşturur. Ses ayarları da telefonun kabul ettiği değerlere göre uyarlanır.\nUyumluluk kontrolü: Telefonların ses ailesi, henüz desteklenmeyen aileler de dahil olmak üzere gösterilir."
   },
   {
     "version": "0.11.0",
     "code": 32,
-    "en": "MediaTek phones: call audio works both ways (tested on the Redmi Note 8 Pro).\nBox mode: the power button no longer lights the screen.\nThe host keeps its place as the default SMS app, so no SMS goes missing.\nSMS the network never confirms show as \"not confirmed\" instead of failed.\nAndroid 11: VoLTE shown correctly.",
-    "tr": "MediaTek telefonlar: arama sesi iki yönde de çalışıyor (Redmi Note 8 Pro'da denendi).\nKutu modu: güç tuşu artık ekranı yakmıyor.\nAna cihaz varsayılan SMS uygulaması olarak kalıyor, böylece hiçbir SMS kaybolmuyor.\nŞebekenin onaylamadığı SMS'ler başarısız yerine \"onaylanmadı\" olarak görünüyor.\nAndroid 11: VoLTE doğru gösteriliyor."
+    "en": "MediaTek phones: call audio works in both directions (tested on the Redmi Note 8 Pro).\nBox mode: the power button no longer turns the screen on.\nThe host stays the default SMS app, so no texts go missing.\nTexts that the network never confirms show as \"not confirmed\" instead of failed.\nAndroid 11: VoLTE is shown correctly.",
+    "tr": "MediaTek telefonlar: Arama sesi iki yönde de çalışır (Redmi Note 8 Pro'da test edildi).\nKutu modu: Güç düğmesi artık ekranı açmaz.\nAna cihaz varsayılan SMS uygulaması olarak kalır. Böylece hiçbir mesaj kaybolmaz.\nŞebeke tarafından onaylanmayan mesajlar artık \"başarısız\" yerine \"onaylanmadı\" olarak gösterilir.\nAndroid 11: VoLTE durumu doğru gösterilir."
   },
   {
     "version": "0.10.3",
     "code": 31,
-    "en": "Host Wi-Fi: when you're away, the host now reliably joins your saved network with its screen off (Samsung could leave it unjoined).",
-    "tr": "Ana cihazın Wi-Fi'ı: siz uzaktayken ana cihaz, ekranı kapalıyken de kayıtlı ağınıza güvenilir şekilde katılıyor (Samsung'da katılmadan kalabiliyordu)."
+    "en": "Host Wi-Fi: when you're away, the host now reliably joins your saved network while its screen is off (on Samsung phones, it sometimes didn't join).",
+    "tr": "Ana cihazın Wi-Fi bağlantısı: Siz uzaktayken ana cihaz, ekranı kapalı olsa bile artık kayıtlı ağınıza güvenilir şekilde bağlanır (Samsung telefonlarda bazen bağlanmıyordu)."
   },
   {
     "version": "0.10.2",
     "code": 30,
-    "en": "When you leave the host, an unused hotspot turns off by itself (so the host can use its Wi-Fi while you're away).\nNo hotspot start during an internet call.\nHermesSIM shows what the host's internet runs on: Wi-Fi or mobile data.",
-    "tr": "Ana cihazdan ayrıldığınızda kullanılmayan hotspot kendiliğinden kapanır (böylece siz uzaktayken ana cihaz Wi-Fi'ını kullanabilir).\nİnternet üzerinden arama sırasında hotspot açılmaz.\nHermesSIM, ana cihazın internetinin neyle çalıştığını gösterir: Wi-Fi veya mobil veri."
+    "en": "When you leave the host, an unused hotspot turns off on its own, so the host can use its Wi-Fi while you're away.\nThe hotspot doesn't start during an internet call.\nHermesSIM shows what the host's internet connection uses: Wi-Fi or mobile data.",
+    "tr": "Ana cihazdan uzaklaştığınızda kullanılmayan hotspot kendiliğinden kapanır. Böylece siz uzaktayken ana cihaz kendi Wi-Fi bağlantısını kullanabilir.\nİnternet üzerinden yapılan bir arama sırasında hotspot açılmaz.\nHermesSIM, ana cihazın internet bağlantısının Wi-Fi mı yoksa mobil veri mi olduğunu gösterir."
   },
   {
     "version": "0.10.1",
     "code": 29,
     "en": "Host Wi-Fi: the list of networks the host can see now works on Samsung phones.",
-    "tr": "Ana cihazın Wi-Fi'ı: ana cihazın gördüğü ağların listesi artık Samsung telefonlarda da çalışıyor."
+    "tr": "Ana cihazın Wi-Fi bağlantısı: Ana cihazın bulduğu ağların listesi artık Samsung telefonlarda da çalışır."
   },
   {
     "version": "0.10.0",
     "code": 28,
-    "en": "First MediaTek phone (Redmi Note 8 Pro), Android 11 and MIUI support.\nFixed: on Android 11 the phone restarted itself about 25 s after every boot.\nHost Wi-Fi: off while your iPhone is nearby or the hotspot is on; optionally on while you're away.\nHotspot: WPA2 only (WPA3 failed to start on some phones).\nThe setup screen no longer crashes on a fresh install.",
-    "tr": "İlk MediaTek telefon (Redmi Note 8 Pro), Android 11 ve MIUI desteği.\nDüzeltildi: Android 11'de telefon her açılıştan yaklaşık 25 sn sonra kendini yeniden başlatıyordu.\nAna cihazın Wi-Fi'ı: iPhone'unuz yakındayken veya hotspot açıkken kapalı; isterseniz siz uzaktayken açık.\nHotspot: yalnızca WPA2 (WPA3 bazı telefonlarda açılmıyordu).\nKurulum ekranı yeni kurulumda artık çökmüyor."
+    "en": "Support for the first MediaTek phone (Redmi Note 8 Pro), Android 11 and MIUI.\nFixed: on Android 11, the phone restarted itself about 25 seconds after every boot.\nHost Wi-Fi: off while your iPhone is nearby or the hotspot is on. You can choose to turn it on while you're away.\nHotspot: WPA2 only (WPA3 failed to start on some phones).\nThe setup screen no longer crashes after a fresh installation.",
+    "tr": "İlk MediaTek telefon (Redmi Note 8 Pro), Android 11 ve MIUI desteği eklendi.\nDüzeltildi: Android 11'de telefon her açılıştan yaklaşık 25 saniye sonra kendiliğinden yeniden başlıyordu.\nAna cihazın Wi-Fi bağlantısı: iPhone'unuz yakındayken veya hotspot açıkken kapalı kalır. İsterseniz siz uzaktayken açılmasını sağlayabilirsiniz.\nHotspot: Yalnızca WPA2 kullanılır (bazı telefonlarda WPA3 ile hotspot başlatılamıyordu).\nKurulum ekranı artık yeni bir yüklemenin ardından çökmez."
   },
   {
     "version": "0.9.9",
     "code": 27,
-    "en": "Until a host passes its call test, HermesSIM stays out of calls: they ring on the host as usual and appear on your iPhone as missed calls.",
-    "tr": "Ana cihaz arama testini geçene kadar HermesSIM aramalara karışmaz: aramalar ana cihazda her zamanki gibi çalar ve iPhone'unuzda cevapsız arama olarak görünür."
+    "en": "Until a host passes its call test, HermesSIM doesn't handle calls. Calls ring on the host as usual and appear on your iPhone as missed calls.",
+    "tr": "Ana cihaz arama testini başarıyla tamamlayana kadar aramalar HermesSIM üzerinden iletilmez. Aramalar ana cihazda her zamanki gibi çalar ve iPhone'unuzda cevapsız arama olarak görünür."
   },
   {
     "version": "0.9.8",
     "code": 26,
-    "en": "Reliability: remote-mode call audio can no longer get stuck after a call, a lost network check keeps a downloaded update, and the host stays quiet in calls without relayed audio.\nGroundwork for more phones: audio settings come from each phone family's profile.",
-    "tr": "Güvenilirlik: uzaktan mod arama sesi artık bir aramadan sonra takılı kalmıyor, başarısız bir ağ denetimi indirilmiş güncellemeyi kaybetmiyor ve ses aktarılmayan aramalarda ana cihaz sessiz kalıyor.\nDaha fazla telefon için altyapı: ses ayarları her telefon ailesinin profilinden geliyor."
+    "en": "Reliability: call audio in remote mode can no longer get stuck after a call, a failed network check no longer loses a downloaded update, and the host stays silent during calls whose audio isn't passed through.\nGroundwork for more phones: audio settings now come from each phone family's profile.",
+    "tr": "Güvenilirlik: Uzaktan modda arama sesi artık bir aramanın ardından takılı kalmaz. Başarısız bir ağ kontrolü artık indirilmiş bir güncellemenin kaybolmasına yol açmaz. Sesi aktarılmayan aramalarda ana cihaz sessiz kalır.\nDaha fazla telefon için altyapı: Ses ayarları artık her telefon ailesinin kendi profilinden alınır."
   },
   {
     "version": "0.9.7",
     "code": 25,
-    "en": "After the host app restarts (for example after an update), your iPhone reconnects within seconds.",
-    "tr": "Ana cihaz uygulaması yeniden başladıktan sonra (örneğin bir güncellemeden sonra) iPhone'unuz saniyeler içinde yeniden bağlanıyor."
+    "en": "After the host app restarts (for example, after an update), your iPhone reconnects within seconds.",
+    "tr": "Ana cihaz uygulaması yeniden başladıktan sonra (örneğin bir güncellemenin ardından) iPhone'unuz saniyeler içinde yeniden bağlanır."
   },
   {
     "version": "0.9.6",
     "code": 24,
-    "en": "Updating shows each step on your iPhone: installing, restarting, and done.",
-    "tr": "Güncelleme her adımı iPhone'unuzda gösteriyor: yükleniyor, yeniden başlıyor ve tamamlandı."
+    "en": "Your iPhone now shows each step of an update: installing, restarting and done.",
+    "tr": "Güncellemenin her adımı artık iPhone'unuzda gösterilir: yükleniyor, yeniden başlatılıyor ve tamamlandı."
   },
   {
     "version": "0.9.5",
     "code": 23,
-    "en": "The host reports changes faster: the hotspot shows \"Starting…\" at once, and the app and widgets update sooner.",
-    "tr": "Ana cihaz değişiklikleri daha hızlı bildiriyor: hotspot hemen \"Açılıyor…\" gösteriyor, uygulama ve widget'lar daha çabuk güncelleniyor."
+    "en": "The host reports changes faster. The hotspot shows \"Starting…\" right away, and the app and widgets update sooner.",
+    "tr": "Ana cihaz değişiklikleri artık daha hızlı bildirir. Hotspot hemen \"Başlatılıyor…\" olarak gösterilir. Uygulama ve widget'lar da daha kısa sürede güncellenir."
   },
   {
     "version": "0.9.4",
     "code": 22,
-    "en": "Fixes messages from the host arriving broken when they were long (update notes, long texts).\nUpdates install at night only an hour or more after your iPhone was told, so you can still choose Later.",
-    "tr": "Ana cihazdan gelen uzun mesajların (güncelleme notları, uzun SMS'ler) bozuk ulaşması düzeltildi.\nGüncellemeler gece, iPhone'unuza haber verildikten en az bir saat sonra yüklenir; böylece hâlâ \"Sonra\"yı seçebilirsiniz."
+    "en": "Fixed long messages from the host (such as update notes and long texts) arriving broken.\nNight-time updates are only installed at least an hour after your iPhone has been notified, so you can still choose Later.",
+    "tr": "Ana cihazdan gelen uzun mesajların (güncelleme notları ve uzun SMS'ler gibi) bozuk ulaşması sorunu giderildi.\nGece yüklenen güncellemeler, iPhone'unuza bildirim gönderildikten en az bir saat sonra yüklenir. Böylece \"Sonra\" seçeneğini yine seçebilirsiniz."
   },
   {
     "version": "0.9.3",
     "code": 21,
-    "en": "Automatic hotspot recognises your iPhone on the host's hotspot more reliably, so turning the hotspot off yourself stays off.",
-    "tr": "Otomatik hotspot, iPhone'unuzun ana cihazın hotspot'una bağlı olduğunu daha güvenilir anlıyor; hotspot'u kendiniz kapattığınızda kapalı kalıyor."
+    "en": "The automatic hotspot recognises your iPhone on the host's hotspot more reliably, so if you turn the hotspot off yourself, it stays off.",
+    "tr": "Otomatik hotspot, iPhone'unuzun ana cihazın hotspot'una bağlı olduğunu artık daha güvenilir şekilde algılar. Böylece hotspot'u kendiniz kapattığınızda hotspot kapalı kalır."
   },
   {
     "version": "0.9.2",
     "code": 20,
-    "en": "Fixes robotic or choppy sound for the other caller on some calls; the host now repairs its audio output by itself if it ever stalls.\nMobile data switch: the hotspot turns it on, you can turn it off.\nThe hotspot shows \"Starting…\" while it comes up.\nUpdates: the host updates itself after asking your iPhone.",
-    "tr": "Bazı aramalarda karşı tarafın sesinizi robotik ya da kesik duyması düzeltildi; ana cihaz ses çıkışı takılırsa artık kendini onarıyor.\nMobil veri anahtarı: hotspot açar, siz kapatabilirsiniz.\nHotspot açılırken \"Açılıyor…\" gösterir.\nGüncellemeler: ana cihaz iPhone'unuza sorduktan sonra kendini günceller."
+    "en": "Fixed your voice sounding robotic or choppy to the other person on some calls. The host now repairs its audio output on its own if it ever stalls.\nMobile data switch: the hotspot turns mobile data on, and you can turn it off.\nThe hotspot shows \"Starting…\" while it turns on.\nUpdates: the host updates itself after asking your iPhone.",
+    "tr": "Bazı aramalarda sesinizin karşı tarafa robotik veya kesik ulaşması sorunu giderildi. Ana cihazın ses çıkışı takılırsa ana cihaz artık bu sorunu kendiliğinden giderir.\nMobil veri anahtarı: Hotspot mobil veriyi açar. Mobil veriyi siz kapatabilirsiniz.\nHotspot açılırken \"Başlatılıyor…\" olarak gösterilir.\nGüncellemeler: Ana cihaz, iPhone'unuza sorduktan sonra kendini günceller."
   }
 ]
