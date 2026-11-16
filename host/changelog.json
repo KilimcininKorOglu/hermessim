@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.2.5",
+    "code": 70,
+    "en": "The host screen could show the background service as not running in red for a moment when you opened it, although the service was running. It now shows the service as running from the start. While the check is still in progress it says Starting… instead of Not running.",
+    "tr": "Ana cihaz ekranı açıldığında arka plan hizmeti çalıştığı hâlde bir an kırmızı renkte \"Çalışmıyor\" gösterebiliyordu. Artık hizmeti baştan çalışıyor olarak gösterir. Kontrol sürerken \"Çalışmıyor\" yerine \"Başlatılıyor…\" yazar."
+  },
+  {
     "version": "1.2.4",
     "code": 69,
     "en": "A host whose Bluetooth sends only in the smallest radio packets (a Galaxy A13 is one) now sends the caller's voice at the lower bit rate from the first moment of a call's Bluetooth audio. 1.2.3 waited until it saw the link fall behind. That sign came too late: Android's Bluetooth holds several seconds of audio in its own queue before the host can notice, so a call came through in broken pieces for about 20 seconds and then arrived late.\nThis still happens only on hosts whose Bluetooth record shows the small packets. Other hosts work as before. A call whose Bluetooth fades still moves to the internet when it can.",
