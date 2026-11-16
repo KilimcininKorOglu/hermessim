@@ -43,8 +43,8 @@ android {
         applicationId = "com.keremgok.hermessim.host"
         minSdk = 30
         targetSdk = 33   // TODO(M6): 34+ needs foregroundServiceType declarations
-        versionCode = 70
-        versionName = "1.2.5"
+        versionCode = 71
+        versionName = "1.2.6"
     }
     sourceSets["main"].apply {
         // Device profiles (repo-root profiles/) ship as assets, e.g. assets/qcom/sm8250-samsung-r8q.json

@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.2.6",
+    "code": 71,
+    "en": "The pairing code now stands in its own centred box on the host screen, in large digits, with the time left below it.\nThe host screen could show the background service as not running in red for a moment when you opened it, although the service was running. It now shows the service as running from the start. While the check is still in progress it says Starting… instead of Not running.",
+    "tr": "Eşleştirme kodu artık ana cihaz ekranında kendi ortalı kutusunda, büyük rakamlarla durur. Kalan süre kodun altında yazar.\nAna cihaz ekranı açıldığında arka plan hizmeti çalıştığı hâlde bir an kırmızı renkte \"Çalışmıyor\" gösterebiliyordu. Artık hizmeti baştan çalışıyor olarak gösterir. Kontrol sürerken \"Çalışmıyor\" yerine \"Başlatılıyor…\" yazar."
+  },
+  {
     "version": "1.2.5",
     "code": 70,
     "en": "The host screen could show the background service as not running in red for a moment when you opened it, although the service was running. It now shows the service as running from the start. While the check is still in progress it says Starting… instead of Not running.",
