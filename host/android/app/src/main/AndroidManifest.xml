@@ -3,13 +3,16 @@
      Installed as a privileged system app by the Magisk module (host/magisk). Every privileged
      permission requested here MUST be listed in host/magisk/privapp-permissions-com.keremgok.hermessim.host.xml:
      this ROM enforces it (ro.control_privapp_permissions=enforce) and refuses to boot otherwise. -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- ProtectedPermissions below: the module installs this app as a privileged system app, which is granted these
+         (each one is in the privapp permissions file); a normal install does not get them and the app says so. -->
     <!-- privileged: lets Telecom bind our non-UI InCallService (the BCR technique) -->
-    <uses-permission android:name="android.permission.CONTROL_INCALL_EXPERIENCE" />
+    <uses-permission android:name="android.permission.CONTROL_INCALL_EXPERIENCE" tools:ignore="ProtectedPermissions" />
     <!-- privileged: Wi-Fi hotspot with internet sharing (TetheringManager) and reading its SSID/passphrase -->
-    <uses-permission android:name="android.permission.TETHER_PRIVILEGED" />
-    <uses-permission android:name="android.permission.OVERRIDE_WIFI_CONFIG" />
+    <uses-permission android:name="android.permission.TETHER_PRIVILEGED" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.OVERRIDE_WIFI_CONFIG" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
 
@@ -19,13 +22,13 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Dual SIM: per-SIM status (ICCID, switched-off SIMs) and settings (data roaming, data SIM, SIM on/off) -->
-    <uses-permission android:name="android.permission.READ_PRIVILEGED_PHONE_STATE" />
-    <uses-permission android:name="android.permission.MODIFY_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_PRIVILEGED_PHONE_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MODIFY_PHONE_STATE" tools:ignore="ProtectedPermissions" />
     <!-- Box mode: settings (AOD, wake gestures, scans, location); WRITE_SETTINGS is an app-op the module allows -->
-    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <!-- The box-mode escape gesture opens the setup checklist from the background -->
-    <uses-permission android:name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" />
+    <uses-permission android:name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" tools:ignore="ProtectedPermissions" />
 
     <!-- Only hermessimd (root) sends these broadcasts; no other app can hold a signature permission of ours. -->
     <permission android:name="com.keremgok.hermessim.host.permission.DAEMON" android:protectionLevel="signature" />
@@ -52,6 +55,9 @@
     <uses-permission android:name="android.permission.RECEIVE_WAP_PUSH" />
 
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+    <!-- The host holds the SIM and needs a phone radio. Not "required": the module installs the app, no store filters it,
+         and the setup screen tells a phone without one that it can't be a host. -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <!-- Pre-root check: is Magisk installed? -->
     <queries>
@@ -73,6 +79,7 @@
     <application
         android:name=".HostApp"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:persistent="true">
@@ -87,7 +94,6 @@
         <activity
             android:name=".SetupActivity"
             android:exported="true"
-            android:label="@string/app_name"
             android:launchMode="singleTask"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
             <intent-filter>
