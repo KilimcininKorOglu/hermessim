@@ -11,7 +11,9 @@ import javax.crypto.spec.SecretKeySpec
  * pairing attempt with a key made for that attempt, so its run time tells an observer nothing that lasts.
  */
 object X25519 {
-    private val P = BigInteger.TWO.pow(255) - BigInteger.valueOf(19)
+    // BigInteger.TWO is API 33; the host runs from Android 11
+    private val TWO = BigInteger.valueOf(2)
+    private val P = TWO.pow(255) - BigInteger.valueOf(19)
     private val A24 = BigInteger.valueOf(121_665)
     private val BASE = ByteArray(32).also { it[0] = 9 }
 
@@ -32,7 +34,7 @@ object X25519 {
             a = next.first; b = next.second
         }
         if (swap) a = b
-        return bytes(a.first * a.second.modPow(P - BigInteger.TWO, P) % P)
+        return bytes(a.first * a.second.modPow(P - TWO, P) % P)
     }
 
     /** One step of the Montgomery ladder: doubles [a] and adds [b] to it. */
@@ -44,7 +46,7 @@ object X25519 {
         val aa = sumA * sumA % P
         val bb = difA * difA % P
         val e = (aa - bb).mod(P)
-        val added = Pair((da + cb).modPow(BigInteger.TWO, P), u * (da - cb).mod(P).modPow(BigInteger.TWO, P) % P)
+        val added = Pair((da + cb).modPow(TWO, P), u * (da - cb).mod(P).modPow(TWO, P) % P)
         val doubled = Pair(aa * bb % P, e * ((aa + A24 * e) % P) % P)
         return doubled to added
     }
