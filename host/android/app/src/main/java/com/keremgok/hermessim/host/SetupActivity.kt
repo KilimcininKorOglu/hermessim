@@ -65,6 +65,8 @@ class SetupActivity : Activity() {
     private var host = false
     private var shown: Model? = null
     private var countdown: TextView? = null
+    private var pairCode: TextView? = null                   // the large code above the countdown, while a code is shown
+    private var pairLabel: TextView? = null
     private var retireStatus: TextView? = null              // the removal's progress screen, while it is up
     private var batteryCare: LinearLayout? = null           // created once; re-added after every model redraw
     private var batteryTarget: TextView? = null
@@ -598,11 +600,25 @@ class SetupActivity : Activity() {
             addView(text(k.title, 20f, c.text, bold = true).apply { setPadding(dp(12), 0, 0, 0); isFocusable = true })
         })
         addView(text(k.body, 15.5f, c.text).apply { setPadding(0, dp(12), 0, 0); setLineSpacing(0f, 1.15f) })
-        countdown = if (k.countdown) text("", 14f, c.accent, bold = true).apply {
-            setPadding(0, dp(10), 0, 0); accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-        }.also { addView(it) } else null
+        if (k.countdown) addView(pairingBlock(), lp(top = 16)) else { countdown = null; pairCode = null; pairLabel = null }
         k.primary?.let { addView(button(it, primary = true), lp(top = 16)) }
         k.secondary?.let { addView(button(it, primary = false), lp(top = 8)) }
+    }
+
+    /** The code a phone types, large and centred: its label, the six digits, then how long the window stays open. */
+    private fun pairingBlock() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER_HORIZONTAL
+        background = rounded(c.bg, 14)
+        setPadding(dp(12), dp(14), dp(12), dp(14))
+        accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        val label = text(getString(R.string.pair_code_label), 15f, c.secondary).apply { gravity = Gravity.CENTER }
+        val code = text("", 40f, c.accent, bold = true).apply { gravity = Gravity.CENTER; letterSpacing = 0.12f }
+        val left = text("", 14f, c.secondary).apply { gravity = Gravity.CENTER; setPadding(0, dp(4), 0, 0) }
+        addView(label); addView(code); addView(left)
+        pairLabel = label
+        pairCode = code
+        countdown = left
     }
 
     private fun updateCountdown() {
@@ -618,8 +634,17 @@ class SetupActivity : Activity() {
             left > 0 -> getString(R.string.pair_open_left, "%d:%02d".format(left / 60, left % 60))
             else -> ""
         }
-        val s = listOfNotNull(code?.let { getString(R.string.pair_code, it) }, open.ifEmpty { null }).joinToString("\n")
-        if (t.text.toString() != s) t.text = s
+        pairCode?.let { v -> if (v.text.toString() != code.orEmpty()) v.text = code.orEmpty() }
+        pairCodeShown(code != null)
+        if (t.text.toString() != open) t.text = open
+        t.visibility = if (open.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    /** The label and the digits show only while a code is up; the countdown line keeps its own rule. */
+    private fun pairCodeShown(on: Boolean) {
+        val v = if (on) View.VISIBLE else View.GONE
+        pairLabel?.visibility = v
+        pairCode?.visibility = v
     }
 
     private fun row(k: Check) = LinearLayout(this).apply {

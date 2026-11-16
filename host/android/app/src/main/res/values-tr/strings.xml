@@ -75,7 +75,7 @@
     <string name="lock_title">Ekran kilidini kaldırın</string>
     <string name="lock_body">PIN, desen veya şifre varken Android, her yeniden başlatma veya elektrik kesintisinden sonra telefonun kilidi açılana kadar HermesSIM\'i kilitli tutar; çantanızdaki ya da evde bıraktığınız bir telefonun kilidini de kimse açmaz. Ekran kilidini Yok (veya Kaydırma) yapın.</string>
     <string name="btn_lock_settings">Ekran kilidi ayarlarını aç</string>
-    <string name="pair_code">Eşleştirme kodu: %1$s</string>
+    <string name="pair_code_label">Eşleştirme kodu</string>
     <string name="btn_open_pairing">Eşleştirmeyi aç (5 dk)</string>
     <string name="next_title">Telefonunuzda devam edin</string>
     <string name="next_test">%1$s ile eşleşti. Sıradaki adım, telefonunuzdaki HermesSIM\'de: Ana cihaz → Arama sesi → Arama testini yap. Bir arkadaşınızı arayın ve ses çıkarıp çıkarmadığını duymak için bu telefonu yanınızda tutun.</string>
