@@ -100,7 +100,9 @@ class SetupActivity : Activity() {
         window.insetsController?.setSystemBarsAppearance(
             if (light) android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS else 0,
             android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS)
-        root.addView(text(getString(R.string.checking), 16f, c.secondary))
+        // Same title and subtitle place as the built screen, so nothing jumps when the first build replaces it
+        root.addView(text(getString(R.string.app_name), 28f, c.text, bold = true))
+        root.addView(text(getString(R.string.checking), 15f, c.secondary).apply { setPadding(0, dp(2), 0, dp(14)) })
     }
 
     override fun onResume() {
