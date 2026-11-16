@@ -190,7 +190,9 @@ object Daemon {
     fun probe(done: (String?) -> Unit) {
         if (!probing.compareAndSet(false, true)) return
         exec.execute {
-            val r = runCatching { if (connect()) send("HELLO") else null }.getOrNull()
+            val r = runCatching { if (connect()) send("HELLO") else null }
+                .onFailure { e -> Log.w(TAG, "daemon probe failed: $e") }.getOrNull()
+            if (r == null) Log.w(TAG, "daemon probe: no answer")
             // A daemon restart leaves the cached LocalSocket dead. Drop it here, or every probe keeps
             // failing on the same socket and the setup screen reports the daemon down while it is up.
             if (r == null) close()
