@@ -40,9 +40,7 @@ object RootSms {
         val binder = Class.forName("android.os.ServiceManager").getMethod("getService", String::class.java).invoke(null, "isms") as IBinder
         val isms = Class.forName("com.android.internal.telephony.ISms\$Stub").getMethod("asInterface", IBinder::class.java).invoke(null, binder)
         val int = Int::class.javaPrimitiveType
-        val subs = runCatching {
-            systemContext().getSystemService(SubscriptionManager::class.java).activeSubscriptionInfoList.orEmpty().map { it.subscriptionId }
-        }.getOrDefault(emptyList())
+        val subs = activeSubs()
         if (subs.isEmpty()) {                                       // no SIM yet: the default phone's copy
             isms.javaClass.getMethod("setPremiumSmsPermission", String::class.java, int).invoke(isms, pkg, answer)
             return 0
@@ -53,6 +51,17 @@ object RootSms {
             require(now == answer) { "subscription $sub answers $now" }
         }
         return subs.size
+    }
+
+    /** The active SIMs' subscription ids; none when they can't be read, and then the default phone's copy is set. */
+    private fun activeSubs(): List<Int> = try {
+        systemContext().getSystemService(SubscriptionManager::class.java).activeSubscriptionInfoList.orEmpty().map { it.subscriptionId }
+    } catch (e: SecurityException) {
+        emptyList()
+    } catch (e: ReflectiveOperationException) {                 // no system context in this process
+        emptyList()
+    } catch (e: RuntimeException) {                             // telephony not up yet
+        emptyList()
     }
 
     /** A context in this bare process (as [RootCallState]): telephony's service handles come with the mainline modules. */

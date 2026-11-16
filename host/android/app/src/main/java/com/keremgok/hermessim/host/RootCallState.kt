@@ -45,6 +45,9 @@ object RootCallState {
             Thread { runCatching { while (System.`in`.read() >= 0) Unit }; exitProcess(0) }.apply { isDaemon = true }.start()
             Handler(Looper.getMainLooper()).postDelayed({ exitProcess(0) }, 180_000)
             Looper.loop()
+        } catch (e: SecurityException) {                    // this root process may not read the SIMs or listen
+            say("error permission $e")
+            exitProcess(1)
         } catch (t: Throwable) {
             say("error ${t.cause ?: t}")
             exitProcess(1)

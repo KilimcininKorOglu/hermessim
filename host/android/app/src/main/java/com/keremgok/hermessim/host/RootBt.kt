@@ -1,6 +1,7 @@
 // HermesSIM host. Copyright (C) 2026 SIM Relay authors. GPL-3.0-or-later.
 package com.keremgok.hermessim.host
 
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 
 /**
@@ -19,11 +20,15 @@ object RootBt {
             val adapter = adapter() ?: return println("error no Bluetooth adapter: $why")
             if (args[0] == "check") return println("ok ${adapter.state}")
             require(args.size == 2) { "usage" }
-            @Suppress("MissingPermission")
             val dev = adapter.getRemoteDevice(args[1])
+            // This runs as root in its own process, not in the app, so the app's manifest can't grant
+            // BLUETOOTH_PRIVILEGED; a refusal still ends in the SecurityException catch below.
+            @SuppressLint("MissingPermission")
             val ok = if (args[0] == "confirm") dev.setPairingConfirmation(true)
                 else dev.javaClass.getMethod("removeBond").invoke(dev) as Boolean
             println(if (ok) "ok" else "error refused")
+        } catch (e: SecurityException) {                    // this root process lacks the Bluetooth permission
+            println("error permission $e")
         } catch (t: Throwable) {
             println("error ${t.cause ?: t}")
         }
