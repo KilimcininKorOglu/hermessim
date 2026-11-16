@@ -255,8 +255,8 @@ object Relay {
 
     // ------------------------------------------------------------- what other parts ask
 
-    /** For the setup screen: paired client model (null = not paired), connected now, pairing code shown. */
-    fun pairedClient(): String? = pinned()?.let { prefs().getString("client_model", null) ?: "your phone" }
+    /** For the setup screen: the paired phone's model; null when no phone is paired, empty when its model is unknown. */
+    fun pairedClient(): String? = pinned()?.let { prefs().getString("client_model", null).orEmpty() }
 
     /** For the setup screen: Android's last answer to our advertising ([BleLink.advStatus]; null: none yet). */
     fun advertisingStatus(): Int? = if (::ble.isInitialized) ble.advStatus else null

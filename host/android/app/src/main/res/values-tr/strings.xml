@@ -125,6 +125,7 @@
     <string name="ble_retrying">Android, Bluetooth yayınını başlatamadı (kod %1$d). Yeniden deneniyor.</string>
     <string name="c_client">Telefonunuz</string>
     <string name="client_none">Eşleştirilmiş telefon yok</string>
+    <string name="paired_phone_unnamed">telefonunuz</string>
     <string name="client_connected">%s bağlı</string>
     <string name="client_away">%s eşli. Ancak şu an Bluetooth menzilinde değil</string>
     <string name="c_sim">SIM</string>

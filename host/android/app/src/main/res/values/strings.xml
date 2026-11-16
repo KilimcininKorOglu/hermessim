@@ -131,6 +131,7 @@
     <string name="ble_retrying">Android couldn\'t start the Bluetooth broadcast (code %1$d). Trying again.</string>
     <string name="c_client">Your phone</string>
     <string name="client_none">No phone paired</string>
+    <string name="paired_phone_unnamed">your phone</string>
     <string name="client_connected">%s is connected</string>
     <string name="client_away">%s is paired but out of Bluetooth range right now</string>
     <string name="c_sim">SIM</string>

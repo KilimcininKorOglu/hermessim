@@ -252,7 +252,7 @@ class SetupActivity : Activity() {
         val silent = Onboarding.silent(this)
         val bt = getSystemService(BluetoothManager::class.java).adapter
         val btOn = bt?.isEnabled == true
-        val paired = Relay.pairedClient()
+        val paired = pairedName()
         val sims = runCatching { Sims.status(this) }.getOrDefault(emptyList())
         val v = Compat.onThisPhone(Compat.verdict(this), Daemon.profile())
         val permsOk = runtimeMissing.isEmpty() && sms && dialer && battery && silent
@@ -270,8 +270,8 @@ class SetupActivity : Activity() {
             bluetoothCheck(btOn),
             Check(getString(R.string.c_lock), if (locked) Mark.WARN else Mark.OK, getString(if (locked) R.string.lock_on else R.string.lock_off)),
             Check(getString(R.string.c_client), if (paired != null && Relay.clientConnected()) Mark.OK else Mark.WARN,
-                when { paired == null -> getString(R.string.client_none); Relay.clientConnected() -> getString(R.string.client_connected, paired)
-                    else -> getString(R.string.client_away, paired) }),
+                when { paired == null -> getString(R.string.client_none); Relay.clientConnected() -> sentence(getString(R.string.client_connected, paired))
+                    else -> sentence(getString(R.string.client_away, paired)) }),
             // A switched-off SIM isn't fine either (it showed as OK; audit, 20 Oct 2026)
             Check(getString(R.string.c_sim), when { sims.isEmpty() -> Mark.FAIL; sims.any { it.lock != LineLock.LINE_LOCK_OPEN || !it.enabled } -> Mark.WARN; else -> Mark.OK },
                 if (sims.isEmpty()) getString(R.string.sim_none) else sims.joinToString("\n") { simLine(it) }),
@@ -327,11 +327,11 @@ class SetupActivity : Activity() {
                 }, s.slot + 1), Mark.WARN)) }
             sims.none { it.enabled } -> at(6, Card(getString(R.string.sim_off_title), getString(R.string.sim_switched_off), Mark.WARN))
             Daemon.hasProfile() && !VoiceGate.fullVoice -> at(6, Card(getString(R.string.next_title),
-                getString(if (VoiceGate.passedBeforeUpdate) R.string.next_retest else R.string.next_test, paired), Mark.WARN,
+                sentence(getString(if (VoiceGate.passedBeforeUpdate) R.string.next_retest else R.string.next_test, paired)), Mark.WARN,
                 secondary = other, countdown = pairing))
-            !Daemon.hasProfile() && !Box.on -> at(6, Card(getString(R.string.next_title), getString(R.string.next_basic, paired), Mark.WARN,
+            !Daemon.hasProfile() && !Box.on -> at(6, Card(getString(R.string.next_title), sentence(getString(R.string.next_basic, paired)), Mark.WARN,
                 secondary = other, countdown = pairing))
-            !Box.on -> at(6, Card(getString(R.string.next_title), getString(R.string.next_box, paired), Mark.WARN,
+            !Box.on -> at(6, Card(getString(R.string.next_title), sentence(getString(R.string.next_box, paired)), Mark.WARN,
                 secondary = other, countdown = pairing))
             // A different iPhone may pair while the window is open (it then replaces this one): show the countdown.
             else -> Model(sub, 0, 0, Card(getString(R.string.done_title), getString(R.string.done_body), Mark.OK,
@@ -491,7 +491,7 @@ class SetupActivity : Activity() {
             }
             Act.OPEN_PAIRING -> { Relay.openPairing(); again() }
             Act.PAIR_OTHER -> AlertDialog.Builder(this)
-                .setMessage(getString(R.string.pair_other_confirm, Relay.pairedClient() ?: ""))
+                .setMessage(getString(R.string.pair_other_confirm, pairedName().orEmpty()))
                 .setPositiveButton(R.string.btn_continue) { _, _ -> unlocked { Relay.openPairing(); again() } }
                 .setNegativeButton(R.string.btn_cancel, null).show()
             Act.OPEN_MAGISK -> magiskIntent()?.let { i -> runCatching { startActivity(i) } }
@@ -778,6 +778,13 @@ class SetupActivity : Activity() {
             if (error == null) { dialog.dismiss(); shown = null; tick.run() } else field.error = error
         }
     }
+
+    /** The paired phone's model, or a translated "your phone" when the model is unknown; null when none is paired. */
+    private fun pairedName(): String? = Relay.pairedClient()?.ifEmpty { getString(R.string.paired_phone_unnamed) }
+
+    /** [text] with its first letter capitalised, for lines that start with the paired phone's name. */
+    private fun sentence(text: String): String =
+        text.replaceFirstChar { it.titlecase(resources.configuration.locales[0]) }
 
     /** The counter under the name field, in characters (nobody counts bytes). */
     private fun btNameLeftText(left: Int): String = when {
