@@ -115,6 +115,7 @@
     <string name="c_service">Arka plan hizmeti</string>
     <string name="service_ok">Çalışıyor</string>
     <string name="service_down">Çalışmıyor</string>
+    <string name="service_starting">Başlatılıyor…</string>
     <string name="c_permissions">İzinler ve roller</string>
     <string name="perm_ok">Telefon, SMS, Bluetooth; varsayılan telefon ve SMS uygulaması; asla uyutulmaz; tam sessizlik</string>
     <string name="c_bluetooth">Bluetooth</string>

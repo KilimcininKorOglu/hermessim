@@ -121,6 +121,7 @@
     <string name="c_service">Background service</string>
     <string name="service_ok">Running</string>
     <string name="service_down">Not running</string>
+    <string name="service_starting">Starting…</string>
     <string name="c_permissions">Permissions and roles</string>
     <string name="perm_ok">Phone, SMS, Bluetooth; default phone and SMS app; never put to sleep; total silence</string>
     <string name="c_bluetooth">Bluetooth</string>

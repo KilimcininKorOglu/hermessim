@@ -56,9 +56,7 @@ class SetupActivity : Activity() {
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "setup-facts").apply { isDaemon = true } }
     @Volatile private var resumed = false
-    @Volatile private var daemon: String? = null
-    @Volatile private var daemonProbed = false
-    @Volatile private var daemonFails = 0
+    @Volatile private var health = DaemonHealth.UNKNOWN
     @Volatile private var module = Onboarding.Module.UNKNOWN
     @Volatile private var moduleAt = 0L                      // module() is a root call: at most every MODULE_MS
     private val building = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -110,13 +108,9 @@ class SetupActivity : Activity() {
         override fun run() {
             main.removeCallbacks(this)
             if (!resumed) return
-            // The daemon is "down" only after two failed answers, once the service has had time to start it (a cold
-            // start right after boot or a crash otherwise shows Restart / Reinstall for a moment).
+            // One value for the reply and its verdict: the screen built on another thread reads both at once (DaemonHealth).
             if (host && Daemon.isStarted()) Daemon.probe { r ->
-                daemon = r
-                daemonFails = if (r?.startsWith("OK") == true) 0 else daemonFails + 1
-                daemonProbed = daemonFails >= 2 || r?.startsWith("OK") == true ||
-                    android.os.SystemClock.elapsedRealtime() - createdAt > 15_000 && daemonFails >= 1
+                health = health.after(r, android.os.SystemClock.elapsedRealtime() - createdAt)
             }
             // One build at a time: a slow root call must not queue builds up behind it.
             if (building.compareAndSet(false, true)) worker.execute {
@@ -241,7 +235,7 @@ class SetupActivity : Activity() {
     /** Running as the host: 5 health and pairing, 6 continue on the iPhone, then done. */
     private fun hostModel(): Model {
         Onboarding.hostRunning(this)
-        val d = daemon
+        val daemon = health.verdict
         val privMissing = Onboarding.missing(this, Onboarding.PRIVILEGED)
         val runtimeMissing = Onboarding.missing(this, Onboarding.RUNTIME)
         val sms = Onboarding.smsRole(this)
@@ -257,11 +251,10 @@ class SetupActivity : Activity() {
         // A PIN/pattern/password: after a restart or power cut HermesSIM can't start until someone unlocks the phone
         // (credential-encrypted storage), which nobody can on a phone without a screen (audit, 19 Oct).
         val locked = getSystemService(KeyguardManager::class.java).isDeviceSecure
-        val daemonOk = d?.startsWith("OK") == true
+        val daemonOk = daemon == DaemonHealth.Verdict.UP
         val checks = listOf(
             Check(getString(R.string.c_phone), Mark.OK, getString(R.string.c_phone_detail, v.name, Build.VERSION.RELEASE, Compat.soc())),
-            Check(getString(R.string.c_service), if (daemonOk) Mark.OK else if (daemonProbed) Mark.FAIL else Mark.WAIT,
-                getString(if (daemonOk) R.string.service_ok else R.string.service_down)),
+            serviceCheck(daemon),
             Check(getString(R.string.c_module), if (privMissing.isEmpty()) Mark.OK else Mark.FAIL,
                 if (privMissing.isEmpty()) getString(R.string.module_active) else getString(R.string.fix_privileged, names(privMissing))),
             Check(getString(R.string.c_permissions), if (permsOk) Mark.OK else Mark.WARN,
@@ -302,7 +295,7 @@ class SetupActivity : Activity() {
                     Mark.FAIL, Btn(getString(R.string.btn_retry), Act.REINSTALL), Btn(getString(R.string.btn_restart), Act.RESTART)))
             Onboarding.install == Onboarding.Install.RESTART_PENDING ->
                 at(5, Card(getString(R.string.restart_title), getString(R.string.restart_body), Mark.OK, Btn(getString(R.string.btn_restart), Act.RESTART)))
-            daemonProbed && !daemonOk -> at(5, Card(getString(R.string.fix_title), getString(R.string.fix_daemon), Mark.FAIL,
+            daemon == DaemonHealth.Verdict.DOWN -> at(5, Card(getString(R.string.fix_title), getString(R.string.fix_daemon), Mark.FAIL,
                 Btn(getString(R.string.btn_restart), Act.RESTART), Btn(getString(R.string.btn_reinstall), Act.REINSTALL)))
             privMissing.isNotEmpty() -> at(5, Card(getString(R.string.fix_title), getString(R.string.fix_privileged, names(privMissing)), Mark.FAIL,
                 Btn(getString(R.string.btn_reinstall), Act.REINSTALL), Btn(getString(R.string.btn_restart), Act.RESTART)))
@@ -339,6 +332,16 @@ class SetupActivity : Activity() {
     }
 
     private fun cant(why: String) = Card(getString(R.string.cant_title), "$why\n\n${getString(R.string.cant_alt)}", Mark.FAIL)
+
+    /** The background service row: still being checked reads as starting, never as not running. */
+    private fun serviceCheck(v: DaemonHealth.Verdict): Check {
+        val (mark, text) = when (v) {
+            DaemonHealth.Verdict.UP -> Mark.OK to R.string.service_ok
+            DaemonHealth.Verdict.WAIT -> Mark.WAIT to R.string.service_starting
+            DaemonHealth.Verdict.DOWN -> Mark.FAIL to R.string.service_down
+        }
+        return Check(getString(R.string.c_service), mark, getString(text))
+    }
 
     /** Host running: what Android answered when we advertised (a connected iPhone proves it too). Only "unsupported"
      *  is final; a busy slot or another refusal is retried by BleLink. */
