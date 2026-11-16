@@ -50,7 +50,9 @@ object Daemon {
     /** What the phone's radios are doing, in a few words: Bluetooth shares its antenna and its chip with them. */
     private fun radios(c: Context): String {
         val wifi = runCatching { c.getSystemService(android.net.wifi.WifiManager::class.java).isWifiEnabled }.getOrNull()
-        val net = runCatching { c.getSystemService(android.telephony.TelephonyManager::class.java).voiceNetworkType }.getOrNull()
+        val phoneState = c.checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val net = if (!phoneState) null
+            else runCatching { c.getSystemService(android.telephony.TelephonyManager::class.java).voiceNetworkType }.getOrNull()
         return "wifi=${wifi?.let { if (it) "on" else "off" } ?: "?"} hotspot=${if (Hotspot.isOn(c)) "on" else "off"} " +
             "voice=${voiceGeneration(net)} ble=${BleLink.lastIntervalMs}ms"
     }

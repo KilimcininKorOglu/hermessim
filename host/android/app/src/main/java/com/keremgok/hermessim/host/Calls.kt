@@ -1,8 +1,10 @@
 // HermesSIM host. Copyright (C) 2026 SIM Relay authors. GPL-3.0-or-later.
 package com.keremgok.hermessim.host
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -293,11 +295,14 @@ object CallRegistry {
         return b.build()
     }
 
-    /** 0-based SIM slot of the call's account; -1 if unknown. */
-    fun slotOf(call: Call): Int = runCatching {
-        val subId = app.getSystemService(TelephonyManager::class.java).getSubscriptionId(call.details.accountHandle)
-        SubscriptionManager.getSlotIndex(subId)
-    }.getOrDefault(-1)
+    /** 0-based SIM slot of the call's account; -1 if unknown, including when READ_PHONE_STATE is not granted. */
+    fun slotOf(call: Call): Int {
+        if (app.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) return -1
+        return runCatching {
+            val subId = app.getSystemService(TelephonyManager::class.java).getSubscriptionId(call.details.accountHandle)
+            SubscriptionManager.getSlotIndex(subId)
+        }.getOrDefault(-1)
+    }
 
     private fun e164(raw: String, slot: Int): String = Sims.e164(app, raw, slot)
 
@@ -342,7 +347,11 @@ object BasicSilence {
         val saved = p.getInt(KEY, -1)
         runCatching {
             if (on && saved < 0) {
-                p.edit().putInt(KEY, am.getStreamVolume(android.media.AudioManager.STREAM_VOICE_CALL)).commit()
+                // Saved to disk before muting: without the saved volume the call volume could never be put back
+                if (!p.edit().putInt(KEY, am.getStreamVolume(android.media.AudioManager.STREAM_VOICE_CALL)).commit()) {
+                    Log.e(TAG, "basic-mode call: couldn't save the call volume, so the host mic stays as it is")
+                    return@runCatching
+                }
                 am.isMicrophoneMute = true
                 am.setStreamVolume(android.media.AudioManager.STREAM_VOICE_CALL, am.getStreamMinVolume(android.media.AudioManager.STREAM_VOICE_CALL), 0)
                 Log.i(TAG, "basic-mode call: host mic muted, call volume at minimum")

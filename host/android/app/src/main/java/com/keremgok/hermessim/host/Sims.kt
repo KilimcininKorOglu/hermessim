@@ -317,6 +317,10 @@ object Sims {
      * loaded yet (right after boot) says "no VoLTE": not remembered, tried again when it loads.
      */
     fun volteOn(ctx: Context) = volteExec.execute {
+        if (ctx.checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            Log.w(TAG, "VoLTE switch: no phone state permission yet")
+            return@execute
+        }
         val prefs = ctx.getSharedPreferences("sims", Context.MODE_PRIVATE)
         for (info in active(ctx)) runCatching {
             val key = "volte_${cardId(info)}"

@@ -1,7 +1,9 @@
 // HermesSIM host. Copyright (C) 2026 SIM Relay authors. GPL-3.0-or-later.
 package com.keremgok.hermessim.host
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.database.ContentObserver
 import android.net.Uri
 import android.os.Build
@@ -26,7 +28,10 @@ object MobileData {
         return if (sub != SubscriptionManager.INVALID_SUBSCRIPTION_ID) base.createForSubscriptionId(sub) else base
     }
 
-    fun isOn(ctx: Context): Boolean = runCatching { tm(ctx).isDataEnabled }.getOrDefault(false)
+    fun isOn(ctx: Context): Boolean {
+        if (ctx.checkSelfPermission(Manifest.permission.ACCESS_NETWORK_STATE) != PackageManager.PERMISSION_GRANTED) return false
+        return runCatching { tm(ctx).isDataEnabled }.getOrDefault(false)
+    }
 
     fun set(ctx: Context, on: Boolean): Boolean = runCatching {
         val t = tm(ctx)

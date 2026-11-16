@@ -928,7 +928,7 @@ object Relay {
      */
     private fun watchSilent(d: BluetoothDevice?) {
         val now = SystemClock.elapsedRealtime()
-        val bond = d?.let { runCatching { it.bondState }.getOrDefault(-1) }
+        val bond = d?.let { bondOf(it) }
         if (d == null || pairingOpen() || bond == BluetoothDevice.BOND_BONDING) { noHelloSince = 0; return }
         if (noHelloSince == 0L) { noHelloSince = now; return }
         val s = (now - noHelloSince) / 1000
@@ -952,10 +952,16 @@ object Relay {
         WakeAlarm.set(app, "hello-drop", 5000) { dropSilentLink(d) }
     }
 
+    /** The device's bond state; -1 when it can't be read (no BLUETOOTH_CONNECT, or the stack refused). */
+    private fun bondOf(d: BluetoothDevice): Int {
+        if (app.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) return -1
+        return runCatching { d.bondState }.getOrDefault(-1)
+    }
+
     /** Never during pairing: a new phone may be in its system's pairing dialog. */
     private fun dropSilentLink(d: BluetoothDevice) {
         val up = ble.connectedDevices().any { it.address == d.address }
-        if (serving(d) || pairingOpen() || d.bondState == BluetoothDevice.BOND_BONDING || !up) return
+        if (serving(d) || pairingOpen() || bondOf(d) == BluetoothDevice.BOND_BONDING || !up) return
         Log.i(TAG, "no Hello from ${d.address} after 5 s: dropping the link so it reconnects fresh")
         ble.disconnect(d)
         // The phone owns the link (it's the central): cancelConnection rarely drops it, and a locked iPhone's app then
