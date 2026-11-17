@@ -18,7 +18,8 @@ object MacRules {
     private val everyMac = setOf(Request.OpCase.GET_STATE, Request.OpCase.SET_HOTSPOT, Request.OpCase.GET_HOTSPOT_SECRET)
     private val withControl = setOf(Request.OpCase.SET_DATA_LINE, Request.OpCase.SET_HOTSPOT_CLIENT, Request.OpCase.HOST_ACTION)
 
-    private val seen = setOf(StateBook.POWER, StateBook.NETWORK, StateBook.SIGNAL, StateBook.HOTSPOT, StateBook.HOTSPOT_LIMITS)
+    private val seen = setOf(StateBook.POWER, StateBook.NETWORK, StateBook.SIGNAL, StateBook.HOTSPOT, StateBook.HOTSPOT_LIMITS,
+        StateBook.NAME)
     private val seenWithControl = setOf(StateBook.LINES, StateBook.HOTSPOT_CLIENTS)
 
     /** CODE_NOT_ALLOWED when a Mac with [grants] may not make [req], else null. */

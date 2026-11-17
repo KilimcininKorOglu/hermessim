@@ -107,6 +107,11 @@ class MacRulesTest {
         assertEquals("", view.peers.code)
     }
 
+    @Test fun `every Mac sees the host's name`() {
+        val named = phoneState.toBuilder().setName(com.keremgok.hermessim.wire.HostName.newBuilder().setName("Kerem host")).build()
+        assertEquals("Kerem host", seen(named, grants()).name.name)
+    }
+
     @Test fun `the lines and the hotspot's devices need the control grant`() {
         assertTrue(seen(phoneState, grants(control = true)).hasLines())
         assertTrue(StateBook.HOTSPOT_CLIENTS in MacRules.groups(grants(control = true)))

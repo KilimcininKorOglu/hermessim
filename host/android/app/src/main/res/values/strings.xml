@@ -155,8 +155,8 @@
     <string name="battery_care_band">Charges when the battery drops below %1$d%%. Above %2$d%%, charging stops and the phone runs on battery.</string>
     <string name="battery_care_off">Off: the phone charges normally</string>
     <string name="box_off">Off. You can turn it on from the HermesSIM app on your phone once setup is done</string>
-    <string name="bt_name_title">Bluetooth name</string>
-    <string name="bt_name_note">Phones see this name when they add this host.</string>
+    <string name="bt_name_title">Host name</string>
+    <string name="bt_name_note">Phones list this host by this name. The phone\'s Bluetooth and its hotspot use the same name.</string>
     <plurals name="bt_name_left">
         <item quantity="one">You can type %d more character.</item>
         <item quantity="other">You can type %d more characters.</item>

@@ -91,6 +91,7 @@ class HostService : Service() {
         Onboarding.hostRunning(this)
         Daemon.start(this)
         Relay.start(this)
+        HostName.changed(this)                    // a hotspot named otherwise takes the Bluetooth name
         RootSms.set(this, "allow", "host start")
         android.os.Handler(mainLooper).postDelayed({ Onboarding.selfHeal(this) }, 30_000)   // after service.sh's own pass
         welcomeOnce()

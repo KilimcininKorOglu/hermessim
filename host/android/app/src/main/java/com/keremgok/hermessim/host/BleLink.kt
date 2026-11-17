@@ -166,11 +166,12 @@ class BleLink(
     /**
      * The phone's Bluetooth name changed (the host screen's Bluetooth name, or Android's settings): put the new name in
      * the running set's scan response, so phones adding the host see it without a restart. A name that did not fit
-     * before may fit now, so it is tried again.
+     * before may fit now, so it is tried again. Peers get the new name and the hotspot takes it ([HostName]).
      */
     private val nameReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(c: android.content.Context, i: android.content.Intent) {
             main.post {
+                HostName.changed(ctx)
                 withName = true
                 val set = advSet ?: return@post
                 runCatching { set.setScanResponseData(scanResponse()) }

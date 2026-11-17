@@ -171,9 +171,15 @@ object Requests {
 
     private fun setHotspot(a: Ask) = with(a.req.setHotspot) { Relay.switchHotspot(on, offWhenUnusedS, a::answer) }
 
-    /** The month limit and the call pause are the host's own settings; the rest is saved in the phone's hotspot. */
+    /**
+     * The month limit and the call pause are the host's own settings; the rest is saved in the phone's hotspot. The
+     * name is the host's name: Bluetooth takes it too ([HostName]).
+     */
     private fun setHotspotSetup(a: Ask) {
-        val s = a.req.setHotspotSetup
+        val name = HostNameCore.requested(a.req.setHotspotSetup)
+        if (name != null && name !is BtName.Check.Ok) return a.answer(Code.CODE_BAD_VALUE, SetHotspotSetup.NAME_FIELD_NUMBER.toLong())
+        if (name is BtName.Check.Ok && !rename(name.name)) return a.answer(Code.CODE_FAILED)
+        val s = HostNameCore.withoutName(a.req.setHotspotSetup)
         // Pausing during calls is only for hosts whose hotspot can only use 2.4 GHz
         if (s.hasPauseInCalls() && s.pauseInCalls && !Hotspot.callPauseOffered(app)) return a.answer(Code.CODE_NOT_OFFERED)
         if (s.hasWatch() && !WatchSettings.valid(s.watch)) return a.answer(Code.CODE_BAD_VALUE, SetHotspotSetup.WATCH_FIELD_NUMBER.toLong())
@@ -190,6 +196,13 @@ object Requests {
             a.answer(code)
             Relay.touchLater(1500, StateBook.HOTSPOT)
         }
+    }
+
+    /** Renames the host; the hotspot follows ([HostName.changed]). False when Android refused the Bluetooth name. */
+    private fun rename(name: String): Boolean {
+        if (name != HostName.current(app)) return HostName.set(app, name)
+        HostName.changed(app)                 // the same Bluetooth name: the hotspot may still carry another one
+        return true
     }
 
     private fun setHotspotClient(a: Ask) = with(a.req.setHotspotClient) {

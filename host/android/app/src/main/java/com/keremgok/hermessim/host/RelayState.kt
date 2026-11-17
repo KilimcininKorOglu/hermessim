@@ -7,6 +7,7 @@ import android.os.BatteryManager
 import android.os.SystemClock
 import com.google.protobuf.ByteString
 import com.keremgok.hermessim.host.wire.StateBook
+import com.keremgok.hermessim.wire.HostName as HostNameMsg
 import com.keremgok.hermessim.wire.Line
 import com.keremgok.hermessim.wire.Lines
 import com.keremgok.hermessim.wire.Network
@@ -56,7 +57,7 @@ object StateCore {
  * book; the relay then sends what changed. Main thread.
  */
 object HostState {
-    val ALL: Set<Int> = (StateBook.POWER..StateBook.SCHEDULED).toSet()
+    val ALL: Set<Int> = (StateBook.POWER..StateBook.NAME).toSet()
 
     /** Changes each time the host app starts: a peer's copy of the state from another run is not built on. */
     val epoch: Int = generateSequence { java.security.SecureRandom().nextInt() }.first { it != 0 }
@@ -90,6 +91,7 @@ object HostState {
         StateBook.HOTSPOT_LIMITS to { r -> Hotspot.limits(r.ctx).toByteArray() },
         StateBook.HOTSPOT_USAGE to { r -> r.usage.toByteArray() },
         StateBook.SCHEDULED to { _ -> ScheduledTexts.group().toByteArray() },
+        StateBook.NAME to { r -> HostNameMsg.newBuilder().setName(HostName.current(r.ctx)).build().toByteArray() },
     )
 
     /**

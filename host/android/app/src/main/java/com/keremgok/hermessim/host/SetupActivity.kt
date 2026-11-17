@@ -776,7 +776,7 @@ class SetupActivity : Activity() {
         })
         count()
         save.setOnClickListener {
-            val error = applyBtName(bt, field.text.toString())
+            val error = applyBtName(field.text.toString())
             if (error == null) { dialog.dismiss(); shown = null; tick.run() } else field.error = error
         }
     }
@@ -795,18 +795,11 @@ class SetupActivity : Activity() {
         else -> resources.getQuantityString(R.plurals.bt_name_over, -left, -left)
     }
 
-    /** Sets a valid name; returns why it was not set, or null once Android took it. */
-    private fun applyBtName(bt: android.bluetooth.BluetoothAdapter, input: String): String? = when (val check = BtName.check(input)) {
+    /** Sets a valid name (Bluetooth, then the hotspot); returns why it was not set, or null once Android took it. */
+    private fun applyBtName(input: String): String? = when (val check = BtName.check(input)) {
         BtName.Check.Empty -> getString(R.string.bt_name_empty)
         BtName.Check.TooLong -> btNameLeftText(BtName.left(input))
-        is BtName.Check.Ok -> if (setBtName(bt, check.name)) null else getString(R.string.bt_name_failed)
-    }
-
-    @Suppress("MissingPermission")
-    private fun setBtName(bt: android.bluetooth.BluetoothAdapter, name: String): Boolean {
-        val ok = runCatching { bt.setName(name) }.onFailure { Log.w("HermesSimHost", "Bluetooth name not set: $it") }.getOrDefault(false)
-        Log.i("HermesSimHost", "Bluetooth name set to ${name.toByteArray().size} bytes -> $ok")
-        return ok
+        is BtName.Check.Ok -> if (HostName.set(this, check.name)) null else getString(R.string.bt_name_failed)
     }
 
     /** "Stop using this phone as a host": the phone back as an ordinary phone, HermesSIM removed (Retire). */
