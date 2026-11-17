@@ -504,7 +504,7 @@ message SetHotspot {
 
 // The hotspot's settings. An absent field stays as it is. A running hotspot starts again when a radio setting changed.
 message SetHotspotSetup {
-  optional string name = 1;
+  optional string name = 1;                // the host's name (State.name): Bluetooth and hotspot together
   optional string passphrase = 2;          // Bluetooth only
   optional HotspotBand band = 3;
   optional HotspotSecurity security = 4;
@@ -967,6 +967,12 @@ message State {
   HotspotLimits hotspot_limits = 14;
   HotspotUsage hotspot_usage = 15;
   ScheduledTexts scheduled = 16;
+  HostName name = 17;
+}
+
+// The host's name: its Bluetooth name, which is also its hotspot's name. Peers list the host by it.
+message HostName {
+  string name = 1;
 }
 
 // ---------------------------------------------------------------- events

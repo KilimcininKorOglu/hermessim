@@ -134,7 +134,7 @@ A Mac is a peer with `ROLE_MAC`. It talks to the host over Bluetooth only: a Mac
 | `SetDataLine`, `SetHotspotClient`, `HostAction` with another verb | with `PeerGrants.control` |
 | `SendText` | with `PeerGrants.texts`, only to the `from` of a text the Mac was sent in the last 10 minutes, on that text's line |
 
-**State.** A Mac gets every `State` with the same `seq` as the phone, holding only the groups it may see: `power`, `network`, `signal`, `hotspot` and `hotspot_limits`; with `control` also `lines` and `hotspot_clients`; and `peers` with only its own `Peer`, without `window_open` and `code`. A `State` with none of them still goes, with its `seq` only. The answer to `GetState` follows the same rule.
+**State.** A Mac gets every `State` with the same `seq` as the phone, holding only the groups it may see: `power`, `network`, `signal`, `hotspot`, `hotspot_limits` and `name`; with `control` also `lines` and `hotspot_clients`; and `peers` with only its own `Peer`, without `window_open` and `code`. A `State` with none of them still goes, with its `seq` only. The answer to `GetState` follows the same rule.
 
 **Events.** A Mac with `texts` gets `Event{seq, text_in}` for each text that comes in, and after its `Welcome` the texts of the last 10 minutes, at most 5. It gets no call, no text status and no notice. The host ignores a Mac's `EventAck`: only the phone's moves the text queue. A Mac's `Hello.text_cursor` names the highest text seq it holds; its replay sends only the texts above it, and its `ReplayEnd` carries the highest text seq it holds after the replay, and no calls.
 
@@ -154,6 +154,8 @@ After its base, a peer that receives a `State` whose `seq` is not one above the 
 A group is sent whole. `Power` is the exception: the host sends only its fields that changed, and all of its fields in a `State` that is a base.
 
 `Signal` changes often. The host sends it at once when a line loses its signal or gets it back, and otherwise at most once in 30 s and only while the peer said it is in the foreground (the last `GetState` that named the group was at most 5 minutes ago).
+
+`HostName` is the host's name: its Bluetooth name, which the host also gives its hotspot. Peers show the host under this name and replace a name they stored at pairing with it. `SetHotspotSetup.name` renames both; a name that is empty after trimming or longer than 29 UTF-8 bytes (what fits in the scan response) is answered `CODE_BAD_VALUE` with field 1. When the Bluetooth name changes on the host itself, or differs from the hotspot's name when the host app starts, the host gives the hotspot the Bluetooth name; a running hotspot starts again, and not while a call is up.
 
 `HotspotUsage` and the byte counts in `HotspotClients` change about once a minute while the hotspot is in use; they have groups of their own so that `Hotspot` is not sent again with them. The hotspot's passphrase is in no group: the phone asks for it with `GetHotspotSecret`.
 
