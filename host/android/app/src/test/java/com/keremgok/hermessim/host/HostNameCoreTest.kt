@@ -2,7 +2,6 @@ package com.keremgok.hermessim.host
 
 import com.keremgok.hermessim.wire.SetHotspotSetup
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -51,14 +50,5 @@ class HostNameCoreTest {
             names.map { HostNameCore.requested(request { setHotspotSetup = SetHotspotSetup.newBuilder().apply { name = it }.build() }.setHotspotSetup) },
         )
         assertNull(HostNameCore.requested(SetHotspotSetup.newBuilder().setHidden(true).build()))
-    }
-
-    @Test
-    fun theHotspotPartOfARequestCarriesNoName() {
-        val s = SetHotspotSetup.newBuilder().setName("Kerem host").setHidden(true).build()
-        val rest = HostNameCore.withoutName(s)
-        assertFalse(rest.hasName())
-        assertEquals(true, rest.hidden)
-        assertFalse(HotspotCore.touchesRadio(HostNameCore.withoutName(SetHotspotSetup.newBuilder().setName("x").build())))
     }
 }

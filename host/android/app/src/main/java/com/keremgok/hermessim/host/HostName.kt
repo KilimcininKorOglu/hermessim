@@ -38,12 +38,6 @@ object HostNameCore {
      * [BtName.Check.TooLong] when it cannot be the host's name (1 to 29 bytes, what fits in the scan response).
      */
     fun requested(s: SetHotspotSetup): BtName.Check? = if (s.hasName()) BtName.check(s.name) else null
-
-    /**
-     * [s] without its name: the hotspot does not take the name from the request but from the Bluetooth name, so it
-     * is renamed once, whoever renamed the host.
-     */
-    fun withoutName(s: SetHotspotSetup): SetHotspotSetup = s.toBuilder().clearName().build()
 }
 
 /**
@@ -54,13 +48,15 @@ object HostName {
     private const val TAG = "HermesSimHost"
     private const val CALL_ALARM = "host-name-call"
     private const val CALL_RECHECK_MS = 20_000L
-    private val exec = Bg.single("host-name")
 
-    /** The Bluetooth name, or the model when Android does not give it. */
+    /**
+     * The Bluetooth name; null when Android does not give it (Bluetooth off, or no permission yet), and then nothing
+     * is renamed and peers keep the name they have.
+     */
     @Suppress("MissingPermission")
-    fun current(ctx: Context): String =
+    fun current(ctx: Context): String? =
         runCatching { ctx.getSystemService(BluetoothManager::class.java).adapter?.name }.getOrNull()?.trim()
-            ?.takeIf { it.isNotEmpty() } ?: android.os.Build.MODEL
+            ?.takeIf { it.isNotEmpty() }
 
     /** Sets the Bluetooth name; true once Android took it. The hotspot follows when Android reports the change. */
     @Suppress("MissingPermission")
@@ -77,22 +73,21 @@ object HostName {
         sync(ctx.applicationContext)
     }
 
-    private fun sync(app: Context) = exec.execute {
-        when (val step = HostNameCore.step(current(app), Hotspot.info(app, wait = true), CallRegistry.anyCall())) {
-            HostNameCore.Step.None -> Unit
-            HostNameCore.Step.WaitForCall -> waitForCall(app)
-            is HostNameCore.Step.Rename -> rename(app, step.ssid)
-        }
-    }
-
-    private fun rename(app: Context, ssid: String) {
-        val now = Hotspot.info(app, wait = true)
-        Log.i(TAG, "hotspot takes the host's name (${ssid.toByteArray().size} bytes)")
-        Hotspot.configure(app, HotspotCore.wanted(now, SetHotspotSetup.newBuilder().setName(ssid).build())) { code ->
+    private fun sync(app: Context) {
+        val name = current(app) ?: return
+        Hotspot.rename(app, { hotspot -> ssidFor(app, name, hotspot) }) { code ->
             if (code != Code.CODE_OK) Log.w(TAG, "hotspot kept its old name: $code")
             Relay.touchLater(1500, StateBook.HOTSPOT)
         }
     }
+
+    /** The SSID the hotspot takes now, or null: it has the name, or a call is up and the rename waits for its end. */
+    private fun ssidFor(app: Context, name: String, hotspot: HotspotInfo): String? =
+        when (val step = HostNameCore.step(name, hotspot, CallRegistry.anyCall())) {
+            HostNameCore.Step.None -> null
+            HostNameCore.Step.WaitForCall -> { waitForCall(app); null }
+            is HostNameCore.Step.Rename -> step.ssid.also { Log.i(TAG, "hotspot takes the host's name (${it.toByteArray().size} bytes)") }
+        }
 
     /** A call is up: look again every 20 s, and rename the hotspot once no call is left. */
     private fun waitForCall(app: Context) {

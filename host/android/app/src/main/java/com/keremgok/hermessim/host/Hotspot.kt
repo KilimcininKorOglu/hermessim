@@ -441,6 +441,16 @@ object Hotspot {
      */
     fun configure(ctx: Context, w: ApWanted, reply: (Code) -> Unit) = exec.execute { configureNow(ctx, w, reply) }
 
+    /**
+     * Gives the hotspot the name [named] picks from its settings as read now, or keeps them when it picks none. On
+     * this object's executor, after every save asked before, so it never writes back settings a save just replaced.
+     */
+    fun rename(ctx: Context, named: (HotspotInfo) -> String?, reply: (Code) -> Unit) = exec.execute {
+        val now = info(ctx, wait = true)
+        val ssid = named(now) ?: return@execute
+        configureNow(ctx, HotspotCore.wanted(now, SetHotspotSetup.newBuilder().setName(ssid).build()), reply)
+    }
+
     private fun configureNow(ctx: Context, w: ApWanted, reply: (Code) -> Unit) {
         val done: (Boolean, String) -> Unit = { ok, detail ->
             if (!ok) Log.w(TAG, "hotspot settings not applied: $detail")

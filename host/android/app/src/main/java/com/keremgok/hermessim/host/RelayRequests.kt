@@ -178,8 +178,7 @@ object Requests {
     private fun setHotspotSetup(a: Ask) {
         val name = HostNameCore.requested(a.req.setHotspotSetup)
         if (name != null && name !is BtName.Check.Ok) return a.answer(Code.CODE_BAD_VALUE, SetHotspotSetup.NAME_FIELD_NUMBER.toLong())
-        if (name is BtName.Check.Ok && !rename(name.name)) return a.answer(Code.CODE_FAILED)
-        val s = HostNameCore.withoutName(a.req.setHotspotSetup)
+        val s = (name as? BtName.Check.Ok)?.let { a.req.setHotspotSetup.toBuilder().setName(it.name).build() } ?: a.req.setHotspotSetup
         // Pausing during calls is only for hosts whose hotspot can only use 2.4 GHz
         if (s.hasPauseInCalls() && s.pauseInCalls && !Hotspot.callPauseOffered(app)) return a.answer(Code.CODE_NOT_OFFERED)
         if (s.hasWatch() && !WatchSettings.valid(s.watch)) return a.answer(Code.CODE_BAD_VALUE, SetHotspotSetup.WATCH_FIELD_NUMBER.toLong())
@@ -187,6 +186,8 @@ object Requests {
         val wanted = HotspotCore.wanted(now, s)
         val radio = HotspotCore.touchesRadio(s) && wanted != HotspotCore.wanted(now, SetHotspotSetup.getDefaultInstance())
         if (radio) HotspotCore.refusal(wanted)?.let { (code, field) -> return a.answer(code, field.toLong()) }
+        // Checked whole: now the name goes to Bluetooth; the hotspot takes it below, in the same save as the rest
+        if (name is BtName.Check.Ok && !rename(name.name, hotspotSaved = radio)) return a.answer(Code.CODE_FAILED)
         if (s.hasMonthLimitBytes() && DataLimit.set(s.monthLimitBytes)) Log.i(TAG, "hotspot month limit ${s.monthLimitBytes / 1_000_000} MB")
         if (s.hasPauseInCalls()) HotspotPause.setSetting(s.pauseInCalls)
         if (s.hasWatch()) HotspotWatch.setSetting(s.watch)
@@ -198,10 +199,14 @@ object Requests {
         }
     }
 
-    /** Renames the host; the hotspot follows ([HostName.changed]). False when Android refused the Bluetooth name. */
-    private fun rename(name: String): Boolean {
+    /**
+     * Gives Bluetooth the host's [name]; false when Android refused it. [hotspotSaved]: the request saves the hotspot
+     * with the name itself. Otherwise the hotspot follows the Bluetooth name ([HostName.changed]), also when only the
+     * hotspot still carried another one.
+     */
+    private fun rename(name: String, hotspotSaved: Boolean): Boolean {
         if (name != HostName.current(app)) return HostName.set(app, name)
-        HostName.changed(app)                 // the same Bluetooth name: the hotspot may still carry another one
+        if (!hotspotSaved) HostName.changed(app)
         return true
     }
 

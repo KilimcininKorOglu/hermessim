@@ -91,7 +91,7 @@ object HostState {
         StateBook.HOTSPOT_LIMITS to { r -> Hotspot.limits(r.ctx).toByteArray() },
         StateBook.HOTSPOT_USAGE to { r -> r.usage.toByteArray() },
         StateBook.SCHEDULED to { _ -> ScheduledTexts.group().toByteArray() },
-        StateBook.NAME to { r -> HostNameMsg.newBuilder().setName(HostName.current(r.ctx)).build().toByteArray() },
+        StateBook.NAME to { r -> HostNameMsg.newBuilder().setName(HostName.current(r.ctx).orEmpty()).build().toByteArray() },
     )
 
     /**
