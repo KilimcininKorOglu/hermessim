@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.2.9",
+    "code": 74,
+    "en": "Every 15 minutes, the host tells the HermesSIM server that it is on. When the server hears nothing from the host for 6 hours, it sends your phone the Host unreachable notification. The notification now arrives on time even when your phone is asleep or the HermesSIM app is closed.",
+    "tr": "Ana cihaz, 15 dakikada bir HermesSIM sunucusuna açık olduğunu bildirir. Sunucuya 6 saat boyunca ana cihazdan hiçbir bildirim gelmezse telefonunuza Ana cihaza ulaşılamıyor bildirimi gönderilir. Bu bildirim artık telefonunuz uykudayken veya HermesSIM uygulaması kapalıyken de zamanında gelir."
+  },
+  {
     "version": "1.2.8",
     "code": 73,
     "en": "The host now has a single name. The name set on the host screen is also the host's Bluetooth name and its hotspot's name, and the HermesSIM app on your phones and Macs lists the host under this name. A new name reaches paired phones and Macs without pairing again.\nWhen the name is changed on the host screen, in the HermesSIM app's hotspot settings or in Android's Bluetooth settings, the hotspot takes the same name. When the host starts and its hotspot has a different name, the hotspot takes the host's name. A running hotspot restarts with the new name. During a call, the restart waits until the call ends.\nThe name can be up to 29 characters. The letters ı, ş, ğ, ç, ö and ü count as two characters each.",
