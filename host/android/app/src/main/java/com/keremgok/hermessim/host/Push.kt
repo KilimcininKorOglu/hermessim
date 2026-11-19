@@ -53,6 +53,11 @@ object Push {
         app.getSystemService(android.os.PowerManager::class.java)
             .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "hermessim:sms-push").apply { setReferenceCounted(false) }
     }
+    /** Holds the phone awake through an alive request; apart from [wake], whose text wait it must not cut short. */
+    private val aliveWake by lazy {
+        app.getSystemService(android.os.PowerManager::class.java)
+            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "hermessim:alive-push").apply { setReferenceCounted(false) }
+    }
     private val main = Handler(Looper.getMainLooper())
     private val exec = Bg.single("push")
     private val pushedCalls = LinkedHashSet<Long>()           // main thread
@@ -62,6 +67,35 @@ object Push {
     fun start(ctx: Context) {
         app = ctx.applicationContext
         prefs().getString("key", null)?.let { crypto = RemoteCrypto(Base64.decode(it, Base64.NO_WRAP)) }
+        scheduleAlive(AliveCore.FIRST_MS)
+    }
+
+    private const val ALIVE_ALARM = "push-alive"
+
+    /** The next alive request; a wake alarm, so deep sleep doesn't silence a host that is on. */
+    private fun scheduleAlive(delayMs: Long) {
+        WakeAlarm.set(app, ALIVE_ALARM, delayMs) {
+            alive()
+            scheduleAlive(AliveCore.EVERY_MS)
+        }
+    }
+
+    /**
+     * Hands the server a ready unreachable notice (protocol/README.md "Alive push"), sealed under its own counter. Sent
+     * whether or not a phone is on Bluetooth: the server can't see the Bluetooth link.
+     */
+    private fun alive() {
+        val c = crypto ?: RemoteLink.crypto ?: run { Log.i(TAG, "push: alive not sent (no push key from the phone yet)"); return }
+        aliveWake.acquire(30_000)
+        exec.execute {
+            val sealed = c.sealPush(nextCounter(c), System.currentTimeMillis(), AliveCore.packet(System.currentTimeMillis()))
+            val body = JSONObject().put("room_token", RemoteCrypto.hex(c.roomToken))
+                .put("sealed", Base64.encodeToString(sealed, Base64.NO_WRAP))
+                .put("collapse_id", c.collapseId(AliveCore.COLLAPSE_NAME))
+            val (code, _) = Api.postStatus("/push/alive", body)
+            Log.i(TAG, "push: alive -> HTTP $code")
+            aliveWake.release()
+        }
     }
 
     private fun prefs() = app.getSharedPreferences("push", Context.MODE_PRIVATE)
@@ -73,6 +107,7 @@ object Push {
             prefs().edit().putString("key", Base64.encodeToString(k, Base64.NO_WRAP)).apply()
             crypto = RemoteCrypto(k)
             Log.i(TAG, "push: key set (${keyId()?.let { RemoteCrypto.hex(it) }})")
+            scheduleAlive(AliveCore.FIRST_MS)       // the new push room's server row is armed soon, not in 15 min
         } else {
             prefs().edit().remove("key").apply()
             crypto = null
