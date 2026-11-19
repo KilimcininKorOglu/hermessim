@@ -165,8 +165,15 @@ other. Vectors: `v2/vectors/push.json`.
 **Health notices.** The host sends each `Notice` once per event: battery at 15 % and at 5 % while not charging (armed
 again once it charges or passes 30 %), a line that newly asks for its PIN or PUK, the monthly hotspot limit at 80 % and
 100 %, a line that starts roaming (armed again once it stops; the host turns nothing off), and a charge limit the phone
-keeps undoing (armed again once the limit holds). That the host has been unreachable for a while the phone works out
-itself (a host that is off can't send anything).
+keeps undoing (armed again once the limit holds).
+
+**Alive push.** A host that is off can't say so, so it says it is on: every 15 minutes, whether or not a phone is on
+Bluetooth, it sends `POST /api/v1/push/alive {room_token, sealed: base64, collapse_id}` with the push room's token. `sealed`
+is a ready `notice` push of `Notice{NOTICE_KIND_UNREACHABLE}` with its own counter, and `collapse_id` the collapse id of
+`notice-unreachable`. The server keeps only the latest per room (`404` without a push registration, `400` for a bad
+request). When 6 hours pass without a new one, it sends that push once, as any `notice`; the next alive request arms it
+again. The phone shows it as "Host unreachable", under the same id as its own unreachable notification, so the two
+replace each other; it still works this out itself too, for a host that never reaches the server.
 
 An Android app the user force-stopped gets no push until it is opened again (Android's rule); a swiped-away one does.
 

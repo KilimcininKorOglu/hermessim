@@ -986,6 +986,7 @@ enum NoticeKind {
   NOTICE_KIND_DATA_LIMIT_REACHED = 5; // value = percent; the hotspot went off
   NOTICE_KIND_ROAMING = 6;            // value = 1 when the line's data roaming is allowed
   NOTICE_KIND_CHARGE_STUCK = 7;       // value = the charge limit
+  NOTICE_KIND_UNREACHABLE = 8;        // only in the alive push the server sends after 6 hours of silence
 }
 
 message Notice {
