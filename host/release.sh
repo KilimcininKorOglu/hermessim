@@ -29,12 +29,13 @@ if [ "$PUBLISH" = 1 ] || [ "$GITHUB" = 1 ]; then
 fi
 COMMIT=$(git -C "$ROOT" rev-parse --short HEAD)
 if [ "$PUBLISH" = 1 ]; then
-  # Local credentials stay inside the project and are gitignored.
+  # Local credentials stay inside the project and are gitignored; the release workflow sets the same names as
+  # environment variables from secrets instead.
   ENV="$HERE/release.env"
-  [ -f "$ENV" ] || { echo "no host/release.env (copy host/release.env.example)"; exit 1; }
   # shellcheck disable=SC1090
-  . "$ENV"
-  [ -n "${HERMESSIM_RELEASE_TOKEN:-}" ] || { echo "$ENV must set HERMESSIM_RELEASE_TOKEN"; exit 1; }
+  if [ -f "$ENV" ]; then . "$ENV"; fi
+  [ -n "${HERMESSIM_RELEASE_TOKEN:-}" ] \
+    || { echo "set HERMESSIM_RELEASE_TOKEN in host/release.env (copy host/release.env.example) or the environment"; exit 1; }
   HERMESSIM_URL="${HERMESSIM_URL:-https://hermessim.keremgok.tr}"
   HERMESSIM_URL="${HERMESSIM_URL%/}"
   command -v curl >/dev/null || { echo "no curl"; exit 1; }

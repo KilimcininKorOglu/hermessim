@@ -1,7 +1,8 @@
 name: Release host
 
 # Pushing a tag host-v<versionName> (for example host-v1.0.0) builds the signed host and publishes a GitHub release
-# with the Magisk zip. host/release.sh does the work, the same script a local release runs.
+# with the Magisk zip, and uploads the APK to the server that hosts update from (secret HERMESSIM_RELEASE_TOKEN,
+# the server's RELEASE_TOKEN). host/release.sh does the work, the same script a local release runs.
 
 on:
   push:
@@ -63,7 +64,9 @@ jobs:
           HERMESSIM_SIGNING_STORE_PASSWORD: ${{ secrets.HERMESSIM_SIGNING_STORE_PASSWORD }}
           HERMESSIM_SIGNING_KEY_ALIAS: ${{ secrets.HERMESSIM_SIGNING_KEY_ALIAS }}
           HERMESSIM_SIGNING_KEY_PASSWORD: ${{ secrets.HERMESSIM_SIGNING_KEY_PASSWORD }}
-        run: host/release.sh --github
+          # Hosts update over the air from the server, so the release goes there as well as to GitHub.
+          HERMESSIM_RELEASE_TOKEN: ${{ secrets.HERMESSIM_RELEASE_TOKEN }}
+        run: host/release.sh --github --publish
 
       - name: Remove the signing key
         if: always()
