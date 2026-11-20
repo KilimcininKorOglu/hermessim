@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.3.1",
+    "code": 76,
+    "en": "When you add the host to a phone, the host's screen shows the same pairing code as the phone's Bluetooth pairing request, so you see one number on both.",
+    "tr": "Ana cihazı bir telefona eklerken ana cihaz ekranında, telefonun Bluetooth eşleştirme isteğindeki kodun aynısı görünür. Böylece iki cihazda da tek bir sayı görürsünüz."
+  },
+  {
     "version": "1.3.0",
     "code": 75,
     "en": "When you add the host on an iPhone, the iPhone now lists it under the host's own name instead of HermesSIM Host. Names longer than 20 bytes still show as HermesSIM Host while adding.",
