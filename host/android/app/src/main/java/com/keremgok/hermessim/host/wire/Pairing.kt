@@ -107,6 +107,17 @@ class PairingDesk(private val random: (Int) -> ByteArray) {
 
     fun close() { code = null; attempt = null; triesLeft = 0 }
 
+    /**
+     * Takes the Bluetooth confirmation number of a phone pairing now as the code, so the phone and the host's screen
+     * show one number. Ignored while pairing is closed or for a number that is not six digits.
+     */
+    fun adopt(bluetoothCode: Int) {
+        if (code == null || bluetoothCode !in 0..999_999) return
+        code = "%06d".format(bluetoothCode)
+        triesLeft = TRIES
+        attempt = null
+    }
+
     /** The host key and salt for a phone that sent [phoneKey], or null while pairing is closed. */
     fun offer(phoneKey: ByteArray): Pair<ByteArray, ByteArray>? {
         if (code == null || phoneKey.size != 32) return null

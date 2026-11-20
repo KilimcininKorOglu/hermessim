@@ -330,16 +330,24 @@ object Relay {
     private fun watchPairingRequests() {
         app.registerReceiver(object : android.content.BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
-                i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)?.let(::pairingRequest)
+                val code = i.getIntExtra(BluetoothDevice.EXTRA_PAIRING_KEY, -1)
+                i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)?.let { pairingRequest(it, code) }
             }
         }, android.content.IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST).apply { priority = 1000 })
     }
 
-    private fun pairingRequest(dev: BluetoothDevice) {
+    /** [code]: the Bluetooth confirmation number the phone shows, or -1 when the request carries none. */
+    private fun pairingRequest(dev: BluetoothDevice, code: Int) {
         val address = dev.address
         val known = pinned() != null && address == prefs().getString("client_mac", null)
         val forMac = macPeers.windowOpen()      // a Mac pairs while the phone holds its window open
         if (!pairable() && !known && !forMac) return
+        if (pairable() && !forMac && code >= 0) Bg.onMain {
+            // One number for the phone: the code on the host's screen becomes the one the phone shows
+            desk.adopt(code)
+            Log.i(TAG, "pairing code set to the Bluetooth code")
+            pairingChanged()
+        }
         if (known && !pairable()) Log.i(TAG, "pairing request from the paired phone (its keys were reset): accepting")
         if (forMac) Log.i(TAG, "pairing request inside the Mac window: accepting")
         pairExec.execute { RootBt.confirm(app, address) }

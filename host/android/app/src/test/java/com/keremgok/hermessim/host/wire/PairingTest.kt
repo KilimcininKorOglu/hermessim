@@ -52,6 +52,30 @@ class PairingTest {
         assertNull(desk.offer(ByteArray(32)))
     }
 
+    /** One code for the phone: the Bluetooth confirmation number the iPhone shows becomes the host's pairing code. */
+    @Test
+    fun theBluetoothCodeBecomesThePairingCodeWhilePairingIsOpen() {
+        val desk = desk()
+        val id = ByteArray(16) { 5 }
+        desk.adopt(405096)
+        assertEquals("405096", desk.code)
+        desk.adopt(7)
+        assertEquals("a short number keeps its leading zeros", "000007", desk.code)
+        assertEquals(PairResult.PAIRED, desk.check(phoneProof(desk, "000007", id), id))
+    }
+
+    @Test
+    fun aBluetoothCodeOutsideSixDigitsOrWithPairingClosedChangesNothing() {
+        val desk = desk()
+        val shown = desk.code
+        desk.adopt(1_000_000)
+        desk.adopt(-1)
+        assertEquals(shown, desk.code)
+        desk.close()
+        desk.adopt(123456)
+        assertNull("a closed host takes no code", desk.code)
+    }
+
     @Test
     fun aWrongCodeCostsATryAndTheThirdOneChangesTheCode() {
         val desk = desk()
