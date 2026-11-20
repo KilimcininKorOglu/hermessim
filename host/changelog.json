@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.3.0",
+    "code": 75,
+    "en": "When you add the host on an iPhone, the iPhone now lists it under the host's own name instead of HermesSIM Host. Names longer than 20 bytes still show as HermesSIM Host while adding.",
+    "tr": "Ana cihazı iPhone'a eklediğinizde iPhone artık onu HermesSIM Host yerine ana cihazın kendi adıyla listeler. 20 bayttan uzun adlar ekleme sırasında yine HermesSIM Host olarak görünür."
+  },
+  {
     "version": "1.2.9",
     "code": 74,
     "en": "Every 15 minutes, the host tells the HermesSIM server that it is on. When the server hears nothing from the host for 6 hours, it sends your phone the Host unreachable notification. The notification now arrives on time even when your phone is asleep or the HermesSIM app is closed.",
