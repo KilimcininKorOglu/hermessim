@@ -23,8 +23,10 @@ The host is the GATT server.
 | `7d5f0001-3c1a-4b6e-9e42-5a1c0de51a00` | service | |
 | `7d5f0002-3c1a-4b6e-9e42-5a1c0de51a00` | `down`, host to peer | notify, encrypted |
 | `7d5f0003-3c1a-4b6e-9e42-5a1c0de51a00` | `up`, peer to host | write without response, encrypted |
-| `7d5f00f0-3c1a-4b6e-9e42-5a1c0de51a00` | pairing | advertised only while the host shows a pairing code |
+| `7d5f00f0-3c1a-4b6e-9e42-5a1c0de51a00` | pairing | advertised only while the host shows a pairing code, in the scan response |
 | `7d5f00f1-3c1a-4b6e-9e42-5a1c0de51a00` | Mac pairing | advertised only while the host takes a new Mac (see "Macs") |
+
+While the host shows a pairing code, its advertising packet carries manufacturer data with company `0xFFFF` and the marker `48 53` ("HS"), and the host's name when it is at most 20 UTF-8 bytes; the pairing UUID moves to the scan response. An iPhone's Add host sheet reads only the advertising packet, so it finds the host by the marker and shows that name. Otherwise the packet carries the service UUID and the scan response the name.
 
 While a phone is connected the host keeps a second advertising set for Macs: it names `7d5f00f1` while it takes a new Mac and the service otherwise.
 

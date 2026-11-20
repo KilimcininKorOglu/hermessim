@@ -61,6 +61,14 @@ class BleLink(
 
         /** Advertising data naming one service: the client's set and the Mac's carry nothing else. */
         fun advertised(uuid: UUID): AdvertiseData = AdvertiseData.Builder().addServiceUuid(ParcelUuid(uuid)).build()
+
+        /**
+         * The packet of a host waiting for its first phone: the HermesSIM marker and the host's name. An iPhone's
+         * Add host sheet reads only this packet, and a 128-bit service UUID left no room for the name in it.
+         */
+        fun pairAdvertised(withName: Boolean): AdvertiseData = AdvertiseData.Builder()
+            .addManufacturerData(PairAdvert.COMPANY_ID, PairAdvert.MARKER)
+            .setIncludeDeviceName(withName).build()
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -174,7 +182,10 @@ class BleLink(
                 HostName.changed(ctx)
                 withName = true
                 val set = advSet ?: return@post
-                runCatching { set.setScanResponseData(scanResponse()) }
+                runCatching {
+                    set.setAdvertisingData(adData())
+                    set.setScanResponseData(scanResponse())
+                }
                     .onSuccess { Log.i(TAG, "advertising: Bluetooth name changed (${nameBytes()} bytes)") }
                     .onFailure { Log.w(TAG, "advertising: new Bluetooth name not taken: $it") }
             }
@@ -480,20 +491,25 @@ class BleLink(
     @Suppress("MissingPermission")
     private fun nameBytes(): Int = runCatching { bt.adapter?.name?.toByteArray()?.size ?: 0 }.getOrDefault(0)
 
-    /** [PAIR_SERVICE] while [pairable] (the Add host sheet lists only those), else [SERVICE] (the paired iPhone's
-     *  search). The GATT service is [SERVICE] either way. */
-    private fun adData(): AdvertiseData = advertised(if (pairable()) PAIR_SERVICE else SERVICE)
+    /** While [pairable]: the HermesSIM marker and the name, which an iPhone's Add host sheet reads ([PairAdvert]).
+     *  Otherwise [SERVICE] (the paired iPhone's search). The GATT service is [SERVICE] either way. */
+    private fun adData(): AdvertiseData =
+        if (pairable()) pairAdvertised(withName && PairAdvert.nameFits(bt.adapter?.name)) else advertised(SERVICE)
 
-    /** The phone's name in the scan response when it fits (31 bytes - 2; Android 11/12 count the whole name, and
-     *  refuse the set otherwise): nameless, the host still works, the iPhone's sheet shows HermesSIM Host. */
+    /** While [pairable]: [PAIR_SERVICE], which an Android phone's Add host search looks for. Otherwise the phone's
+     *  name when it fits (31 bytes - 2; Android 11/12 count the whole name, and refuse the set otherwise). */
     private fun scanResponse(): AdvertiseData =
-        AdvertiseData.Builder().setIncludeDeviceName(withName && nameBytes() <= 29).build()
+        if (pairable()) advertised(PAIR_SERVICE)
+        else AdvertiseData.Builder().setIncludeDeviceName(withName && nameBytes() <= 29).build()
 
     /** The pairable state changed: update the running set's data (same set, same address). */
     fun refreshAdvertising() = main.post {
         val set = advSet ?: return@post
         val p = pairable()
-        runCatching { set.setAdvertisingData(adData()) }.onSuccess { Log.i(TAG, "advertising: ${if (p) "ready to pair" else "paired"}") }
+        runCatching {
+            set.setAdvertisingData(adData())
+            set.setScanResponseData(scanResponse())
+        }.onSuccess { Log.i(TAG, "advertising: ${if (p) "ready to pair" else "paired"}") }
         if (p && slowAdv) setPace(false) else schedulePace()
     }
 
