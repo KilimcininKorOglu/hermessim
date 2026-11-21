@@ -64,7 +64,7 @@ take play 1
 put 0 1
 take play 2
 count 3 0 1
-scenario running dry waits for the prime again
+scenario running dry waits for a prime two ticks deeper
 put 0 1
 put 1 1
 take play 0
@@ -73,9 +73,13 @@ take silence
 put 2 1
 take silence
 put 3 1
+take silence
+put 4 1
+take silence
+put 5 1
 take play 2
 take play 3
-count 4 0 0
+count 6 0 0
 scenario 10 and 20 ms packets mixed, as when the path changes
 put 0 1
 put 1 1

@@ -57,7 +57,9 @@ engine; the sender only changes where packets go and their length (10 or 20 ms).
 the ticks between the next tick to play and the end of the last packet, plus the decoded ticks still waiting. Each
 10 ms the player takes one tick:
 
-- Before it plays it waits for 2 ticks; when it runs dry it waits for 2 ticks again.
+- Before it plays it waits for 2 ticks (the prime). Each time it runs dry the prime grows by 2 ticks, up to 12
+  (120 ms), and the depth trimming keeps and the hard cap rise by as much: packets that arrive in bursts, as on the
+  internet path, need a deeper buffer. After 500 takes without running dry the growth goes back one tick.
 - A packet at the next tick is decoded whole; a 20 ms packet's second half plays at the next take.
 - A missing tick: the first packet after it within 4 ticks is looked at. When the gap to it is at least that packet's
   length, the gap is decoded from the packet's FEC (`opus_decode` with `decode_fec` and the gap as frame size: Opus

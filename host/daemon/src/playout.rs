@@ -12,6 +12,11 @@ const MAX_GAP: u16 = 4;
 const WINDOW: i32 = 200;
 const MAX_DEPTH: i32 = 8;
 const RESYNC: u32 = 50;
+/// Ticks the prime grows by each time playback runs dry, and the most it grows to (120 ms).
+const GROW: i32 = 2;
+const MAX_PRIME: i32 = 12;
+/// Takes without running dry after which the prime comes back one tick.
+const QUIET: i32 = 500;
 
 #[derive(Clone, Copy)]
 struct Slot {
@@ -66,6 +71,10 @@ pub struct Playout {
     pub prime: i32,
     /// The depth the trimming keeps (TUNE).
     pub keep: i32,
+    /// Ticks added to the prime, the keep and the cap after runs dry: bursty arrival (the internet path) needs a
+    /// deeper buffer than an even one, and a quiet stretch gives it back.
+    grown: i32,
+    quiet: i32,
     pub received: u32,
     pub lost: u32,
     pub late: u32,
@@ -93,6 +102,8 @@ impl Playout {
             trim: 0,
             prime: 2,
             keep: 1,
+            grown: 0,
+            quiet: 0,
             received: 0,
             lost: 0,
             late: 0,
@@ -109,6 +120,23 @@ impl Playout {
         self.win_min = 1000;
         self.win_n = 0;
         self.trim = 0;
+        self.grown = 0;
+        self.quiet = 0;
+    }
+
+    /// The prime with what runs dry added.
+    pub fn prime_now(&self) -> i32 {
+        self.prime + self.grown
+    }
+
+    fn keep_now(&self) -> i32 {
+        self.keep + self.grown
+    }
+
+    /// Ran dry: the next start waits for a deeper buffer.
+    fn ran_dry(&mut self) {
+        self.grown = (self.grown + GROW).min((MAX_PRIME - self.prime).max(0));
+        self.quiet = 0;
     }
 
     /// Ticks buffered ahead of playback, decoded ones included.
@@ -181,7 +209,7 @@ impl Playout {
             self.end = end;
         }
         self.received += 1;
-        if !self.playing && self.depth() >= self.prime {
+        if !self.playing && self.depth() >= self.prime_now() {
             self.playing = true;
         }
     }
@@ -206,7 +234,8 @@ impl Playout {
             return Take::Silence;
         }
         if diff(self.end, self.next) <= 0 {
-            self.playing = false; // ran dry: wait for the prime again
+            self.playing = false; // ran dry: wait for a deeper prime
+            self.ran_dry();
             return Take::Silence;
         }
         let Some(i) = self.at(self.next) else {
@@ -278,18 +307,23 @@ impl Playout {
         self.win_min = self.win_min.min(self.depth());
         self.win_n += 1;
         if self.win_n >= WINDOW {
-            if self.win_min > self.keep {
-                self.trim = self.win_min - self.keep;
+            if self.win_min > self.keep_now() {
+                self.trim = self.win_min - self.keep_now();
             }
             self.win_min = 1000;
             self.win_n = 0;
         }
-        if self.trim > 0 && self.depth() > self.keep {
+        if self.trim > 0 && self.depth() > self.keep_now() {
             self.drop_tick();
             self.trim -= 1;
         }
-        if self.depth() > MAX_DEPTH {
+        if self.depth() > MAX_DEPTH + self.grown {
             self.drop_tick();
+        }
+        self.quiet += 1;
+        if self.quiet >= QUIET {
+            self.quiet = 0;
+            self.grown = (self.grown - 1).max(0);
         }
     }
 }
@@ -351,6 +385,50 @@ mod tests {
         }
         assert_eq!(scenarios, 14);
         assert!(failures.is_empty(), "{:#?}", failures);
+    }
+
+    /// Runs dry `times` times: plays what is queued, then takes once from an empty buffer.
+    fn run_dry(p: &mut Playout, tick: &mut u16, times: i32) {
+        let mut buf = [0u8; MAX_PACKET];
+        for _ in 0..times {
+            for _ in 0..p.prime_now() {
+                p.put(*tick, 1, &[0x78]);
+                *tick = tick.wrapping_add(1);
+            }
+            while p.take(&mut buf) != Take::Silence {}
+        }
+    }
+
+    /// Bursty arrival (internet path) needs a deeper buffer: each run dry adds 20 ms, never past 120 ms.
+    #[test]
+    fn running_dry_deepens_the_prime_up_to_120_ms() {
+        let mut p = Playout::new();
+        let mut tick = 0;
+        run_dry(&mut p, &mut tick, 1);
+        assert_eq!(p.prime_now(), 4);
+        run_dry(&mut p, &mut tick, 10);
+        assert_eq!(p.prime_now(), MAX_PRIME);
+    }
+
+    /// Five seconds of steady audio give the extra depth back one tick, down to the tuned prime.
+    #[test]
+    fn a_quiet_stretch_gives_the_depth_back() {
+        let mut p = Playout::new();
+        let mut tick = 0;
+        let mut buf = [0u8; MAX_PACKET];
+        run_dry(&mut p, &mut tick, 1);
+        for _ in 0..p.prime_now() {
+            p.put(tick, 1, &[0x78]);
+            tick = tick.wrapping_add(1);
+        }
+        for _ in 0..QUIET {
+            p.put(tick, 1, &[0x78]);
+            tick = tick.wrapping_add(1);
+            assert_ne!(p.take(&mut buf), Take::Silence);
+        }
+        assert_eq!(p.prime_now(), 3);
+        p.reset();
+        assert_eq!(p.prime_now(), 2);
     }
 
     #[test]
