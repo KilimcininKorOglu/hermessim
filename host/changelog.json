@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.3.2",
+    "code": 77,
+    "en": "Battery care no longer cuts the USB connection when it stops charging. On some phones the cut turned the USB port off, so a cable to a computer kept dropping. On those phones battery care is now not available.",
+    "tr": "Pil koruması şarjı durdururken artık USB bağlantısını kesmez. Bazı telefonlarda bu işlem USB girişini kapatıyordu. Bu yüzden bilgisayara bağlı kablonun bağlantısı sürekli kopuyordu. Bu telefonlarda pil koruması artık kullanılamaz."
+  },
+  {
     "version": "1.3.1",
     "code": 76,
     "en": "When you add the host to a phone, the host's screen shows the same pairing code as the phone's Bluetooth pairing request, so you see one number on both.",
