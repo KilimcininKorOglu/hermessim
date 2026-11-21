@@ -1,0 +1,42 @@
+name: Publish support table
+
+# A change to profiles/support.json on main replaces the live table that hosts and phones read from
+# GET /api/v1/support (secret HERMESSIM_RELEASE_TOKEN, the server's RELEASE_TOKEN). The server refuses a table
+# that is not a JSON object with a non-empty phones array, so the job fails instead of publishing a broken one.
+
+on:
+  push:
+    branches: [main]
+    paths: ['profiles/support.json']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: support-table
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Upload the table
+        env:
+          HERMESSIM_RELEASE_TOKEN: ${{ secrets.HERMESSIM_RELEASE_TOKEN }}
+          HERMESSIM_URL: https://hermessim.keremgok.tr
+        run: |
+          if [ -z "$HERMESSIM_RELEASE_TOKEN" ]; then
+            echo "::error::secret HERMESSIM_RELEASE_TOKEN is not set"
+            exit 1
+          fi
+          curl --fail-with-body --silent --show-error --max-time 60 -X PUT \
+            -H "Authorization: Bearer $HERMESSIM_RELEASE_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary @profiles/support.json \
+            "$HERMESSIM_URL/api/v1/support"
+          echo
