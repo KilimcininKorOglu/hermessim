@@ -405,8 +405,8 @@ impl Charge {
     }
 
     fn cut_index(&self) -> i32 {
-        for (i, (path, _)) in CUT_NODES.iter().enumerate() {
-            if node_writable(path) {
+        for (i, node) in CUT_NODES.iter().enumerate() {
+            if node_writable(node.path) {
                 return i as i32;
             }
         }
@@ -418,7 +418,7 @@ impl Charge {
         if i < 0 {
             None
         } else {
-            Some(CUT_NODES[i as usize].0)
+            Some(CUT_NODES[i as usize].path)
         }
     }
 
@@ -427,13 +427,14 @@ impl Charge {
         if i < 0 {
             return;
         }
-        let (node, stop) = CUT_NODES[i as usize];
-        let want = if on { stop } else { !stop };
-        if read_int(node) == want as i32 {
+        let cut = &CUT_NODES[i as usize];
+        let node = cut.path;
+        let want = if on { cut.stop } else { cut.run };
+        if read_text(node).as_deref() == Some(want) {
             self.cutting = on;
             return;
         }
-        if write_int(node, want as i32) < 0 {
+        if write_text(node, want) < 0 {
             if !self.cut_failed {
                 crate::logw!(
                     "battery care: writing {} failed: {}",
@@ -635,8 +636,8 @@ impl Charge {
             return;
         }
         let (release_at, should_cut) = self.cut_band(level, plugged, with_cap);
-        let (node, stop) = CUT_NODES[cut];
-        if self.cutting && read_int(node) != stop as i32 {
+        let node = CUT_NODES[cut].path;
+        if self.cutting && read_text(node).as_deref() != Some(CUT_NODES[cut].stop) {
             self.cutting = false;
             if level > release_at {
                 self.recut(node, now);

@@ -120,6 +120,7 @@ until [ "$(getprop sys.boot_completed)" = 1 ]; do sleep 2; done
       f=/sys/class/${n%%:*}
       [ -e "$f" ] && echo "${n##*:}" > "$f" 2>/dev/null
     done
+    [ -e /proc/mtk_battery_cmd/current_cmd ] && echo "0 0" > /proc/mtk_battery_cmd/current_cmd 2>/dev/null
   }
   # Quick failures back off (2 s up to 60 s); after a self-update that won't start, the previous build comes back; a
   # daemon that keeps failing runs in safe mode (no mixer writes) rather than restart for ever (audit, 19 Oct).

@@ -292,6 +292,7 @@ object Retire {
             |         power_supply/battery/batt_full_capacity:100 power_supply/battery/charge_stop_level:100; do
             |  f=/sys/class/${'$'}{n%%:*}; [ -e "${'$'}f" ] && echo "${'$'}{n##*:}" > "${'$'}f"
             |done
+            |[ -e /proc/mtk_battery_cmd/current_cmd ] && echo "0 0" > /proc/mtk_battery_cmd/current_cmd
             |# What service.sh silenced (its snapshot, else Android's defaults)
             |put system vibrate_when_ringing 1
             |put system haptic_feedback_enabled 1

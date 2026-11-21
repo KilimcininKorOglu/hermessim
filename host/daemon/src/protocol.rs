@@ -234,13 +234,22 @@ pub fn tune_values(prime: i32, keep: i32, period: i32) -> Option<(i32, i32, i32)
         .then_some((prime, keep, period))
 }
 
-/// The nodes that stop charging, each with the value that stops it. An `input_suspend` node is never one: it
-/// suspends the whole USB input, so the cable reads offline and USB data (adb) drops with the charge.
-pub const CUT_NODES: [(&str, bool); 4] = [
-    ("/sys/class/power_supply/battery/batt_slate_mode", true),
-    ("/sys/class/power_supply/battery/charging_enabled", false),
-    ("/sys/class/power_supply/battery/battery_charging_enabled", false),
-    ("/sys/class/power_supply/battery/charge_disable", true),
+/// A node that stops charging: its path, the text that stops the charge and the text that lets it run.
+pub struct CutNode {
+    pub path: &'static str,
+    pub stop: &'static str,
+    pub run: &'static str,
+}
+
+/// The nodes that stop charging, first found first used. An `input_suspend` node is never one: it suspends the
+/// whole USB input, so the cable reads offline and USB data (adb) drops with the charge. MediaTek's battery command
+/// "0 1" stops the charge and leaves the USB input on.
+pub const CUT_NODES: [CutNode; 5] = [
+    CutNode { path: "/sys/class/power_supply/battery/batt_slate_mode", stop: "1", run: "0" },
+    CutNode { path: "/sys/class/power_supply/battery/charging_enabled", stop: "0", run: "1" },
+    CutNode { path: "/sys/class/power_supply/battery/battery_charging_enabled", stop: "0", run: "1" },
+    CutNode { path: "/sys/class/power_supply/battery/charge_disable", stop: "1", run: "0" },
+    CutNode { path: "/proc/mtk_battery_cmd/current_cmd", stop: "0 1", run: "0 0" },
 ];
 
 /// Input suspend nodes an earlier daemon wrote 1 to as its cut; each is set back to 0 at start.
@@ -578,7 +587,16 @@ mod tests {
     /// Battery care must never stop charging by suspending the input: that takes the USB data link down too.
     #[test]
     fn no_cut_node_suspends_the_usb_input() {
-        assert!(CUT_NODES.iter().all(|(node, _)| !node.contains("input_suspend")));
+        assert!(CUT_NODES.iter().all(|node| !node.path.contains("input_suspend")));
+    }
+
+    /// A MediaTek phone (Redmi Note 8 Pro) has no other node: its battery command stops the charge with "0 1" and
+    /// lets it run with "0 0", keeping the USB input on.
+    #[test]
+    fn mediatek_battery_command_holds_the_charge() {
+        let mtk = CUT_NODES.iter().find(|node| node.path == "/proc/mtk_battery_cmd/current_cmd");
+        let mtk = mtk.map(|node| (node.stop, node.run));
+        assert_eq!(mtk, Some(("0 1", "0 0")));
     }
 
     /// Every input suspend node an earlier daemon used as its cut is cleared at start.
