@@ -7,7 +7,7 @@ use std::os::unix::io::RawFd;
 use libc::{c_int, c_void, pid_t};
 
 use crate::protocol::{
-    c_atoi, charge_band, charge_status_line, net_cycle_script, netblock_script, valid_pkg,
+    c_atoi, charge_band, charge_status_line, CUT_NODES, SUSPEND_NODES, net_cycle_script, netblock_script, valid_pkg,
     valid_role, EscapeGesture,
 };
 
@@ -17,21 +17,6 @@ const ESCAPE_ACTION: &str = "com.keremgok.hermessim.host.BOX_ESCAPE";
 const ESCAPE_RECEIVER: &str = "com.keremgok.hermessim.host/.DaemonEventReceiver";
 const DAEMON_UP: &str = "com.keremgok.hermessim.host.DAEMON_UP";
 
-const CUT_NODES: [(&str, bool); 10] = [
-    ("/sys/class/power_supply/battery/batt_slate_mode", true),
-    ("/sys/class/power_supply/battery/charging_enabled", false),
-    (
-        "/sys/class/power_supply/battery/battery_charging_enabled",
-        false,
-    ),
-    ("/sys/class/power_supply/battery/charge_disable", true),
-    ("/sys/class/power_supply/battery/input_suspend", true),
-    ("/sys/class/qcom-battery/input_suspend", true),
-    ("/sys/class/power_supply/usb/input_suspend", true),
-    ("/sys/class/power_supply/main/input_suspend", true),
-    ("/sys/class/power_supply/ac/input_suspend", true),
-    ("/sys/class/power_supply/dc/input_suspend", true),
-];
 const CAP_NODES: [&str; 6] = [
     "/sys/class/power_supply/battery/batt_full_capacity",
     "/sys/class/power_supply/battery/charge_control_end_threshold",
@@ -774,7 +759,17 @@ impl Charge {
         0
     }
 
+    /// Undo an input suspend an earlier daemon left behind, which keeps the USB input and its data link off.
+    fn clear_suspend() {
+        for node in SUSPEND_NODES {
+            if read_int(node) == 1 && write_int(node, 0) == 0 {
+                crate::logi!("battery care: input suspend cleared ({})", node);
+            }
+        }
+    }
+
     fn init(&mut self) {
+        Self::clear_suspend();
         self.capture_originals();
         self.release_charge();
         let saved = read_int(LIMIT_FILE);

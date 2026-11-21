@@ -234,6 +234,25 @@ pub fn tune_values(prime: i32, keep: i32, period: i32) -> Option<(i32, i32, i32)
         .then_some((prime, keep, period))
 }
 
+/// The nodes that stop charging, each with the value that stops it. An `input_suspend` node is never one: it
+/// suspends the whole USB input, so the cable reads offline and USB data (adb) drops with the charge.
+pub const CUT_NODES: [(&str, bool); 4] = [
+    ("/sys/class/power_supply/battery/batt_slate_mode", true),
+    ("/sys/class/power_supply/battery/charging_enabled", false),
+    ("/sys/class/power_supply/battery/battery_charging_enabled", false),
+    ("/sys/class/power_supply/battery/charge_disable", true),
+];
+
+/// Input suspend nodes an earlier daemon wrote 1 to as its cut; each is set back to 0 at start.
+pub const SUSPEND_NODES: [&str; 6] = [
+    "/sys/class/power_supply/battery/input_suspend",
+    "/sys/class/qcom-battery/input_suspend",
+    "/sys/class/power_supply/usb/input_suspend",
+    "/sys/class/power_supply/main/input_suspend",
+    "/sys/class/power_supply/ac/input_suspend",
+    "/sys/class/power_supply/dc/input_suspend",
+];
+
 /// The charge target band: 60 -> charge below 57, hold at 60, drain above 62.
 pub fn charge_band(limit: i32) -> (i32, i32) {
     if limit <= 0 || limit >= 100 {
@@ -555,6 +574,24 @@ impl EscapeGesture {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Battery care must never stop charging by suspending the input: that takes the USB data link down too.
+    #[test]
+    fn no_cut_node_suspends_the_usb_input() {
+        assert!(CUT_NODES.iter().all(|(node, _)| !node.contains("input_suspend")));
+    }
+
+    /// Every input suspend node an earlier daemon used as its cut is cleared at start.
+    #[test]
+    fn every_old_input_suspend_cut_is_cleared() {
+        for node in [
+            "/sys/class/power_supply/battery/input_suspend",
+            "/sys/class/power_supply/usb/input_suspend",
+            "/sys/class/qcom-battery/input_suspend",
+        ] {
+            assert!(SUSPEND_NODES.contains(&node), "{node}");
+        }
+    }
 
     #[test]
     fn parses_c_integer_bases() {
