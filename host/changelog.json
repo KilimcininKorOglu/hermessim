@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.3.4",
+    "code": 79,
+    "en": "When an update fails, the host sends its own error text to your phone, so the Updates page shows why the update did not install.",
+    "tr": "Bir güncelleme başarısız olduğunda ana cihaz kendi hata metnini telefonunuza gönderir. Güncellemeler sayfası, güncellemenin neden kurulmadığını gösterir."
+  },
+  {
     "version": "1.3.3",
     "code": 78,
     "en": "Battery care works again on MediaTek phones such as the Redmi Note 8 Pro: charging stops at your limit and the USB connection stays on.",
