@@ -815,6 +815,7 @@ message Update {
   UpdateFault fault = 8;          // why the last check, download or install did not work
   uint64 later_until_ms = 9;      // host wall clock until which UPDATE_VERB_LATER holds, 0 for none
   uint64 checked_ms = 10;         // host wall clock of the last check that reached the server
+  string fault_detail = 11;       // the failed step's own text (installer output, HTTP status), at most 120 characters
 }
 
 // The host log, scrubbed. A long log comes as several replies to the one request, on the bulk stream.

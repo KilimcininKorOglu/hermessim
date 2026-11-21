@@ -199,5 +199,7 @@ switches it with `UPDATE_VERB_AUTO_ON` and `UPDATE_VERB_AUTO_OFF`. While it is o
 that it is signed with the installed app's key, and installs it. While it is on, the host downloads and checks the
 newest APK by itself (`UPDATE_PHASE_READY`) and installs it on `UPDATE_VERB_INSTALL`, or between 02:00 and 05:00 host
 time once a phone has been shown the update and no call is up, unless `UPDATE_VERB_LATER` set `later_until_ms` (one
-day). An install never starts during a call. A failed check, download or install names its `UpdateFault`. Every
+day). An install never starts during a call. A failed check, download or install names its `UpdateFault`, and
+`fault_detail` carries the failed step's own text (the installer's output, the HTTP status), at most 120 characters,
+which a phone shows under the fault; it is empty when nothing failed. Every
 release carries notes in English and Turkish.
