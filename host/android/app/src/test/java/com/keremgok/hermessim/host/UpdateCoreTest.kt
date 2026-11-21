@@ -3,6 +3,7 @@ package com.keremgok.hermessim.host
 
 import com.keremgok.hermessim.host.UpdateCore.Install
 import com.keremgok.hermessim.host.UpdateCore.Next
+import com.keremgok.hermessim.wire.UpdateFault
 import com.keremgok.hermessim.wire.UpdatePhase
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -44,5 +45,19 @@ class UpdateCoreTest {
         assertFalse(UpdateCore.nightInstall(due.copy(deferredUntilMs = now + 1)))
         assertFalse(UpdateCore.nightInstall(due.copy(toldAtMs = 0)))
         assertFalse(UpdateCore.nightInstall(due.copy(toldAtMs = now - UpdateCore.HOUR_MS + 1)))
+    }
+
+    /** The phone shows the installer's own words under a failed update, on one line and at most 120 characters. */
+    @Test
+    fun `a failed step's text reaches the phone as one short line`() {
+        val out = "Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE:\n  Package com.keremgok.hermessim.host signatures do not match]"
+        val detail = UpdateCore.faultDetail(UpdateFault.UPDATE_FAULT_INSTALL, out)
+        assertEquals("Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: Package com.keremgok.hermessim.host signatures do not match]", detail)
+        assertEquals(120, UpdateCore.faultDetail(UpdateFault.UPDATE_FAULT_INSTALL, "x".repeat(500)).length)
+    }
+
+    @Test
+    fun `nothing failed, nothing to show`() {
+        assertEquals("", UpdateCore.faultDetail(UpdateFault.UPDATE_FAULT_UNSPECIFIED, "leftover text"))
     }
 }

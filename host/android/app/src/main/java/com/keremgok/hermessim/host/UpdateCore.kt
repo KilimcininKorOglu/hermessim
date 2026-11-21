@@ -1,6 +1,7 @@
 // HermesSIM host. Copyright (C) 2026 SIM Relay authors. GPL-3.0-or-later.
 package com.keremgok.hermessim.host
 
+import com.keremgok.hermessim.wire.UpdateFault
 import com.keremgok.hermessim.wire.UpdatePhase
 
 /**
@@ -42,4 +43,13 @@ object UpdateCore {
         n.auto && n.ready && n.hour in NIGHT && n.nowMs >= n.deferredUntilMs && told(n)
 
     private fun told(n: Night) = n.toldAtMs > 0 && n.nowMs - n.toldAtMs >= HOUR_MS
+
+    const val DETAIL_MAX = 120
+
+    /** The failed step's own text for the phone: one line, at most [DETAIL_MAX] characters; empty without a fault. */
+    fun faultDetail(fault: UpdateFault, detail: String): String {
+        if (fault == UpdateFault.UPDATE_FAULT_UNSPECIFIED) return ""
+        return detail.map { if (it.isISOControl()) ' ' else it }.joinToString("")
+            .replace(Regex(" {2,}"), " ").trim().take(DETAIL_MAX)
+    }
 }

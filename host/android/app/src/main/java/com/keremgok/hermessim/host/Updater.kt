@@ -42,6 +42,7 @@ object Updater {
     @Volatile private var available: JSONObject? = null     // newest release (from the API)
     @Volatile private var notes: List<UpdateNote> = emptyList()
     @Volatile private var fault = UpdateFault.UPDATE_FAULT_UNSPECIFIED
+    @Volatile private var faultDetail = ""
 
     private fun prefs() = app.getSharedPreferences("updater", Context.MODE_PRIVATE)
     private val apkFile get() = File(app.filesDir, "update.apk")
@@ -68,7 +69,7 @@ object Updater {
         val a = available
         val b = Update.newBuilder()
             .setCurrentVersion(BuildConfigInfo.version(app)).setCurrentCode(myCode())
-            .setPhase(state).addAllNotes(notes).setFault(fault).setAutomatic(auto())
+            .setPhase(state).addAllNotes(notes).setFault(fault).setFaultDetail(faultDetail).setAutomatic(auto())
             .setLaterUntilMs(prefs().getLong("deferred_until", 0)).setCheckedMs(prefs().getLong("checked", 0))
         if (a != null) b.setVersion(a.optString("version")).setCode(a.optInt("code"))
         return b.build()
@@ -129,11 +130,13 @@ object Updater {
         @Suppress("DEPRECATION") app.packageManager.getPackageInfo(app.packageName, 0).versionCode
     }.getOrDefault(0)
 
-    /** The new phase; with a [why] the fault a peer shows its own text for, and [detail] for this host's log. */
+    /** The new phase; with a [why] the fault a peer shows its own text for, and [detail], the failed step's own text,
+     *  for this host's log and under the fault on the phone. */
     private fun set(s: UpdatePhase, why: UpdateFault = UpdateFault.UPDATE_FAULT_UNSPECIFIED, detail: String = "") {
         if (why != UpdateFault.UPDATE_FAULT_UNSPECIFIED) Log.w(TAG, "update: $why $detail")
         state = s
         fault = why
+        faultDetail = UpdateCore.faultDetail(why, detail)
         changed()
     }
 
