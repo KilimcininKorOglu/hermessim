@@ -33,24 +33,33 @@ object LanLink {
         @Volatile var peer: String? = null; private set
         private var tunnel: Tunnel? = null
         private val lock = Any()
+        /** Set by [close], under [lock] with the writer's shutdown, so no write reaches a shut writer. */
+        private var closed = false
 
-        /** Seals [frames] and writes them; false once the tunnel is used up or the socket is gone. */
+        /** Seals [frames] and writes them; false once the tunnel is used up, the socket is gone or [close] ran. */
         fun send(frames: ByteArray): Boolean {
             val body = synchronized(lock) { tunnel?.seal(frames) } ?: return false
-            write(body)
-            return true
+            return write(body)
         }
 
         fun close() {
+            synchronized(lock) {
+                closed = true
+                writer.shutdown()
+            }
             runCatching { socket.close() }
-            writer.shutdown()
         }
 
-        private fun write(body: ByteArray) = writer.execute {
-            try { socket.getOutputStream().apply { write(LanFrames.frame(body)); flush() } } catch (e: IOException) {
-                log("lan: write failed: ${e.message}")
-                close()
+        // A CREDIT timer can fire after the phone closed the link: a write then is refused, not run.
+        private fun write(body: ByteArray): Boolean = synchronized(lock) {
+            if (closed) return false
+            writer.execute {
+                try { socket.getOutputStream().apply { write(LanFrames.frame(body)); flush() } } catch (e: IOException) {
+                    log("lan: write failed: ${e.message}")
+                    close()
+                }
             }
+            true
         }
 
         /** The first frame: the peer's key; false when it names none of ours. */

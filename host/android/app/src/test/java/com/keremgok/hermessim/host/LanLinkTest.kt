@@ -131,6 +131,17 @@ class LanLinkTest {
         assertEquals("closed", events.poll(5, TimeUnit.SECONDS))
     }
 
+    /** A CREDIT timer can fire after the phone closed the link; sending then must say no, not crash the app. */
+    @Test fun `a send on a closed connection is refused without throwing`() {
+        val peer = Peer(port)
+        handshake(peer, phoneKey)
+        assertEquals("opened phone", events.poll(5, TimeUnit.SECONDS))
+        val conn = conns.poll(5, TimeUnit.SECONDS)!!
+        conn.close()
+        assertEquals(false, conn.send("credit after close".toByteArray()))
+        peer.socket.close()
+    }
+
     @Test fun `a key the host never made is closed before any handshake`() {
         val peer = Peer(port)
         peer.send(byteArrayOf(LanFrames.KEY.toByte()) + LanFrames.keyId(ByteArray(32) { 9 }))
