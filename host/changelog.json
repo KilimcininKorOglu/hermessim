@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.4.3",
+    "code": 88,
+    "en": "The host app no longer restarts at the end of a call when the phone closes its local network link.",
+    "tr": "Telefon yerel ağ bağlantısını kapattığında ana cihaz uygulaması artık arama sonunda yeniden başlamıyor."
+  },
+  {
     "version": "1.4.2",
     "code": 87,
     "en": "Setup now starts with a short intro: what this phone becomes, and that unlocking it for root erases it. The last card also says what box mode does and that the host's settings are on your other phone.",
