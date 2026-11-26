@@ -49,7 +49,10 @@ object InternetPath {
     private val rng = SecureRandom()
     @Volatile private var path: Path? = null
 
-    private class Path(val socket: PathSocket, val seal: AudioSeal, val phone: List<InetSocketAddress>, val phoneRelay: InetSocketAddress?) {
+    private class Path(
+        val socket: PathSocket, val seal: AudioSeal, val phone: List<InetSocketAddress>, val phoneRelay: InetSocketAddress?,
+        val phoneLan: Set<InetSocketAddress>,
+    ) {
         @Volatile var turn: Turn? = null
         /** The way the phone's latest audio came, and the best way a probe came (direct over relayed). */
         @Volatile var audioRoute: PathSocket.Route? = null
@@ -62,6 +65,7 @@ object InternetPath {
         val binding = AtomicBoolean()
 
         fun relayed(r: PathSocket.Route) = r.viaOurRelay || r.to == phoneRelay
+        fun rank(r: PathSocket.Route) = AudioPathCore.rank(r.to in phoneLan, relayed(r))
 
         fun close() {
             synchronized(tasks) { tasks.forEach { it.cancel(false) } }
@@ -101,7 +105,8 @@ object InternetPath {
                 val phone = o.candidatesList.map(::address)
                 val phoneRelay = o.candidatesList.firstOrNull { it.kind == CandidateKind.CANDIDATE_KIND_RELAY }?.let(::address)
                 val socket = PathSocket { b, off, len, route -> holder[0]?.let { received(it, b, off, len, route) } }
-                val p = Path(socket, AudioSeal(keys.h2p, keys.p2h), phone, phoneRelay)
+                val phoneLan = o.candidatesList.filter { it.kind == CandidateKind.CANDIDATE_KIND_LAN }.map(::address).toSet()
+                val p = Path(socket, AudioSeal(keys.h2p, keys.p2h), phone, phoneRelay, phoneLan)
                 holder[0] = p
                 val ours = candidates(ctx, p, o.candidatesList)
                 synchronized(this) {
@@ -120,8 +125,35 @@ object InternetPath {
         }
     }
 
-    /** The host's candidates: its public addresses, and its relay when the phone brought none. */
+    /**
+     * The host's candidates: its local network addresses first, then (unless the phone brought only local network
+     * ones, as with internet mode off) its public addresses and its relay when the phone brought none.
+     */
     private fun candidates(ctx: Context, p: Path, phone: List<Candidate>): List<Candidate> {
+        val lan = if (phone.any { it.kind == CandidateKind.CANDIDATE_KIND_LAN }) lanCandidates(p) else emptyList()
+        if (AudioPathCore.lanOnly(phone)) {
+            check(lan.isNotEmpty()) { "no candidate: the host has no local network address" }
+            return AudioPathCore.answer(phone, lan, emptyList())
+        }
+        // Without the TURN server the local network still carries the call; with neither the path fails.
+        val net = runCatching { internetCandidates(ctx, p, phone) }.getOrElse { e ->
+            if (lan.isEmpty()) throw e
+            Log.w(TAG, "audio path: local network only: ${e.message}")
+            emptyList()
+        }
+        return AudioPathCore.answer(phone, lan, net)
+    }
+
+    /** The host's private IPv4 addresses on its up interfaces (Wi-Fi and its own hotspot), on the path's port. */
+    private fun lanCandidates(p: Path): List<Candidate> {
+        val all = runCatching {
+            java.net.NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp && !it.isLoopback }
+                .flatMap { it.inetAddresses.toList() }.map { it.address }
+        }.getOrDefault(emptyList())
+        return AudioPathCore.lanAddresses(all).map { AudioPathCore.candidate(CandidateKind.CANDIDATE_KIND_LAN, it, p.socket.port) }
+    }
+
+    private fun internetCandidates(ctx: Context, p: Path, phone: List<Candidate>): List<Candidate> {
         val c = credentials(ctx)
         val server = turnServer(c)
         val addresses = InetAddress.getAllByName(server.hostString)
@@ -205,9 +237,10 @@ object InternetPath {
             AudioRouter.fromPhone(Via.INTERNET, o.plain, 0, o.plain.size)
             return
         }
-        // A probe: a direct way wins over a relayed one; an ask is answered on the way it came.
+        // A probe: the local network wins over another direct way, which wins over a relay; an ask is answered on
+        // the way it came.
         val best = p.probeRoute
-        if (best == null || (p.relayed(best) && !p.relayed(route))) p.probeRoute = route
+        if (best == null || p.rank(route) < p.rank(best)) p.probeRoute = route
         if (o.plain.size == AudioPacket.PROBE_SIZE && o.plain[0].toInt() == AudioPacket.PROBE_ASK) {
             val answer = o.plain.copyOf().also { it[0] = AudioPacket.PROBE_ANSWER.toByte() }
             p.seal.seal(AudioPacket.PROBE, answer)?.let { transmit(p, it, route) }

@@ -159,7 +159,8 @@ tries again after 5 s while it still sees the host's instance.
 **Audio.** On the local network the host and the phone each add `CANDIDATE_KIND_LAN` candidates (their addresses
 on the Wi-Fi network) to `OpenAudioPath` and `AudioPath`, and the probes try them first: LAN, then direct, then
 relay. A path over the local network link needs no TURN server; with internet mode off it holds only LAN
-candidates.
+candidates. The host answers with LAN candidates only when the phone brought some (an older phone knows no such
+kind), and never with more than 4 candidates in all.
 
 ## Push
 

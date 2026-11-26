@@ -44,6 +44,41 @@ class AudioPathCoreTest {
         assertTrue(AudioPathCore.hostRelays(listOf(direct4)))
     }
 
+    private val lan4 = candidate(CandidateKind.CANDIDATE_KIND_LAN, 4)
+
+    @Test fun aPhoneMayBringLocalNetworkCandidates() {
+        assertNull(AudioPathCore.refusal(open(lan4, direct4)))
+        assertTrue(AudioPathCore.lanOnly(listOf(lan4)))
+        assertFalse(AudioPathCore.lanOnly(listOf(lan4, direct4)))
+        assertFalse(AudioPathCore.lanOnly(emptyList()))
+    }
+
+    @Test fun theLocalNetworkWinsOverAnotherDirectWayWhichWinsOverARelay() {
+        val lan = AudioPathCore.rank(toLan = true, relayed = false)
+        val direct = AudioPathCore.rank(toLan = false, relayed = false)
+        val relayed = AudioPathCore.rank(toLan = false, relayed = true)
+        assertTrue(lan < direct && direct < relayed)
+    }
+
+    @Test fun onlyAPhoneThatBroughtLanCandidatesGetsTheHostsAndNeverMoreThanFour() {
+        val hostLan = listOf(candidate(CandidateKind.CANDIDATE_KIND_LAN, 4), candidate(CandidateKind.CANDIDATE_KIND_LAN, 4, 40001))
+        val hostNet = listOf(direct4, direct6, relay4)
+        // An older phone knows no LAN kind and refuses an answer with one
+        assertEquals(hostNet, AudioPathCore.answer(listOf(direct4), hostLan, hostNet))
+        val answer = AudioPathCore.answer(listOf(lan4, direct4), hostLan, hostNet)
+        assertEquals(AudioPathCore.MAX_CANDIDATES, answer.size)
+        assertEquals(CandidateKind.CANDIDATE_KIND_LAN, answer.first().kind)
+        assertEquals(hostNet, answer.drop(1))
+        assertEquals(hostLan, AudioPathCore.answer(listOf(lan4), hostLan, emptyList()))
+    }
+
+    @Test fun onlyPrivateIpv4AddressesAreLanCandidates() {
+        fun a(vararg b: Int) = ByteArray(b.size) { b[it].toByte() }
+        val all = listOf(a(10, 0, 0, 5), a(172, 16, 1, 2), a(172, 32, 1, 2), a(192, 168, 43, 1), a(8, 8, 8, 8), a(192, 168, 43, 1), ByteArray(16))
+        assertEquals(listOf(listOf(10, 0, 0, 5), listOf(172, 16, 1, 2), listOf(192, 168, 43, 1)),
+            AudioPathCore.lanAddresses(all).map { it.map { b -> b.toInt() and 0xFF } })
+    }
+
     @Test fun anIpv6OnlyPhoneGetsAnIpv6Relay() {
         assertTrue(AudioPathCore.wantsIpv6(listOf(direct6)))
         assertFalse(AudioPathCore.wantsIpv6(listOf(direct6, direct4)))

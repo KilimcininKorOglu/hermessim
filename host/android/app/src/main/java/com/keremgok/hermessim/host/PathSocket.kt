@@ -22,6 +22,8 @@ class PathSocket(private val onDatagram: (ByteArray, Int, Int, Route) -> Unit) {
     data class Route(val to: InetSocketAddress, val viaOurRelay: Boolean)
 
     private val sock = DatagramSocket(0)
+    /** The UDP port the path takes datagrams on: the port of its local network candidates. */
+    val port: Int get() = sock.localPort
     private val pending = ConcurrentHashMap<String, LinkedBlockingQueue<Stun.Message>>()
     @Volatile var turn: Turn? = null
     @Volatile private var open = true

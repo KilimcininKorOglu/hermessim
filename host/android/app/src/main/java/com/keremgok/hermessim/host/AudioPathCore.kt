@@ -27,7 +27,41 @@ object AudioPathCore {
     }
 
     private fun valid(c: Candidate) = (c.address.size() == 4 || c.address.size() == 16) && c.port in 1..65535 &&
-        (c.kind == CandidateKind.CANDIDATE_KIND_DIRECT || c.kind == CandidateKind.CANDIDATE_KIND_RELAY)
+        c.kind in setOf(CandidateKind.CANDIDATE_KIND_DIRECT, CandidateKind.CANDIDATE_KIND_RELAY, CandidateKind.CANDIDATE_KIND_LAN)
+
+    /**
+     * A probe's way, best first (protocol/README.md "Local network"): to one of the phone's local network
+     * addresses 0, another direct way 1, through a relay 2.
+     */
+    fun rank(toLan: Boolean, relayed: Boolean): Int = when {
+        relayed -> 2
+        toLan -> 0
+        else -> 1
+    }
+
+    /** The phone brought only local network candidates: the path needs no TURN server. */
+    fun lanOnly(phone: List<Candidate>): Boolean = phone.isNotEmpty() && phone.all { it.kind == CandidateKind.CANDIDATE_KIND_LAN }
+
+    /** The host's own addresses that can be LAN candidates: its private IPv4 ones (its Wi-Fi and its hotspot). */
+    fun lanAddresses(all: List<ByteArray>): List<ByteArray> = all.filter(::privateV4).distinctBy { it.toList() }
+
+    /**
+     * The candidates the host answers with: LAN ones only to a phone that brought LAN ones itself (an older phone
+     * knows no such kind), first, and never more than [MAX_CANDIDATES] in all (a phone refuses an answer with more).
+     */
+    fun answer(phone: List<Candidate>, lan: List<Candidate>, internet: List<Candidate>): List<Candidate> {
+        val net = internet.take(MAX_CANDIDATES)
+        if (phone.none { it.kind == CandidateKind.CANDIDATE_KIND_LAN }) return net
+        return lan.take(MAX_CANDIDATES - net.size) + net
+    }
+
+    /** 10/8, 172.16/12 and 192.168/16: the addresses a Wi-Fi network or the host's hotspot hands out. */
+    private fun privateV4(a: ByteArray): Boolean {
+        if (a.size != 4) return false
+        val b0 = a[0].toInt() and 0xFF
+        val b1 = a[1].toInt() and 0xFF
+        return b0 == 10 || (b0 == 172 && b1 in 16..31) || (b0 == 192 && b1 == 168)
+    }
 
     /** A candidate to offer: an IPv4 or IPv6 [address] and its [port]. */
     fun candidate(kind: CandidateKind, address: ByteArray, port: Int): Candidate {
