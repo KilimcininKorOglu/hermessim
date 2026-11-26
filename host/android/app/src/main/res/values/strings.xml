@@ -88,7 +88,7 @@
     <string name="sim_body">No SIM card found. Insert a SIM card and make sure it\'s seated properly. HermesSIM picks it up on its own.</string>
     <string name="sim_locked">SIM %d is locked. Enter its PIN in the HermesSIM app on your phone (Host → SIM).</string>
     <string name="done_title">This phone is ready</string>
-    <string name="done_body">Keep it charged. You can take it with you (a bag is fine) or leave it at home. To open this screen again, press Volume Up 3 times, then Volume Down 3 times.</string>
+    <string name="done_body">Box mode is on: the screen and touch stay off and the phone stays quiet. Keep it charged. You can take it with you (a bag is fine) or leave it at home. You manage it from your other phone, in the Host tab. To open this screen again, press Volume Up 3 times, then Volume Down 3 times.</string>
     <string name="btn_pair_other">Pair a different phone…</string>
     <string name="pair_other_confirm">If another phone connects in the next 5 minutes, it will be paired instead of %1$s. If no other phone connects, %1$s stays paired. Continue?</string>
     <string name="btn_continue">Continue</string>
@@ -237,4 +237,7 @@
     <string name="tab_modules_magisk">Modules</string>
     <string name="tab_modules_apatch">APModule</string>
     <string name="tab_modules_kernelsu">Module</string>
+    <string name="intro_title">This phone becomes your SIM box</string>
+    <string name="intro_body">HermesSIM turns this phone into a host. Your SIM stays in it, and its calls and texts reach your other phone or Mac over Bluetooth or the internet.\n\nIt needs root. Unlocking the bootloader for root erases this phone and can affect its warranty, so back up what you need first.\n\nOnce it is set up, keep this phone on the charger. You manage it from your other phone.</string>
+    <string name="btn_start">Start</string>
 </resources>

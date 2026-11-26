@@ -259,6 +259,13 @@ object Onboarding {
         }
     }
 
+    /** Whether the intro card ([SetupIntro]) was passed with Start. */
+    fun introSeen(ctx: Context): Boolean = prefs(ctx).getBoolean("intro_seen", false)
+
+    fun markIntroSeen(ctx: Context) {
+        prefs(ctx).edit().putBoolean("intro_seen", true).apply()
+    }
+
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("onboarding", Context.MODE_PRIVATE)
 
     /** The daemon build for this phone's Android: the module carries arm64-v8a and armeabi-v7a, and customize.sh keeps

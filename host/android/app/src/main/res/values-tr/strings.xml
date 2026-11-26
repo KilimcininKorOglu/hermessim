@@ -83,7 +83,7 @@
     <string name="sim_body">SIM kart bulunamadı. Bir SIM kart takın ve yerine tam oturduğundan emin olun. HermesSIM, takılan SIM kartı kendiliğinden tanır.</string>
     <string name="sim_locked">SIM %d kilitli. PIN kodunu telefonunuzdaki HermesSIM uygulamasından girin (Ana cihaz → SIM).</string>
     <string name="done_title">Bu telefon hazır</string>
-    <string name="done_body">Telefonu şarjda tutun. Telefonu yanınızda taşıyabilir (çantada da olabilir) ya da evde bırakabilirsiniz. Bu ekranı yeniden açmak için önce Ses Açma tuşuna, ardından Ses Kısma tuşuna 3\'er kez basın.</string>
+    <string name="done_body">Kutu modu açık. Ekran ve dokunmatik kapalı kalır, telefon ses çıkarmaz. Telefonu şarjda tutun. Telefonu yanınızda taşıyabilir (çantada da olabilir) ya da evde bırakabilirsiniz. Ayarlarını diğer telefonunuzdaki Ana cihaz sekmesinden yönetirsiniz. Bu ekranı yeniden açmak için önce Ses Açma tuşuna, ardından Ses Kısma tuşuna 3\'er kez basın.</string>
     <string name="btn_pair_other">Başka bir telefon eşleştir…</string>
     <string name="pair_other_confirm">Önümüzdeki 5 dakika içinde başka bir telefon bağlanırsa, %1$s yerine o telefon eşleştirilir. Başka bir telefon bağlanmazsa %1$s eşli kalmaya devam eder. Devam edilsin mi?</string>
     <string name="btn_continue">Devam</string>
@@ -230,4 +230,7 @@
     <string name="tab_modules_magisk">Modüller</string>
     <string name="tab_modules_apatch">APModule</string>
     <string name="tab_modules_kernelsu">Modül</string>
+    <string name="intro_title">Bu telefon SIM kutunuz olacak</string>
+    <string name="intro_body">HermesSIM bu telefonu ana cihaza çevirir. SIM kartınız bu telefonda kalır. Aramaları ve mesajları Bluetooth ya da internet üzerinden diğer telefonunuza veya Mac\'inize gelir.\n\nBunun için root gerekir. Root için bootloader kilidini açmak bu telefonu sıfırlar ve garantiyi etkileyebilir. Bu yüzden önce gerekenleri yedekleyin.\n\nKurulumdan sonra telefonu şarjda tutun. Telefonu diğer telefonunuzdan yönetirsiniz.</string>
+    <string name="btn_start">Başla</string>
 </resources>

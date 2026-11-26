@@ -45,7 +45,7 @@ class SetupActivity : Activity() {
     internal enum class Mark(val glyph: String) { OK("✓"), WARN("!"), FAIL("✗"), WAIT("…") }
     internal data class Check(val title: String, val mark: Mark, val detail: String)
     internal enum class Act { CHECK_ROOT, INSTALL, RESTART, REINSTALL, DEV_OPTIONS, MAGISK_GUIDE, FIX, OPEN_PAIRING, PAIR_OTHER, LOCK_SETTINGS,
-        OPEN_MAGISK, RETIRE, RETIRE_DISMISS }
+        OPEN_MAGISK, RETIRE, RETIRE_DISMISS, INTRO_START }
     internal data class Btn(val label: String, val act: Act?, val enabled: Boolean = true)
     internal data class Card(val title: String, val body: String, val mark: Mark, val primary: Btn? = null, val secondary: Btn? = null,
                              val countdown: Boolean = false)
@@ -149,6 +149,7 @@ class SetupActivity : Activity() {
     private fun model(): Model {
         demo?.let { SetupDemo.model(this, it) }?.let { return it }
         if (host && Retire.givenBack(this)) return givenBackModel()
+        if (SetupIntro.shows(Onboarding.introSeen(this), Onboarding.root == Onboarding.Root.OK, host)) return introModel()
         val m = if (host) hostModel().copy(btName = btName(getSystemService(BluetoothManager::class.java).adapter)) else setupModel()
         if (Retire.failed == 0) return m
         // The removal stopped (nothing changed, or rolled back to a working host): say why, offer it again
@@ -156,6 +157,11 @@ class SetupActivity : Activity() {
         return m.copy(step = 0, steps = 0, card = Card(getString(R.string.retire_failed_title), body.joinToString("\n\n"), Mark.FAIL,
             Btn(getString(R.string.btn_retry), Act.RETIRE), Btn(getString(R.string.btn_close), Act.RETIRE_DISMISS)))
     }
+
+    /** The card before the steps: what this phone becomes and what root costs, until Start is pressed. */
+    internal fun introModel(): Model = Model(getString(R.string.subtitle_setup), 0, 0,
+        Card(getString(R.string.intro_title), getString(R.string.intro_body), Mark.OK, Btn(getString(R.string.btn_start), Act.INTRO_START)),
+        emptyList())
 
     /** The removal ran ([Retire.givenBack]): a restart finishes it, or, if one didn't, the root manager. No root calls. */
     private fun givenBackModel(): Model {
@@ -499,6 +505,7 @@ class SetupActivity : Activity() {
             Act.OPEN_MAGISK -> magiskIntent()?.let { i -> runCatching { startActivity(i) } }
             Act.RETIRE -> unlocked { retire() }
             Act.RETIRE_DISMISS -> { Retire.dismiss(); again() }
+            Act.INTRO_START -> { Onboarding.markIntroSeen(this); again() }
             Act.DEV_OPTIONS -> runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
                 .onFailure { runCatching { startActivity(Intent(Settings.ACTION_DEVICE_INFO_SETTINGS)) } }
             Act.LOCK_SETTINGS -> runCatching { startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS)) }

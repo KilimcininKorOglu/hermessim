@@ -16,7 +16,7 @@ import com.keremgok.hermessim.wire.LineLock
  */
 internal object SetupDemo {
     val STATES = listOf(
-        "cant", "unlock", "unlock_cant", "root_checking", "root_denied", "root_unknown", "install", "install_busy",
+        "intro", "cant", "unlock", "unlock_cant", "root_checking", "root_denied", "root_unknown", "install", "install_busy",
         "install_failed", "restart", "inactive", "given_back", "given_back_after", "retire_failed", "error", "retire",
         "fix_daemon", "fix_privileged", "fix_permissions", "lock", "pair", "pair_closed", "sim_none", "sim_puk", "sim_off",
         "next_test", "next_basic", "next_box", "done",
@@ -40,6 +40,7 @@ internal object SetupDemo {
     fun retireStep(key: String?): Int? = if (key == "retire") R.string.retire_step_settings else null
 
     fun model(a: SetupActivity, key: String): Model? = when (key) {
+        "intro" -> a.introModel()
         in SETUP -> setup(a, key)
         else -> host(a, key)
     }
