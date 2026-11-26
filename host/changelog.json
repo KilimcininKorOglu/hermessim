@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.4.5",
+    "code": 90,
+    "en": "Host updates install again: the host takes the new version and restarts, which takes about a minute. This version itself must be installed with the Magisk module.",
+    "tr": "Ana cihaz güncellemeleri yeniden kurulabiliyor: ana cihaz yeni sürümü alır ve yeniden başlar, bu yaklaşık bir dakika sürer. Bu sürümün kendisi Magisk modülüyle kurulmalıdır."
+  },
+  {
     "version": "1.4.4",
     "code": 89,
     "en": "When the phone closes its local network link, the host no longer tries to answer on it.",
