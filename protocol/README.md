@@ -2,7 +2,7 @@
 
 | Link | Specification | Schema | Licence |
 | --- | --- | --- | --- |
-| Host and its peers, the phone and up to 4 Macs (Bluetooth LE, and the phone's internet path below) | [`v2/SPEC.md`](v2/SPEC.md), protocol 2 | `v2/wire.proto` | see `v2/LICENSE` |
+| Host and its peers, the phone and up to 4 Macs (Bluetooth LE, the local network path and the phone's internet path below) | [`v2/SPEC.md`](v2/SPEC.md), protocol 2 | `v2/wire.proto` | see `v2/LICENSE` |
 
 The phones and the Macs speak only protocol 2. Test vectors are in `v2/vectors/`.
 
@@ -130,6 +130,36 @@ right `HS3`. `frames` are protocol 2 frames, the same stream as over Bluetooth: 
 follow `v2/SPEC.md`. No clock takes part. `State.remote` says whether the host reaches the relay.
 
 **Audio.** Call audio does not travel in the tunnel: it has a path of its own, see "Call audio".
+
+## Local network
+
+Used when the peer and the host are on the same Wi-Fi network (the host's own hotspot counts). It needs no server
+and works with internet mode off. The order of links is Bluetooth, then the local network, then the internet: a
+peer opens a local network link only while its Bluetooth link is down, and the host sends on it only then.
+Vectors: `v2/vectors/lan.json`.
+
+**Key.** A peer sends `GetLanKey` **over Bluetooth only** (the host refuses it on any other link with
+`CODE_BLUETOOTH_ONLY`) when both sides set `FEATURE_LOCAL_NETWORK`. The host makes 32 random bytes `L` for that peer
+the first time and answers the same `L` after; forgetting the peer forgets `L`. `key_id` is the first 8 bytes of
+sha256(`L`), and `auth` is HKDF-SHA256(`L`, salt `"hermes-remote-v1"`, info `lan-auth`), 32 bytes.
+
+**Finding the host.** The host announces mDNS service `_hermessim._tcp` on its Wi-Fi network and on its hotspot,
+under the instance name `LanKey.service` (16 random hex characters, made once per host). The announcement carries
+no TXT data: nothing in it names the host, its owner or its phone. A peer resolves that one instance name to an
+address and port.
+
+**Stream.** One TCP connection is one link. Both directions are frames `[u32 BE length][body]`, length 1 to
+16 448; a frame of length 0 or over 16 448 closes the connection. The peer's first frame is `KEY`
+`[0][key_id, 8 bytes]`; the host closes the connection when no peer of its own has that `key_id`. Then the tunnel of
+"Internet mode" runs in the frame bodies unchanged (`HS1`, `HS2`, `HS3`, `SEAL`), with the `auth` above. After a
+right `HS3`, the host takes only a `Hello` whose `install_id` is the one the key was made for. The link ends when
+the connection closes, when a counter reaches 2³², and after 24 hours. A peer whose connection fails or closes
+tries again after 5 s while it still sees the host's instance.
+
+**Audio.** On the local network the host and the phone each add `CANDIDATE_KIND_LAN` candidates (their addresses
+on the Wi-Fi network) to `OpenAudioPath` and `AudioPath`, and the probes try them first: LAN, then direct, then
+relay. A path over the local network link needs no TURN server; with internet mode off it holds only LAN
+candidates.
 
 ## Push
 

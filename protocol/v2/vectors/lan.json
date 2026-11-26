@@ -1,0 +1,48 @@
+{
+ "keys": [
+  {
+   "name": "a local network key",
+   "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+   "key_id": "630dcd2966c43366",
+   "auth": "27969637583911a03ece1c3876b72af3695aa0349cd6ae4f45769327e38b7110",
+   "key_frame": "0000000900630dcd2966c43366"
+  },
+  {
+   "name": "another local network key",
+   "key": "6465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f80818283",
+   "key_id": "e3e16780becf601d",
+   "auth": "3d55ec3f698840c6c98d043576dd636bee928f636835535dc769c6684e971089",
+   "key_frame": "0000000900e3e16780becf601d"
+  }
+ ],
+ "frames": {
+  "max_body": 16448,
+  "cases": [
+   {
+    "name": "one byte",
+    "body": "01",
+    "stream": "0000000101"
+   },
+   {
+    "name": "hs1",
+    "body": "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "stream": "0000002101aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   {
+    "name": "empty body is refused",
+    "stream": "00000000",
+    "error": true
+   },
+   {
+    "name": "over the limit is refused",
+    "stream": "00004041",
+    "error": true
+   },
+   {
+    "name": "a cut frame waits",
+    "stream": "0000000301",
+    "partial": true
+   }
+  ]
+ }
+}

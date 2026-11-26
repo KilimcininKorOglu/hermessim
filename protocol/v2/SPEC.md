@@ -10,7 +10,7 @@ Status: stages 1 (the control channel), 2 (the internet carrier), 3 (call audio)
 
 - **Host:** the Android phone that holds the SIM.
 - **Peer:** a phone or a Mac that talks to the host.
-- **Link:** one connection that carries frames in order and without loss: a Bluetooth LE connection from the peer's subscription to `down` until it ends, or the time the host and the peer are both in an internet room. When either side leaves the room and comes back, a new link starts. The peer sends `Hello` at the start of every link. Each kind of link has a session of its own.
+- **Link:** one connection that carries frames in order and without loss: a Bluetooth LE connection from the peer's subscription to `down` until it ends, a TCP connection on the local network (`../README.md` "Local network"), or the time the host and the peer are both in an internet room. When either side leaves the room and comes back, a new link starts. The peer sends `Hello` at the start of every link. Each kind of link has a session of its own.
 - **Session:** the state both sides keep across links: the message counters and the request ids.
 - **Message:** one `Packet` of `wire.proto`.
 
@@ -89,7 +89,7 @@ Every `Request` gets exactly one `Reply` with the same id, except `GetLog`, whos
 
 `Request.age_ms` is the time since the user asked. The host answers `CODE_TOO_OLD` when it is above 10 000 for `Dial`, `CallControl` and `SendTones`, and above 30 000 for any other request that changes something. `SendText` has no limit; its `client_ref` keeps a resent text from being sent twice.
 
-Requests that carry or return a secret or a network name (`SetHotspotSetup.passphrase`, `GetHotspotSecret`, `ScanWifi`, `SaveWifi`, `ForgetWifi`, `SetRemote` with `on`, `SetPushKey` with a key) are answered `CODE_BLUETOOTH_ONLY` over the internet. `SetMobileData` with `on` = false is answered `CODE_CARRIES_LINK` over the internet.
+Requests that carry or return a secret or a network name (`SetHotspotSetup.passphrase`, `GetHotspotSecret`, `ScanWifi`, `SaveWifi`, `ForgetWifi`, `SetRemote` with `on`, `SetPushKey` with a key, `GetLanKey`) are answered `CODE_BLUETOOTH_ONLY` on a local network or internet link. `SetMobileData` with `on` = false is answered `CODE_CARRIES_LINK` over the internet.
 
 `HostAction` with `HOST_VERB_REGISTER_AGAIN` or `HOST_VERB_RESTART` is answered `CODE_IN_CALL` while a call is up. `HOST_VERB_HOTSPOT_NO_INTERNET` is answered `CODE_OK` at any time; a step it causes waits for the end of the call (see "The hotspot check").
 
@@ -124,7 +124,7 @@ Over Bluetooth, call audio runs on the L2CAP channel of `Welcome.audio_psm`. Ove
 
 ## Macs
 
-A Mac is a peer with `ROLE_MAC`. It talks to the host over Bluetooth only: a Mac `Hello` on an internet link is refused with `CODE_NOT_ALLOWED`. The host takes at most `HostInfo.max_mac_peers` Macs and serves each of them with or without the phone.
+A Mac is a peer with `ROLE_MAC`. It talks to the host over Bluetooth or the local network: a Mac `Hello` on an internet link is refused with `CODE_NOT_ALLOWED`. Pairing stays Bluetooth only. The host takes at most `HostInfo.max_mac_peers` Macs and serves each of them with or without the phone.
 
 **Pairing.** The phone sends `OpenPeerWindow{open}`. For 120 s the host takes a new Mac: it advertises `7d5f00f1` and puts a fresh 6-digit code in `Peers.code`. The phone shows the code; the user types it on the Mac. The Mac pairs as in "Pairing", with its own `install_id` and that code. When the proof is right the host adds the Mac to `Peers` (id = `install_id`, name = `Hello.device_model`, no grants) and closes the window. `SetPeer{remove}` forgets the Mac, ends its link and removes its Bluetooth bond.
 

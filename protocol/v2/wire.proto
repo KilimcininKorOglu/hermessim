@@ -47,6 +47,7 @@ enum Feature {
   FEATURE_AUTO_UPDATE = 6;
   FEATURE_MAC_PEERS = 7;
   FEATURE_SCHEDULED_TEXTS = 8;
+  FEATURE_LOCAL_NETWORK = 9;      // the host takes links over the local network (protocol/README.md "Local network")
 }
 
 // The first message of a link, from the side that connected.
@@ -208,6 +209,7 @@ message Request {
     AudioReport audio_report = 42;
     ScheduleText schedule_text = 43;
     CancelScheduled cancel_scheduled = 44;
+    GetLanKey get_lan_key = 45;
   }
 }
 
@@ -225,6 +227,7 @@ message Reply {
     CallTestReading call_test = 17;
     WifiList wifi_list = 18;
     AudioReport audio_report = 19;
+    LanKey lan_key = 20;
   }
 }
 
@@ -864,6 +867,17 @@ message SetPushKey {
   bytes key = 1;                  // 32 bytes
 }
 
+// ---------------------------------------------------------------- local network
+
+// Asks for this peer's key of the local network path (protocol/README.md "Local network"). Bluetooth only. The host
+// makes the key the first time and gives the same one after; forgetting the peer forgets it.
+message GetLanKey {}
+
+message LanKey {
+  bytes key = 1;                  // 32 bytes, this peer's own
+  string service = 2;             // the mDNS instance name the host announces under _hermessim._tcp
+}
+
 message Remote {
   bool on = 1;
   bool host_online = 2;           // the host reaches the relay
@@ -895,6 +909,7 @@ enum CandidateKind {
   CANDIDATE_KIND_UNSPECIFIED = 0;
   CANDIDATE_KIND_DIRECT = 1;      // the side's own public address, as the TURN server's STUN answer saw it
   CANDIDATE_KIND_RELAY = 2;       // the side's TURN allocation: at most one side of a path has one
+  CANDIDATE_KIND_LAN = 3;         // the side's own address on its Wi-Fi network; tried before the others
 }
 
 // Every 5 s of a call, the phone's numbers for the last 5 s; the host answers with its own (Reply.audio_report).
