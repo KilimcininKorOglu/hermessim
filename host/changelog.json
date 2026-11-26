@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.4.6",
+    "code": 91,
+    "en": "When Bluetooth cannot keep up during a call, the caller's voice goes over the internet for a while instead of breaking up.",
+    "tr": "Arama sırasında Bluetooth yetişemediğinde karşı tarafın sesi kesilmek yerine bir süre internet üzerinden gidiyor."
+  },
+  {
     "version": "1.4.5",
     "code": 90,
     "en": "Host updates install again: the host takes the new version and restarts, which takes about a minute. This version itself must be installed with the Magisk module.",
