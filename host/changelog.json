@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.4.2",
+    "code": 87,
+    "en": "Setup now starts with a short intro: what this phone becomes, and that unlocking it for root erases it. The last card also says what box mode does and that the host's settings are on your other phone.",
+    "tr": "Kurulum artık kısa bir tanıtımla başlar. Tanıtım, bu telefonun neye dönüşeceğini ve root için kilit açmanın telefonu sıfırladığını söyler. Son kart da kutu modunun ne yaptığını ve ana cihaz ayarlarının diğer telefonunuzda olduğunu anlatır."
+  },
+  {
     "version": "1.4.1",
     "code": 86,
     "en": "In box mode the host's screen no longer flashes on when the charger is plugged in or unplugged.",
