@@ -3,6 +3,7 @@ package com.keremgok.hermessim.host
 
 import android.net.LocalSocket
 import android.net.LocalSocketAddress
+import android.os.SystemClock
 import android.util.Log
 import com.keremgok.hermessim.host.AudioPathCore.Via
 import com.keremgok.hermessim.wire.AudioReport
@@ -45,8 +46,22 @@ object AudioRouter {
     val capEpoch: Int get() = capDrops.get()
     private val capDrops = AtomicInteger()
 
+    private val choke = AudioPathCore.Choke()
+    @Volatile private var chokedNow = false
+
+    /**
+     * The Bluetooth channel had no room for a caller frame: enough of them in a row choke it, and the caller's audio
+     * goes over the internet path for a while when it is there.
+     */
+    fun bluetoothDropped() {
+        if (!choke.dropped(SystemClock.elapsedRealtime()) || !senders.containsKey(Via.INTERNET)) return
+        Log.w(TAG, "call audio: Bluetooth is choking, caller audio over the internet for ${AudioPathCore.Choke.HOLD_MS / 1000} s")
+        choose()
+    }
+
     /** A path is ready to carry the caller's audio with [send]. */
     fun attach(via: Via, send: (ByteArray, Int) -> Unit) {
+        if (via == Via.BLUETOOTH) choke.reset()
         senders[via] = send
         choose()
         synchronized(this) {
@@ -86,7 +101,8 @@ object AudioRouter {
     }
 
     private fun choose() {
-        val now = AudioPathCore.via(last, senders.containsKey(Via.BLUETOOTH), senders.containsKey(Via.INTERNET))
+        chokedNow = choke.choked(SystemClock.elapsedRealtime())
+        val now = AudioPathCore.via(last, senders.containsKey(Via.BLUETOOTH), senders.containsKey(Via.INTERNET), chokedNow)
         if (now == active) return
         active = now
         now ?: return
@@ -118,6 +134,8 @@ object AudioRouter {
         while (senders.isNotEmpty()) {
             val n = din.read(buf)
             if (n <= 0) return
+            // A choke's hold ran out: Bluetooth is tried again.
+            if (chokedNow && !choke.choked(SystemClock.elapsedRealtime())) choose()
             active?.let { senders[it] }?.invoke(buf, n)
         }
     }

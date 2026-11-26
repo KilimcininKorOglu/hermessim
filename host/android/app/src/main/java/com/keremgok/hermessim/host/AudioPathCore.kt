@@ -76,12 +76,13 @@ object AudioPathCore {
     fun wantsIpv6(phone: List<Candidate>): Boolean = phone.isNotEmpty() && phone.all { it.address.size() == 16 }
 
     /**
-     * Where the caller's audio goes: the way the phone's latest packet came, while it is still there; else Bluetooth,
-     * else the internet path; null with neither.
+     * Where the caller's audio goes: the internet path while Bluetooth is [choked] ([Choke]); else the way the phone's
+     * latest packet came, while it is still there; else Bluetooth, else the internet path; null with neither.
      */
-    fun via(last: Via?, bluetooth: Boolean, internet: Boolean): Via? {
+    fun via(last: Via?, bluetooth: Boolean, internet: Boolean, choked: Boolean = false): Via? {
         val up = { v: Via -> if (v == Via.BLUETOOTH) bluetooth else internet }
         return when {
+            choked && internet -> Via.INTERNET
             last != null && up(last) -> last
             bluetooth -> Via.BLUETOOTH
             internet -> Via.INTERNET
@@ -116,4 +117,38 @@ object AudioPathCore {
     }
 
     private fun since(before: Long, now: Long) = if (now >= before) now - before else now
+
+    /**
+     * Bluetooth that stops taking the caller's audio: [DROPS] frames dropped within [WINDOW_MS] choke it for [HOLD_MS],
+     * and the caller's audio goes over the internet path meanwhile (two calls on 26 Nov 2026 lost 18-26% of it while the
+     * Bluetooth writes blocked 3.5 s of every 5 s and the internet path was ready). After the hold Bluetooth is tried
+     * again; a new choke holds again. [dropped] has one caller, the audio router's thread.
+     */
+    class Choke {
+        // null: no drop counted yet (a Long.MIN_VALUE start overflowed now - start and never opened a new window)
+        private var windowStart: Long? = null
+        private var drops = 0
+        @Volatile private var until = Long.MIN_VALUE
+
+        /** One frame Bluetooth had no room for at [now]; true when this drop starts a choke. */
+        fun dropped(now: Long): Boolean {
+            val start = windowStart
+            if (start == null || now - start > WINDOW_MS) { windowStart = now; drops = 0 }
+            drops++
+            if (drops < DROPS || choked(now)) return false
+            until = now + HOLD_MS
+            drops = 0
+            return true
+        }
+
+        fun choked(now: Long): Boolean = now < until
+
+        fun reset() { until = Long.MIN_VALUE; drops = 0; windowStart = null }
+
+        companion object {
+            const val DROPS = 5
+            const val WINDOW_MS = 1_000L
+            const val HOLD_MS = 10_000L
+        }
+    }
 }

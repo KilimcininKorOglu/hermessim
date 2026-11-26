@@ -97,6 +97,38 @@ class AudioPathCoreTest {
         assertNull(AudioPathCore.via(Via.INTERNET, bluetooth = false, internet = false))
     }
 
+    // Two calls lost 18-26% of the caller's audio while Bluetooth blocked and the internet path stood ready.
+    @Test fun aChokedBluetoothSendsTheCallersAudioOverTheInternet() {
+        assertEquals(Via.INTERNET, AudioPathCore.via(Via.BLUETOOTH, bluetooth = true, internet = true, choked = true))
+        // No internet path: Bluetooth is all there is.
+        assertEquals(Via.BLUETOOTH, AudioPathCore.via(Via.BLUETOOTH, bluetooth = true, internet = false, choked = true))
+    }
+
+    @Test fun fiveDropsWithinASecondChokeBluetoothForTenSeconds() {
+        val c = AudioPathCore.Choke()
+        repeat(4) { assertFalse(c.dropped(1_000L + it * 100)) }
+        assertFalse(c.choked(1_400))
+        assertTrue(c.dropped(1_450))
+        assertTrue(c.choked(1_450 + 9_999))
+        // The hold ran out: Bluetooth is tried again.
+        assertFalse(c.choked(1_450 + 10_000))
+    }
+
+    @Test fun dropsSpreadOverMoreThanASecondDoNotChoke() {
+        val c = AudioPathCore.Choke()
+        // One drop every 300 ms: never 5 within a second.
+        for (i in 0 until 20) assertFalse(c.dropped(i * 300L))
+        assertFalse(c.choked(6_000))
+    }
+
+    @Test fun aNewBluetoothChannelStartsUnchoked() {
+        val c = AudioPathCore.Choke()
+        repeat(5) { c.dropped(100L + it) }
+        assertTrue(c.choked(200))
+        c.reset()
+        assertFalse(c.choked(200))
+    }
+
     @Test fun theExpectedLossStaysBetweenFiveAndThirtyPercent() {
         // received, lost, the expected loss
         listOf(Triple(500, 0, 5), Triple(450, 50, 10), Triple(100, 400, 30), Triple(0, 0, null)).forEach { (received, lost, want) ->

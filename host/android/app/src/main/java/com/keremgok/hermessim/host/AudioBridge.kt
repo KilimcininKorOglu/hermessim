@@ -103,6 +103,7 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
             lean.frame(now)
             if (!dropped) return@attach
             AudioRouter.droppedSent.incrementAndGet()
+            AudioRouter.bluetoothDropped()
             // A write that never returns logs nothing itself: say so from here, with what the radios were doing (a
             // client got no caller audio for 15 s while its own audio still reached the host, 6 Nov 2026)
             if (now - stallLogged > 5000) {

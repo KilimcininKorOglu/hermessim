@@ -51,7 +51,9 @@ fails is dropped. Allocations are refreshed every 4 minutes and released with `R
 channel it has (usually Bluetooth). An unused path sends a probe every 5 s, which keeps NAT bindings and permissions
 alive. The phone sends its audio on the path it chooses: Bluetooth while it works, else the internet path. The host
 sends on the path the phone's latest packet came on, so a change needs no message, and neither side stops its audio
-engine; the sender only changes where packets go and their length (10 or 20 ms).
+engine; the sender only changes where packets go and their length (10 or 20 ms). When the host's Bluetooth channel
+stops taking the caller's audio (5 frames dropped within a second), the host sends it on the internet path for 10 s,
+then tries Bluetooth again; the phone plays what comes on either path.
 
 **Playout.** One rule in every receiver (vectors: `v2/vectors/playout.txt`). Packets go into a ring by tick; depth is
 the ticks between the next tick to play and the end of the last packet, plus the decoded ticks still waiting. Each
