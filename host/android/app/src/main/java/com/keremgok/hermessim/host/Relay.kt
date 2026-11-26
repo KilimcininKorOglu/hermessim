@@ -234,6 +234,8 @@ object Relay {
 
     private fun lanClosed(conn: LanLink.Conn) {
         val link = lanLinks.remove(conn) ?: return
+        // The CREDIT due for the last message has no link to go on any more.
+        main.removeCallbacks(link.creditTick)
         val wasServed = link.channel.serving
         val wasMac = link.role == Role.ROLE_MAC
         link.channel.close()
