@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.4.0",
+    "code": 85,
+    "en": "The host now keeps one port for the local network link, so a phone on the host's own hotspot connects to it directly, even where Android does not announce the host on the hotspot.",
+    "tr": "Ana cihaz artık yerel ağ bağlantısı için tek bir sabit port kullanır. Böylece ana cihazın kendi hotspot'una bağlı telefon, Android ana cihazı hotspot'ta duyurmasa bile ona doğrudan bağlanır."
+  },
+  {
     "version": "1.3.9",
     "code": 84,
     "en": "With \"Use Wi-Fi\" on, the host now stays on a saved Wi-Fi network while your phone is nearby too, not only when you are away. A phone on the same network, at home, at work or on a travel router, then reaches the host over the local network.",
