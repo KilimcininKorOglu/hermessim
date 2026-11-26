@@ -878,6 +878,8 @@ message GetLanKey {}
 message LanKey {
   bytes key = 1;                  // 32 bytes, this peer's own
   string service = 2;             // the mDNS instance name the host announces under _hermessim._tcp
+  uint32 port = 3;                // the TCP port of the link; kept across restarts, so a peer on the host's hotspot
+                                  // can connect to its gateway without the announcement (0: an older host)
 }
 
 message Remote {

@@ -152,6 +152,12 @@ under the instance name `LanKey.service` (16 random hex characters, made once pe
 no TXT data: nothing in it names the host, its owner or its phone. A peer resolves that one instance name to an
 address and port.
 
+**On the host's hotspot.** A phone that is on the host's own hotspot does not wait for the announcement: the host is
+the network's gateway, so the phone connects to the gateway address on `LanKey.port`. The host picks that port at
+random once (40000 to 59999), keeps it, and listens on it at every start; when the port is taken it listens on
+another one and answers that in `LanKey.port`. A peer asks `GetLanKey` again on every Bluetooth Welcome, so it learns
+a changed port. `port` 0 is an older host: only the announcement finds it.
+
 **Stream.** One TCP connection is one link. Both directions are frames `[u32 BE length][body]`, length 1 to
 16 448; a frame of length 0 or over 16 448 closes the connection. The peer's first frame is `KEY`
 `[0][key_id, 8 bytes]`; the host closes the connection when no peer of its own has that `key_id`. Then the tunnel of
