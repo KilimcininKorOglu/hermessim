@@ -7,6 +7,7 @@ import com.keremgok.hermessim.host.wire.X25519
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -44,6 +45,27 @@ class LanLinkTest {
     }
 
     @After fun down() = LanLink.stop()
+
+    @Test fun `the server listens on the kept port, and on another one when that is taken`() {
+        LanLink.stop()
+        val free = java.net.ServerSocket(0).use { it.localPort }
+        assertEquals(free, LanLink.listen(object : LanLink.Listener {
+            override fun opened(conn: LanLink.Conn) = Unit
+            override fun frames(conn: LanLink.Conn, bytes: ByteArray) = Unit
+            override fun closed(conn: LanLink.Conn) = Unit
+        }, free))
+        assertEquals(free, LanLink.port)
+        LanLink.stop()
+        java.net.ServerSocket(free).use { taken ->
+            val other = LanLink.listen(object : LanLink.Listener {
+                override fun opened(conn: LanLink.Conn) = Unit
+                override fun frames(conn: LanLink.Conn, bytes: ByteArray) = Unit
+                override fun closed(conn: LanLink.Conn) = Unit
+            }, taken.localPort)!!
+            assertNotEquals(taken.localPort, other)
+            assertEquals(other, LanLink.port)
+        }
+    }
 
     /** The peer's side of one connection. */
     private class Peer(port: Int) {

@@ -6,6 +6,7 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Each peer's local network key (protocol/README.md "Local network": one key per peer, the same one after). */
@@ -20,6 +21,12 @@ class LanKeyBookTest {
         assertEquals(LanKeyBook.KEY_BYTES, phone.size)
         assertFalse(phone.contentEquals(mac))
         assertArrayEquals(phone, book.keyFor("phone"))
+    }
+
+    @Test fun `the kept port is between 40000 and 59999`() {
+        assertEquals(40_000, LanKeyBook.pickPort(byteArrayOf(0, 0)))
+        assertEquals(40_000 + 0xFFFF % 20_000, LanKeyBook.pickPort(byteArrayOf(-1, -1)))
+        for (i in 0 until 256) assertTrue(LanKeyBook.pickPort(byteArrayOf(i.toByte(), (i * 7).toByte())) in 40_000..59_999)
     }
 
     @Test fun `a key id finds only the peer its key was made for`() {

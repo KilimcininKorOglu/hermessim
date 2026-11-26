@@ -23,6 +23,11 @@ class LanKeyBook(private val keys: MutableMap<String, ByteArray>, private val ra
     companion object {
         const val KEY_BYTES = 32
         const val SERVICE_HEX = 16
+        const val PORT_LOW = 40_000
+        const val PORT_COUNT = 20_000
+
+        /** The kept port of the link: 40000 to 59999, from two random bytes. */
+        fun pickPort(random: ByteArray): Int = PORT_LOW + (((random[0].toInt() and 0xFF) shl 8) or (random[1].toInt() and 0xFF)) % PORT_COUNT
     }
 }
 
@@ -46,6 +51,10 @@ object LanKeys {
     }
 
     /** 16 random hex characters, made once: names nothing about the host or its owner. */
+    /** The port the link listens on, made once and kept. */
+    @Synchronized fun port(): Int = prefs().getInt(PORT, 0).takeIf { it > 0 }
+        ?: LanKeyBook.pickPort(ByteArray(2).also(rng::nextBytes)).also { prefs().edit().putInt(PORT, it).apply() }
+
     @Synchronized fun service(): String = prefs().getString(SERVICE, null)
         ?: RemoteCrypto.hex(ByteArray(LanKeyBook.SERVICE_HEX / 2).also(rng::nextBytes)).also { prefs().edit().putString(SERVICE, it).apply() }
 
@@ -66,4 +75,5 @@ object LanKeys {
 
     private const val PEER = "key."
     private const val SERVICE = "service"
+    private const val PORT = "port"
 }

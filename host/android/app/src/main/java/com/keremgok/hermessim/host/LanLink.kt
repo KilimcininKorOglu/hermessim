@@ -15,7 +15,7 @@ import java.security.SecureRandom
 import java.util.concurrent.Executors
 
 /**
- * The local network path (protocol/README.md "Local network"): a TCP server on a random port, announced over mDNS as
+ * The local network path (protocol/README.md "Local network"): a TCP server on the kept port (LanKeys.port), announced over mDNS as
  * `_hermessim._tcp` under [LanKeys.service]. Each connection names a peer's key, runs the tunnel with that key's
  * auth, and becomes a link once HS3 is right. Sockets run on their own threads; [Relay] gets everything on main.
  */
@@ -89,23 +89,38 @@ object LanLink {
     internal var find: (ByteArray) -> Pair<String, ByteArray>? = LanKeys::find
 
     fun start(ctx: Context, listener: Listener) {
-        val port = listen(listener) ?: return
+        val port = listen(listener, LanKeys.port()) ?: return
         announce(ctx, port)
     }
 
-    /** Takes connections on a random port; the port, or null when there is no socket or one runs already. */
-    internal fun listen(listener: Listener): Int? {
+    /** The port the link listens on now; 0 before it listens. */
+    @Volatile var port = 0; private set
+
+    /**
+     * Takes connections on [wanted] (the kept port), else on a random one when that is taken; the port, or null when
+     * there is no socket or one runs already.
+     */
+    internal fun listen(listener: Listener, wanted: Int = 0): Int? {
         if (server != null) return null
-        val s = try { ServerSocket(0) } catch (e: IOException) { log("lan: no server socket: ${e.message}"); return null }
+        val s = open(wanted) ?: return null
         server = s
+        port = s.localPort
         Thread({ accept(s, listener) }, "lan-accept").apply { isDaemon = true }.start()
         return s.localPort
+    }
+
+    private fun open(wanted: Int): ServerSocket? {
+        if (wanted > 0) {
+            try { return ServerSocket(wanted) } catch (e: IOException) { log("lan: port $wanted taken: ${e.message}") }
+        }
+        return try { ServerSocket(0) } catch (e: IOException) { log("lan: no server socket: ${e.message}"); null }
     }
 
     /** Ends the server; its open connections stay until they end. */
     internal fun stop() {
         runCatching { server?.close() }
         server = null
+        port = 0
     }
 
     private fun announce(ctx: Context, port: Int) {

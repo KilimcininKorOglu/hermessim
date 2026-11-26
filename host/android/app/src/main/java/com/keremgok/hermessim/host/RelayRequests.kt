@@ -310,7 +310,7 @@ object Requests {
 
     private fun getLanKey(a: Ask) {
         val (key, service) = Relay.lanKey(a.link) ?: return a.answer(Code.CODE_NOT_PAIRED)
-        a.answer(Code.CODE_OK) { it.setLanKey(LanKey.newBuilder().setKey(ByteString.copyFrom(key)).setService(service)) }
+        a.answer(Code.CODE_OK) { it.setLanKey(LanKey.newBuilder().setKey(ByteString.copyFrom(key)).setService(service).setPort(LanLink.port)) }
     }
 
     private fun openAudioPath(a: Ask) {
