@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.4.1",
+    "code": 86,
+    "en": "In box mode the host's screen no longer flashes on when the charger is plugged in or unplugged.",
+    "tr": "Kutu modunda ana cihazın ekranı artık şarj aleti takılınca veya çıkarılınca kısa süreliğine açılıp kapanmaz."
+  },
+  {
     "version": "1.4.0",
     "code": 85,
     "en": "The host now keeps one port for the local network link, so a phone on the host's own hotspot connects to it directly, even where Android does not announce the host on the hotspot.",
