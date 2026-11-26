@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.3.6",
+    "code": 81,
+    "en": "Your phone gets back to the host over Bluetooth on its own after the host's Bluetooth or app restarts, instead of staying on \"connecting\".",
+    "tr": "Ana cihazın Bluetooth'u veya uygulaması yeniden başladıktan sonra telefonunuz ana cihaza Bluetooth üzerinden kendiliğinden yeniden bağlanır. Artık \"bağlanıyor\" durumunda kalmaz."
+  },
+  {
     "version": "1.3.5",
     "code": 80,
     "en": "Your voice reaches the other side without gaps when the call runs over the internet: the host waits a little longer for audio that arrives in bursts.",
