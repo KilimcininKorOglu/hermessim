@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.4.4",
+    "code": 89,
+    "en": "When the phone closes its local network link, the host no longer tries to answer on it.",
+    "tr": "Telefon yerel ağ bağlantısını kapattığında ana cihaz artık o bağlantıdan cevap göndermeye çalışmıyor."
+  },
+  {
     "version": "1.4.3",
     "code": 88,
     "en": "The host app no longer restarts at the end of a call when the phone closes its local network link.",
