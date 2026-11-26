@@ -247,9 +247,10 @@ object Updater {
         if (CallRegistry.live()) {
             set(UpdatePhase.UPDATE_PHASE_READY); return Code.CODE_IN_CALL     // a call started during the pause
         }
-        val tmp = "/data/local/tmp/hermessim-update.apk"
-        val out = Root.sh("cp ${Root.q(apkFile.path)} $tmp && chmod 644 $tmp && pm install -r $tmp; rc=\$?; rm -f $tmp; exit \$rc", 180_000).out.trim()
-        // Success replaces this process before we get here, usually; if we're still alive, it failed.
+        // A persistent system app can't be replaced with pm install: the module's APK is, and the phone restarts.
+        Log.i(TAG, "update: replacing the module's app and restarting the phone")
+        val out = Root.sh(UpdateCore.moduleInstall(apkFile.path, Root::q), 180_000).out.trim()
+        // Success restarts the phone before we get here, usually; if we're still alive, it failed.
         val refused = out.contains("Permission denied", true) || out.contains("not allowed", true)
         // Still downloaded and verified: "Update now" can retry
         set(UpdatePhase.UPDATE_PHASE_READY, if (refused) UpdateFault.UPDATE_FAULT_ROOT_REFUSED else UpdateFault.UPDATE_FAULT_INSTALL, out.take(120))

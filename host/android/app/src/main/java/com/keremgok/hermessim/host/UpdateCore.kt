@@ -44,6 +44,27 @@ object UpdateCore {
 
     private fun told(n: Night) = n.toldAtMs > 0 && n.nowMs - n.toldAtMs >= HOUR_MS
 
+    /** Where the module keeps this app as a system app (customize.sh); Android starts it from here at boot. */
+    const val MODULE_APK = "/data/adb/modules/hermessim-host/system/priv-app/HermesSimHost/HermesSimHost.apk"
+
+    /**
+     * The root command that installs a verified update: the app is a persistent system app, which `pm install` refuses
+     * to replace, so the new APK takes the module's place and the phone restarts into it. The copy lands next to the
+     * old APK and replaces it in one rename, and the restart runs only after that rename worked; a missing module
+     * fails before anything is written. [quote] quotes a path for the shell; [moduleApk] and [restart] are the real
+     * ones except in tests.
+     */
+    fun moduleInstall(
+        apk: String,
+        quote: (String) -> String,
+        moduleApk: String = MODULE_APK,
+        restart: String = "reboot",
+    ): String {
+        val dst = quote(moduleApk)
+        val tmp = quote("$moduleApk.new")
+        return "test -f $dst && cp ${quote(apk)} $tmp && chmod 644 $tmp && mv -f $tmp $dst && sync && $restart"
+    }
+
     const val DETAIL_MAX = 120
 
     /** The failed step's own text for the phone: one line, at most [DETAIL_MAX] characters; empty without a fault. */
