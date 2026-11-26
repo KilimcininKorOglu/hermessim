@@ -197,7 +197,7 @@ object Box {
         val orig = JSONObject(prefs.getString("orig", "{}")!!)
         for ((ns, key, value) in plan()) {
             val id = "$ns/$key"
-            val cur = read(ns, key) ?: continue                 // not on this phone: leave it alone
+            val cur = original(id, read(ns, key)) ?: continue   // not on this phone: leave it alone
             if (!orig.has(id)) orig.put(id, cur)
             if (cur != value) write(ns, key, value)
         }
@@ -236,21 +236,34 @@ object Box {
         Log.i(TAG, "box mode restored ${orig.length()} settings")
     }
 
+    /** Box values every phone gets (namespace, key, value). */
+    internal val AOSP_KEYS = listOf(
+        Triple("secure", "doze_always_on", "0"),             // always-on / ambient display
+        Triple("secure", "doze_enabled", "0"),               // ambient display for notifications
+        Triple("secure", "doze_pulse_on_pick_up", "0"),
+        Triple("secure", "doze_pulse_on_double_tap", "0"),
+        Triple("secure", "doze_tap_gesture", "0"),
+        Triple("secure", "doze_wake_screen_gesture", "0"),
+        Triple("secure", "wake_gesture_enabled", "0"),
+        Triple("secure", "camera_double_tap_power_gesture_disabled", "1"),
+        Triple("global", "wifi_scan_always_enabled", "0"),   // background Wi-Fi scans for location
+        Triple("global", "ble_scan_always_enabled", "0"),    // background BLE scans (our BLE link is unaffected)
+        Triple("global", "stay_on_while_plugged_in", "0"),
+        // Theater mode: Android no longer wakes the display on charger plug or unplug, so box mode does not have
+        // to put it back to sleep (a flash). The escape gesture still works: escape() restores this before the
+        // setup screen turns the display on.
+        Triple("global", "theater_mode_on", "1"),
+    )
+
+    /** Keys Android leaves unset until first written, with the value an unset key means (theater mode: off). */
+    private val UNSET_MEANS = mapOf("global/theater_mode_on" to "0")
+
+    /** The value to restore for [id]: its current one, or what an unset key means; null leaves the key alone. */
+    internal fun original(id: String, current: String?): String? = current ?: UNSET_MEANS[id]
+
     /** (namespace, key, box value): AOSP keys for every phone + the maker's keys from its OEM profile. */
     private fun plan(): List<Triple<String, String, String>> {
-        val l = mutableListOf(
-            Triple("secure", "doze_always_on", "0"),             // always-on / ambient display
-            Triple("secure", "doze_enabled", "0"),               // ambient display for notifications
-            Triple("secure", "doze_pulse_on_pick_up", "0"),
-            Triple("secure", "doze_pulse_on_double_tap", "0"),
-            Triple("secure", "doze_tap_gesture", "0"),
-            Triple("secure", "doze_wake_screen_gesture", "0"),
-            Triple("secure", "wake_gesture_enabled", "0"),
-            Triple("secure", "camera_double_tap_power_gesture_disabled", "1"),
-            Triple("global", "wifi_scan_always_enabled", "0"),   // background Wi-Fi scans for location
-            Triple("global", "ble_scan_always_enabled", "0"),    // background BLE scans (our BLE link is unaffected)
-            Triple("global", "stay_on_while_plugged_in", "0"),
-        )
+        val l = AOSP_KEYS.toMutableList()
         Profiles.forManufacturer(app)?.optJSONObject("box")?.let { box ->
             for (ns in listOf("system", "secure", "global")) {
                 val o = box.optJSONObject(ns) ?: continue
