@@ -56,6 +56,8 @@ class BleLink(
         val DOWN: UUID = UUID.fromString("7d5f0002-3c1a-4b6e-9e42-5a1c0de51a00")
         val UP: UUID = UUID.fromString("7d5f0003-3c1a-4b6e-9e42-5a1c0de51a00")
         val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+        /** A service that only exists to change the table ([tellServicesChanged]); nothing reads it. */
+        val CHANGED: UUID = UUID.fromString("7d5f00fe-3c1a-4b6e-9e42-5a1c0de51a00")
         /** ATT caps an attribute value at 512 bytes, whatever the MTU. */
         private const val MAX_VALUE = 512
 
@@ -82,6 +84,8 @@ class BleLink(
     private val inFlight = HashSet<String>()
     private val held = HashMap<String, ByteArray>()
     private val notifyFails = HashMap<String, Int>()
+    /** Links Android told us came up and not yet that they ended. */
+    private val up = ConcurrentHashMap<String, BluetoothDevice>()
     /** The L2CAP channel of call audio (AudioBridge): the Welcome carries it. */
     @Volatile var audioPsm = 0
 
@@ -154,7 +158,11 @@ class BleLink(
             when (i.getIntExtra(android.bluetooth.BluetoothAdapter.EXTRA_STATE, -1)) {
                 android.bluetooth.BluetoothAdapter.STATE_TURNING_OFF -> main.post {
                     Log.i(TAG, "Bluetooth turning off: GATT server down")
-                    runCatching { gatt?.close() }; gatt = null
+                    runCatching { gatt?.close() }; gatt = null; serviceHandle = 0
+                    // Every link ends with the radio, and with the server closed nobody tells us: the phone stayed
+                    // "served" here, so when it came back silent the host took none of a silent link's steps.
+                    val ended = up.values.toList(); up.clear()
+                    ended.forEach { runCatching { onLink(it, false) } }
                     advSet = null; registered = false; starting = false; replacing = false; enableTries = 0; failures = 0; advDisabled = false   // the radio drops it
                     advStatus = null
                     resetPace()
@@ -334,6 +342,7 @@ class BleLink(
     }
 
     private fun linkDown(d: BluetoothDevice) {
+        up.remove(d.address)
         if (mac?.isMac(d.address) != true) phoneDownAt = android.os.SystemClock.elapsedRealtime()
         resetStream(d.address)
         onLink(d, false)
@@ -343,10 +352,49 @@ class BleLink(
     /** Our GATT service is registered: notifications can reach clients from now on. */
     var onServiceReady: (() -> Unit)? = null
 
+    /** A link came up (before it subscribes or says anything). Main thread. */
+    var onConnected: ((BluetoothDevice) -> Unit)? = null
+
+    /**
+     * Where our service sits in the phone's table of Bluetooth services (its first attribute handle; 0: not added yet).
+     * Android gives a service the next free place each time it is added: after a Bluetooth restart or a restart of this
+     * app that can be another place than before. A phone that paired keeps a copy of the table and writes by place.
+     */
+    @Volatile var serviceHandle = 0
+        private set
+
+    /** [serviceHandle] when the paired phone last said Hello over Bluetooth (0: never). */
+    var handleAtHello: Int
+        get() = prefs.getInt("handle_at_hello", 0)
+        set(v) { if (v != handleAtHello) prefs.edit().putInt("handle_at_hello", v).apply() }
+
+    /**
+     * Tell every connected phone that our table of services changed, so it reads the table again instead of using its
+     * copy. Android sends Bluetooth's "Service Changed" to connected phones whenever a service is added or removed, so
+     * a service of no other use is added, or taken away if an earlier telling left it there. Ours keeps its place.
+     * A phone that writes from a copy made before a Bluetooth restart writes to places that are no longer ours, and its
+     * Hello never reaches this app (the iPhone logs "Writing is not permitted").
+     */
+    fun tellServicesChanged(): Boolean {
+        val g = gatt ?: return false
+        return runCatching {
+            val there = g.getService(CHANGED)
+            if (there != null) g.removeService(there)
+            else g.addService(BluetoothGattService(CHANGED, BluetoothGattService.SERVICE_TYPE_PRIMARY).apply {
+                addCharacteristic(BluetoothGattCharacteristic(CHANGED, BluetoothGattCharacteristic.PROPERTY_READ,
+                    BluetoothGattCharacteristic.PERMISSION_READ))
+            })
+        }.onFailure { Log.w(TAG, "telling phones the services changed failed: $it") }.getOrDefault(false)
+    }
+
     private val callback = object : BluetoothGattServerCallback() {
         override fun onServiceAdded(status: Int, service: BluetoothGattService) {
-            Log.i(TAG, "GATT service ${service.uuid} added status=$status")
-            if (status != BluetoothGatt.GATT_SUCCESS) return
+            if (service.uuid == CHANGED) return                           // [tellServicesChanged]: not ours to announce
+            val ok = status == BluetoothGatt.GATT_SUCCESS
+            if (ok && service.uuid == SERVICE) serviceHandle = service.instanceId
+            val place = if (ok && service.uuid == SERVICE) SilentLinkCore.placeNote(service.instanceId, handleAtHello) else ""
+            Log.i(TAG, "GATT service ${service.uuid} added status=$status$place")
+            if (!ok) return
             main.post { onServiceReady?.invoke() }
             mac?.serviceReady()
         }
@@ -355,10 +403,12 @@ class BleLink(
             mac?.kick()
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 Log.i(TAG, "BLE connected ${device.address} bond=${device.bondState}")
+                up[device.address] = device
                 ignoredDown.remove(device.address)
                 resetStream(device.address)
                 LinkRadio.linkUp()
                 askPhy(device, "connected")
+                main.post { onConnected?.invoke(device) }
                 // A Mac that came in through the client's set switched it off: the iPhone must still find the host.
                 if (mac?.isMac(device.address) == true) restartAdvertising()
                 return

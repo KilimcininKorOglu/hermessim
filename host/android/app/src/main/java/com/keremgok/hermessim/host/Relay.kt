@@ -126,7 +126,11 @@ object Relay {
     private val main = Handler(Looper.getMainLooper())
     private val links = ConcurrentHashMap<String, Link.Ble>()
     private val rejected = ConcurrentHashMap.newKeySet<String>()      // links told NOT_PAIRED since they connected
-    private val droppedOnce = ConcurrentHashMap.newKeySet<String>()   // links already dropped for a missing Hello
+    private val droppedOnce = ConcurrentHashMap.newKeySet<String>()   // links dropped for a missing Hello since their phone's last one
+    private val toldChanged = ConcurrentHashMap.newKeySet<String>()   // silent links told "our services changed", per connection
+    private val silentSteps = ConcurrentHashMap<String, Pair<SilentLinkCore.Step, Int>>()   // a silent link's last step, and on which link
+    private val linkNo = ConcurrentHashMap<String, Int>()             // a phone's links, counted as they come up
+    private val seenAt = ConcurrentHashMap<String, Long>()            // when a link came up, or this app first saw it (elapsedRealtime)
     private val desk = PairingDesk { n -> ByteArray(n).also(java.security.SecureRandom()::nextBytes) }
     @Volatile private var shownCode: String? = null
     @Volatile private var pairingUntil = 0L                           // 0: open until a phone pairs
@@ -182,6 +186,7 @@ object Relay {
         ble = BleLink(app, ::onBytes, ::onLink, { device, max -> links[device.address]?.channel?.next(max) ?: ByteArray(0) },
             ::pairable, macPeers)
         ble.onServiceReady = { askForHello() }
+        ble.onConnected = ::linkCameUp
         ble.start()
         val adapter = (app.getSystemService(Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager).adapter
         audio = AudioBridge(adapter, ble).also { it.start() }
@@ -567,6 +572,7 @@ object Relay {
     private fun onLink(d: BluetoothDevice, up: Boolean) = main.post {
         rejected.remove(d.address)
         val link = links.getOrPut(d.address) { Link.Ble(d, ble) }
+        if (!up) { toldChanged.remove(d.address); seenAt.remove(d.address) }   // per connection: the next one may need telling again
         if (up) {
             link.channel.newLink()
             Log.i(TAG, "client ${d.address} subscribed; waiting for Hello")
@@ -702,6 +708,7 @@ object Relay {
         val edit = prefs().edit().putString("client_model", h.deviceModel)
         if (link is Link.Ble) {
             noHelloSince = 0
+            saidHello(link.id)
             // What the link agreed on (RadioLook): well after the Hello, when the link serves and nothing is being set up
             main.postDelayed({ if (link.channel.serving) RadioLook.linkLook() }, 20_000)
             HostWifi.evaluate("Bluetooth up")
@@ -903,11 +910,32 @@ object Relay {
         askMacsForHello()
         // Only the paired phone, and not after it was told it isn't paired: the phone's other LE links (a watch, a band)
         // aren't ours to ask, and asking a rejected phone looped Hello / NOT_PAIRED every minute (29 Oct 2026, 23 times)
+        val d = silentLink()
+        watchSilent(d)
+        if (d != null) askForHello(d)
+    }
+
+    /** The paired phone's link when it is up, unserved and not told it isn't paired; else null. */
+    private fun silentLink(): BluetoothDevice? {
         val ours = prefs().getString("client_mac", null)
-        if (pinned() == null || ours == null) return
-        val silent = ble.connectedDevices().filter { it.address == ours && links[it.address]?.channel?.serving != true && it.address !in rejected }
-        watchSilent(silent.firstOrNull())
-        silent.forEach { askForHello(it) }
+        if (pinned() == null || ours == null) return null
+        return ble.connectedDevices().firstOrNull { it.address == ours && !serving(it) && it.address !in rejected }
+    }
+
+    /**
+     * A link came up. Whatever an earlier link of this phone did, this one has said nothing yet: one whose end never
+     * reached us must not pass for it. The paired phone says Hello within a second or two; still silent after
+     * [SilentLinkCore.SILENT_MS], the silent link's steps start now, not at the next tick up to a minute later.
+     */
+    private fun linkCameUp(d: BluetoothDevice) {
+        links[d.address]?.channel?.takeIf { it.serving }?.let {
+            it.close(); Log.i(TAG, "link ${d.address} is new: its phone has to say Hello again")
+        }
+        if (d.address != prefs().getString("client_mac", null)) return
+        seenAt[d.address] = SystemClock.elapsedRealtime()
+        linkNo.merge(d.address, 1, Int::plus)
+        toldChanged.remove(d.address)
+        WakeAlarm.set(app, "hello-wait", SilentLinkCore.SILENT_MS) { silentLink()?.let { helpSilent(it) } }
     }
 
     /** A listed Mac whose link outlived this process: told there is no session, so it says Hello. */
@@ -941,23 +969,82 @@ object Relay {
         if (noHelloSince == 0L) { noHelloSince = now; return }
         val s = (now - noHelloSince) / 1000
         if (s < 90) return
+        val subscribed = ble.subscribers().any { it.address == d.address }
         Log.w(TAG, "link ${d.address} has been up for $s s without a Hello (bond $bond, " +
-            "subscribed ${ble.subscribers().any { it.address == d.address }}, dropped once ${d.address in droppedOnce})")
+            "subscribed $subscribed, dropped once ${d.address in droppedOnce})")
+        Diag.event("link_no_hello", org.json.JSONObject().put("what", "bluetooth").put("seconds", s)
+            .put("bond", bond).put("subscribed", subscribed).put("dropped_once", d.address in droppedOnce)
+            // Whether our service moved in the table since this phone last used it, and what was tried
+            .put("place", ble.serviceHandle).put("place_at_hello", ble.handleAtHello)
+            .put("tried", silentSteps[d.address]?.first?.wire ?: "nothing"))
     }
 
     private fun serving(d: BluetoothDevice): Boolean = links[d.address]?.channel?.serving == true
 
     private fun askForHello(d: BluetoothDevice) {
         Log.i(TAG, "link ${d.address} is up without a session: asking for a Hello")
+        seenAt.putIfAbsent(d.address, SystemClock.elapsedRealtime())     // a link that outlived this app's restart
+        sendNoSession(d)
+        // After an app restart the phone's subscription belongs to the old process: our request may never reach it
+        // (18 Oct, after a self-update: 3 min of silence). No Hello in [SilentLinkCore.SILENT_MS]: the silent link's steps.
+        // By alarm, not by the main thread's timer: that one stops while the host sleeps, and a host that restarts in
+        // a drawer goes back to sleep at once (11 Nov 2026).
+        if (d.address in toldChanged || WakeAlarm.pending("hello-wait")) return     // this connection had its steps, or they are due
+        WakeAlarm.set(app, "hello-wait", SilentLinkCore.SILENT_MS) { silentLink()?.let { helpSilent(it) } }
+    }
+
+    private fun sendNoSession(d: BluetoothDevice) {
         val link = links.getOrPut(d.address) { Link.Ble(d, ble) }
         link.channel.reset(WireFault.NO_SESSION)
         link.kick()
-        // After an app restart the phone's subscription belongs to the old process: our request may never reach it
-        // (18 Oct, after a self-update: 3 min of silence). No Hello in 5 s -> drop the link; it reconnects at once.
-        if (!droppedOnce.add(d.address)) return                      // once per link after a restart, not every minute
-        // By alarm, not by the main thread's timer: that one stops while the host sleeps, and a host that restarts in
-        // a drawer goes back to sleep at once (11 Nov 2026).
-        WakeAlarm.set(app, "hello-drop", 5000) { dropSilentLink(d) }
+    }
+
+    private fun silentFor(d: BluetoothDevice): Long =
+        (SystemClock.elapsedRealtime() - (seenAt[d.address] ?: SystemClock.elapsedRealtime())) / 1000
+
+    private fun stillSilent(d: BluetoothDevice): Boolean = SilentLinkCore.mayHelp(
+        silentLink()?.address == d.address, pairingOpen(), bondOf(d) == BluetoothDevice.BOND_BONDED)
+
+    /**
+     * The paired phone's link has been up for [SilentLinkCore.SILENT_MS] without a Hello. In order, each only if the
+     * one before brought no Hello:
+     * 1. Tell the phone our services changed ([BleLink.tellServicesChanged]), once per connection: a phone using an
+     *    old copy of the table reads it again and says Hello. Nothing is disconnected.
+     * 2. [SilentLinkCore.SILENT_MS] later, drop the link so it reconnects fresh.
+     * 3. 3 s after that, switch Bluetooth off and on (never in a call): the phone owns the link (it's the central),
+     *    cancelConnection rarely drops it, and a locked iPhone's app then hears nothing for minutes. A real disconnect
+     *    is one its system always delivers.
+     * 2 and 3 run once until the phone's next Hello over Bluetooth, not every minute and not once in this app's life.
+     */
+    private fun helpSilent(d: BluetoothDevice) {
+        if (!stillSilent(d)) return
+        if (toldChanged.add(d.address)) {
+            sendNoSession(d)                // a phone that only has to say Hello again answers this at once
+            val told = ble.tellServicesChanged()
+            val step = if (told) SilentLinkCore.Step.SERVICES_CHANGED else SilentLinkCore.Step.SERVICES_CHANGED_REFUSED
+            silentSteps[d.address] = step to (linkNo[d.address] ?: 0)
+            Log.i(TAG, "no Hello from ${d.address} ${silentFor(d)} s after its link came up: telling it our services " +
+                "changed (ours is at place ${ble.serviceHandle}, at ${ble.handleAtHello} when it last said Hello)" +
+                if (told) "" else ": Android refused")
+        }
+        if (!droppedOnce.add(d.address)) return                      // once until its next Hello, not every minute
+        WakeAlarm.set(app, "hello-drop", SilentLinkCore.SILENT_MS) { dropSilentLink(d) }
+    }
+
+    /**
+     * The paired phone said Hello over Bluetooth: its link serves. The next silent one gets every step again, and a
+     * Hello that followed a step says which (link_recovered).
+     */
+    private fun saidHello(address: String) {
+        droppedOnce.remove(address)
+        val step = silentSteps.remove(address)
+        val before = ble.handleAtHello
+        ble.handleAtHello = ble.serviceHandle
+        val after = SilentLinkCore.recoveredBy(step?.first, step?.second ?: 0, linkNo[address] ?: 0) ?: return
+        val s = (SystemClock.elapsedRealtime() - (seenAt[address] ?: SystemClock.elapsedRealtime())) / 1000
+        Log.i(TAG, "Hello from $address after: ${after.wire} ($s s after its link came up)")
+        Diag.event("link_recovered", org.json.JSONObject().put("what", after.wire).put("seconds", s)
+            .put("place", ble.serviceHandle).put("place_at_hello", before), withLog = false)
     }
 
     /** The device's bond state; -1 when it can't be read (no BLUETOOTH_CONNECT, or the stack refused). */
@@ -968,9 +1055,9 @@ object Relay {
 
     /** Never during pairing: a new phone may be in its system's pairing dialog. */
     private fun dropSilentLink(d: BluetoothDevice) {
-        val up = ble.connectedDevices().any { it.address == d.address }
-        if (serving(d) || pairingOpen() || bondOf(d) == BluetoothDevice.BOND_BONDING || !up) return
-        Log.i(TAG, "no Hello from ${d.address} after 5 s: dropping the link so it reconnects fresh")
+        if (!stillSilent(d)) return
+        Log.i(TAG, "still no Hello from ${d.address} after ${silentFor(d)} s: dropping the link so it reconnects fresh")
+        silentSteps[d.address] = SilentLinkCore.Step.DROP to (linkNo[d.address] ?: 0)
         ble.disconnect(d)
         // The phone owns the link (it's the central): cancelConnection rarely drops it, and a locked iPhone's app then
         // hears nothing for minutes (19 Oct, after a self-update: 170 s+, reproduced). Switching our Bluetooth off and
@@ -978,6 +1065,7 @@ object Relay {
         WakeAlarm.set(app, "hello-reset", 3000) {
             if (!serving(d) && ble.connectedDevices().any { it.address == d.address } && !CallRegistry.live()) {
                 Log.i(TAG, "link ${d.address} still up without a Hello: resetting Bluetooth so the phone reconnects")
+                silentSteps[d.address] = SilentLinkCore.Step.BLUETOOTH_RESET to (linkNo[d.address] ?: 0)
                 // Detached: if this app dies in those 2 s, Bluetooth must still come back on
                 Root.background("setsid sh -c 'svc bluetooth disable; sleep 2; svc bluetooth enable' </dev/null >/dev/null 2>&1 &")
             }
