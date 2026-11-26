@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.3.9",
+    "code": 84,
+    "en": "With \"Use Wi-Fi\" on, the host now stays on a saved Wi-Fi network while your phone is nearby too, not only when you are away. A phone on the same network, at home, at work or on a travel router, then reaches the host over the local network.",
+    "tr": "\"Wi-Fi kullan\" açıkken ana cihaz artık yalnızca siz uzaktayken değil, telefonunuz yakındayken de kayıtlı bir Wi-Fi ağında kalır. Aynı ağdaki telefon, evde, iş yerinde veya taşınabilir bir router'da, ana cihaza yerel ağ üzerinden ulaşır."
+  },
+  {
     "version": "1.3.8",
     "code": 83,
     "en": "When your phone or Mac is out of Bluetooth range but on the same Wi-Fi as the host, it now connects to the host directly over the local network. Calls, texts and call audio then stay on your Wi-Fi and do not go through the relay server.",
