@@ -134,8 +134,12 @@ follow `v2/SPEC.md`. No clock takes part. `State.remote` says whether the host r
 ## Local network
 
 Used when the peer and the host are on the same Wi-Fi network (the host's own hotspot counts). It needs no server
-and works with internet mode off. The order of links is Bluetooth, then the local network, then the internet: a
-peer opens a local network link only while its Bluetooth link is down, and the host sends on it only then.
+and works with internet mode off. A peer keeps its local network link open next to its Bluetooth link whenever it
+sees the host's instance, and sends its requests on the local network first, then Bluetooth, then the internet. The
+host answers a request on the link it came on, and sends events and state on Bluetooth while a Bluetooth link serves
+(a sleeping iPhone app wakes for Bluetooth, never for the local network), else on the local network, else on the
+internet. With the user's `use_when_away` switch on, the host stays on its saved Wi-Fi networks while the phone is
+near too (`WIFI_RULE_LOCAL_NETWORK`), so any network both join (a home, an office, a travel router) carries the link.
 Vectors: `v2/vectors/lan.json`.
 
 **Key.** A peer sends `GetLanKey` **over Bluetooth only** (the host refuses it on any other link with

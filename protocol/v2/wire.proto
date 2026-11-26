@@ -606,7 +606,8 @@ message SetMobileData {
   bool on = 1;
 }
 
-// The host joins a saved Wi-Fi network when the phone is away.
+// The host joins a saved Wi-Fi network instead of using mobile data: while the phone is away, and while it is near
+// too, so the phone can reach the host over the local network. The field keeps its first name.
 message SetHostWifi {
   bool use_when_away = 1;
 }
@@ -675,9 +676,10 @@ enum WifiRule {
   WIFI_RULE_IN_CALL = 2;          // left alone until the call ends
   WIFI_RULE_HOTSPOT = 3;          // off: the hotspot is on
   WIFI_RULE_SETUP = 4;            // on for a scan or a join
-  WIFI_RULE_PHONE_NEAR = 5;       // off: the phone is on Bluetooth
+  WIFI_RULE_PHONE_NEAR = 5;       // off: the phone is on Bluetooth and use_when_away is not set
   WIFI_RULE_AWAY = 6;             // on: the phone is away and use_when_away is set
   WIFI_RULE_SETTING_OFF = 7;      // off: the phone is away and use_when_away is not set
+  WIFI_RULE_LOCAL_NETWORK = 8;    // on: the phone is on Bluetooth and use_when_away is set (the local network link)
 }
 
 message HostWifi {
