@@ -7,6 +7,8 @@ import android.os.SystemClock
 import android.util.Log
 import com.keremgok.hermessim.host.wire.StateBook
 import com.keremgok.hermessim.wire.Code
+import com.keremgok.hermessim.wire.LanKey
+import com.google.protobuf.ByteString
 import com.keremgok.hermessim.wire.HotspotSecret
 import com.keremgok.hermessim.wire.LineLockNow
 import com.keremgok.hermessim.wire.LogPart
@@ -60,6 +62,7 @@ object Requests {
         Request.OpCase.GET_LOG to ::getLog,
         Request.OpCase.SET_REMOTE to ::setRemote,
         Request.OpCase.SET_PUSH_KEY to ::setPushKey,
+        Request.OpCase.GET_LAN_KEY to ::getLanKey,
         Request.OpCase.OPEN_AUDIO_PATH to ::openAudioPath,
         Request.OpCase.CLOSE_AUDIO_PATH to ::closeAudioPath,
         Request.OpCase.AUDIO_REPORT to ::audioReport,
@@ -303,6 +306,11 @@ object Requests {
         Push.setKey(key)
         a.ok()
         Relay.touchLater(300, StateBook.REMOTE)
+    }
+
+    private fun getLanKey(a: Ask) {
+        val (key, service) = Relay.lanKey(a.link) ?: return a.answer(Code.CODE_NOT_PAIRED)
+        a.answer(Code.CODE_OK) { it.setLanKey(LanKey.newBuilder().setKey(ByteString.copyFrom(key)).setService(service)) }
     }
 
     private fun openAudioPath(a: Ask) {

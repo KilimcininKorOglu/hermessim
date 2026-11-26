@@ -72,7 +72,7 @@ object HelloRules {
     val FEATURES: Long = listOf(
         Feature.FEATURE_USSD, Feature.FEATURE_HOST_ACTIONS, Feature.FEATURE_CALL_RULES, Feature.FEATURE_NETWORK_MODE,
         Feature.FEATURE_HOTSPOT_CALL_PAUSE, Feature.FEATURE_AUTO_UPDATE, Feature.FEATURE_MAC_PEERS,
-        Feature.FEATURE_SCHEDULED_TEXTS,
+        Feature.FEATURE_SCHEDULED_TEXTS, Feature.FEATURE_LOCAL_NETWORK,
     ).fold(0L) { bits, f -> bits or (1L shl f.number) }
 
     /** The install id as the host stores it. */

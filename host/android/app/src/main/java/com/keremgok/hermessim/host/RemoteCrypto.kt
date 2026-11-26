@@ -40,6 +40,8 @@ class RemoteCrypto(key: ByteArray) {
         }
 
         fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }
+
+        fun unhex(text: String): ByteArray = ByteArray(text.length / 2) { text.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
     }
 
     val roomToken: ByteArray = hkdf(key, "room-token")

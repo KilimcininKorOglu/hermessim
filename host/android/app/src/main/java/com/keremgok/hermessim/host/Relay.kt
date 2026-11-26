@@ -85,10 +85,26 @@ sealed class Link(val id: String) {
         override fun drop() = ble.disconnect(device)
     }
 
+    /** A TCP connection on the local network whose tunnel is open; [peer] is the install id its key was made for. */
+    class Lan(val conn: LanLink.Conn, val peer: String, id: String) : Link(id) {
+        override val kind = LinkKind.LAN
+        override fun kick() {
+            while (true) {
+                val bytes = channel.next(MESSAGE_BYTES)
+                if (bytes.isEmpty()) return
+                if (!conn.send(bytes)) { conn.close(); return }
+            }
+        }
+        override fun drop() = conn.close()
+    }
+
+    companion object {
+        // A frame body is at most 16 448 bytes; the tunnel adds its 25 bytes to the frames
+        const val MESSAGE_BYTES = 16_384
+    }
+
     /** The internet room: a link lasts while the host and the phone are both in it. */
     object Internet : Link("remote") {
-        // A DATA body is at most 16 448 bytes; the tunnel adds its 25 bytes to the frames
-        private const val MESSAGE_BYTES = 16_384
         override val kind = LinkKind.INTERNET
         override fun kick() {
             while (true) {
@@ -192,6 +208,65 @@ object Relay {
         val adapter = (app.getSystemService(Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager).adapter
         audio = AudioBridge(adapter, ble).also { it.start() }
         RemoteLink.start(app, { bytes -> main.post { receive(Link.Internet, bytes) } }) { present -> main.post { roomChanged(present) } }
+        LanKeys.init(app)
+        LanLink.start(app, lanListener)
+    }
+
+    // ------------------------------------------------------------- the local network
+
+    private var lanCount = 0
+    private val lanLinks = HashMap<LanLink.Conn, Link.Lan>()
+
+    /** Connection threads hand everything to main, like Bluetooth's binder threads. */
+    private val lanListener = object : LanLink.Listener {
+        override fun opened(conn: LanLink.Conn) = main.post { lanOpened(conn) }.let { }
+        override fun frames(conn: LanLink.Conn, bytes: ByteArray) = main.post { lanLinks[conn]?.let { receive(it, bytes) } }.let { }
+        override fun closed(conn: LanLink.Conn) = main.post { lanClosed(conn) }.let { }
+    }
+
+    private fun lanOpened(conn: LanLink.Conn) {
+        val peer = conn.peer ?: return conn.close()
+        val link = Link.Lan(conn, peer, "lan:${++lanCount}")
+        lanLinks[conn] = link
+        link.channel.newLink()
+        Log.i(TAG, "lan: ${link.id} opened; waiting for Hello")
+    }
+
+    private fun lanClosed(conn: LanLink.Conn) {
+        val link = lanLinks.remove(conn) ?: return
+        val wasServed = link.channel.serving
+        val wasMac = link.role == Role.ROLE_MAC
+        link.channel.close()
+        Log.i(TAG, "lan: ${link.id} closed")
+        if (wasMac) { touch(StateBook.PEERS); return }
+        if (wasServed) peerLeft()
+    }
+
+    /** The phone's links on the local network that serve now. */
+    private fun lanPhones(): List<Link> = lanLinks.values.filter { it.phone }
+
+    /** The paired phone hears the host without the internet room: on Bluetooth or the local network. */
+    private fun phoneNear(): Boolean = bleNear() || lanPhones().isNotEmpty()
+
+    /** A link of the phone ended: the next one in the order serves and gets what it lacks. */
+    private fun peerLeft() {
+        RemoteLink.phoneOnBluetooth(phoneNear())
+        val next = targets().singleOrNull() ?: return
+        if (next.bluetooth) return
+        Log.i(TAG, "the phone's link ended, ${next.id} serves: sending it what it lacks")
+        replay(next, StateMark.newBuilder().setEpoch(HostState.epoch).setSeq(next.stateSeq).build(), next.textSeq)
+    }
+
+    /** GetLanKey: the asking peer's own key and the name the host announces under. */
+    internal fun lanKey(link: Link): Pair<ByteArray, String>? {
+        val peer = (if (link.role == Role.ROLE_MAC) link.macId else pinned()) ?: return null
+        return LanKeys.keyFor(peer) to LanKeys.service()
+    }
+
+    /** A forgotten peer's key goes, and so do its links on the local network. */
+    private fun forgetLan(peer: String) {
+        LanKeys.forget(peer)
+        lanLinks.values.filter { it.peer == peer }.forEach { it.drop() }
     }
 
     /** The parts whose changes the peers hear: each names the state groups it moves. */
@@ -250,7 +325,7 @@ object Relay {
      */
     private fun pushMissed() {
         val log = Events.log(app)
-        if (!bleNear()) CallRegistry.snapshot().filter { it.incoming && it.phase == CallPhase.CALL_PHASE_RINGING }
+        if (!phoneNear()) CallRegistry.snapshot().filter { it.incoming && it.phase == CallPhase.CALL_PHASE_RINGING }
             .forEach { Push.call(log.callCursor, it) }
         val recent = System.currentTimeMillis() - 120_000
         log.textsAfter(0).forEach { (seq, bytes) ->
@@ -270,7 +345,7 @@ object Relay {
     /** The paired phone is here on Bluetooth (it said Hello on a subscribed link). */
     private fun bleNear(): Boolean = ::ble.isInitialized && ble.subscribers().any { links[it.address]?.phone == true }
 
-    fun clientConnected(): Boolean = bleNear() || (RemoteLink.peerPresent && Link.Internet.channel.serving)
+    fun clientConnected(): Boolean = phoneNear() || (RemoteLink.peerPresent && Link.Internet.channel.serving)
 
     /** [start] ran in this process (Retire can run from a host whose service never came up). */
     fun started(): Boolean = ::app.isInitialized
@@ -414,7 +489,7 @@ object Relay {
         broadcast(event { setSeq(seq); call = e })
         // No phone on Bluetooth: the app may be closed, and its system only starts it for a push. One in the room gets
         // the event above as well; it rings the same call once.
-        if (e.incoming && e.phase == CallPhase.CALL_PHASE_RINGING && !bleNear()) Push.call(seq, e)
+        if (e.incoming && e.phase == CallPhase.CALL_PHASE_RINGING && !phoneNear()) Push.call(seq, e)
     }
 
     /**
@@ -449,7 +524,7 @@ object Relay {
     private fun notice(n: Notice) {
         Log.i(TAG, "notice ${n.kind} value=${n.value} line=${if (n.hasLine()) n.line else -1}")
         broadcast(event { notice = n })
-        if (!bleNear()) Push.notice(n)
+        if (!phoneNear()) Push.notice(n)
     }
 
     /** The phone's Bluetooth links when any serves, else the internet room. A Mac is never one of them. */
@@ -457,11 +532,12 @@ object Relay {
         if (!::ble.isInitialized) return emptyList()
         val viaBle = ble.subscribers().mapNotNull { links[it.address] }.filter { it.phone }
         if (viaBle.isNotEmpty()) return viaBle
+        lanPhones().takeIf { it.isNotEmpty() }?.let { return it }
         return if (RemoteLink.peerPresent && Link.Internet.phone) listOf(Link.Internet) else emptyList()
     }
 
     /** The Macs served now (always over Bluetooth). */
-    private fun macTargets(): List<Link> = links.values.filter { it.mac }
+    private fun macTargets(): List<Link> = links.values.filter { it.mac } + lanLinks.values.filter { it.mac }
 
     /** A `State` as [link] may see it: a Mac gets its own view (MacPeers.view). */
     private fun stateFor(link: Link, state: ByteArray): ByteArray = if (link.role == Role.ROLE_MAC) macPeers.view(state, link.macId) else state
@@ -585,16 +661,12 @@ object Relay {
         link.claimed = null
         if (wasMac) { Log.i(TAG, "Mac ${d.address} gone"); touch(StateBook.PEERS); return@post }
         Log.i(TAG, "client ${d.address} gone")
-        RemoteLink.phoneOnBluetooth(bleNear())
         HostWifi.evaluate("Bluetooth gone")
         HotspotPause.transportChanged("Bluetooth gone")
         scheduleHeartbeat()
-        // The internet room serves now. It heard nothing while Bluetooth served: a call's end or a text would be lost
+        // The next link serves now. It heard nothing while Bluetooth served: a call's end or a text would be lost
         // until the next one (audit, 1 Nov 2026).
-        if (wasServed && targets().singleOrNull() === Link.Internet) {
-            Log.i(TAG, "Bluetooth gone, the internet room serves: sending it what it lacks")
-            replay(Link.Internet, StateMark.newBuilder().setEpoch(HostState.epoch).setSeq(Link.Internet.stateSeq).build(), Link.Internet.textSeq)
-        }
+        if (wasServed) peerLeft() else RemoteLink.phoneOnBluetooth(phoneNear())
     }
 
     /** The phone opened the tunnel or lost it: a link lasts while the tunnel is open. The phone says Hello on a new link. */
@@ -646,6 +718,8 @@ object Relay {
 
     private fun hello(link: Link, h: Hello) {
         val refusal = HelloRules.refusal(h, pinned(), macPeers::known, link.kind)
+            // A key opens the local network only for the peer it was made for
+            ?: Code.CODE_NOT_PAIRED.takeIf { link is Link.Lan && link.peer != HelloRules.id(h) }
         if (refusal != null) {
             link.role = Role.ROLE_UNSPECIFIED
             if (refusal == Code.CODE_NOT_PAIRED) notPaired(link, h)
@@ -674,7 +748,8 @@ object Relay {
      */
     private fun macServed(link: Link, h: Hello, mark: StateMark?) {
         Log.i(TAG, "Hello from the Mac ${h.deviceModel} app ${h.appVersion}")
-        macPeers.seen(HelloRules.id(h), link.id, h.deviceModel)
+        // The stored address is the Mac's Bluetooth one: a local network link keeps it
+        if (link is Link.Ble) macPeers.seen(HelloRules.id(h), link.id, h.deviceModel)
         var lane = sendBase(link, mark)
         var cursor = h.textCursor
         for (text in macPeers.texts(link.macId, h.textCursor)) {
@@ -714,7 +789,7 @@ object Relay {
             main.postDelayed({ if (link.channel.serving) RadioLook.linkLook() }, 20_000)
             HostWifi.evaluate("Bluetooth up")
             HotspotPause.transportChanged("Bluetooth back")
-            RemoteLink.phoneOnBluetooth(bleNear())
+            RemoteLink.phoneOnBluetooth(phoneNear())
             // Remembered so the same phone can pair again on its own after its system dropped the keys (see the receiver)
             edit.putString("client_mac", link.id)
             scheduleHeartbeat()
@@ -787,6 +862,7 @@ object Relay {
     }
 
     private fun forgetPin(): String? {
+        pinned()?.let(::forgetLan)
         val address = prefs().getString("client_mac", null)
         prefs().edit().remove("pinned_install_id").remove("client_model").remove("client_mac").apply()
         forgetKeys()
@@ -796,6 +872,7 @@ object Relay {
     /** The phone's sessions end; a Mac's stays (it goes only with the Mac or with Retire). */
     private fun closeSessions() {
         links.values.filter { it.role != Role.ROLE_MAC }.forEach { it.channel.close() }
+        lanLinks.values.filter { it.role != Role.ROLE_MAC }.forEach { it.channel.close(); it.drop() }
         Link.Internet.channel.close()
     }
 
@@ -951,6 +1028,7 @@ object Relay {
     /** SetPeer{remove}: the Mac is forgotten, its link ends and its Bluetooth bond goes. */
     internal fun removeMac(id: String) {
         val gone = macPeers.remove(id) ?: return
+        forgetLan(id)
         links.values.filter { it.macId == id }.forEach { it.channel.close(); it.drop() }
         pairExec.execute { RootBt.unbond(app, gone.address) }
     }
@@ -1101,6 +1179,7 @@ object Relay {
                 askForHello()
                 links.values.filter { it.channel.serving }.forEach(::keepOrAsk)
                 if (Link.Internet.channel.serving) Link.Internet.kick()
+                lanLinks.values.filter { it.channel.serving }.forEach { if (it.channel.silent()) it.drop() else it.kick() }
                 HostWifi.evaluate("tick")
                 guardSmsRole()
                 guardDialerRole()
