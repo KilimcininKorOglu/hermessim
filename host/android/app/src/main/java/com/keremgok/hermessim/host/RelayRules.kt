@@ -9,6 +9,9 @@ import com.keremgok.hermessim.wire.Request
 import com.keremgok.hermessim.wire.Role
 import com.keremgok.hermessim.host.wire.commonVersion
 
+/** What carries a link: only Bluetooth is near enough for secrets and pairing (protocol/README.md "Local network"). */
+enum class LinkKind { BLUETOOTH, LAN, INTERNET }
+
 /** Which requests the host runs, apart from the phone (protocol/v2/SPEC.md "Requests"). Pure. */
 object RequestRules {
     const val CALL_AGE_MS = 10_000
@@ -37,15 +40,16 @@ object RequestRules {
         Request.OpCase.GET_HOTSPOT_SECRET, Request.OpCase.SCAN_WIFI, Request.OpCase.SAVE_WIFI, Request.OpCase.FORGET_WIFI -> true
         Request.OpCase.SET_REMOTE -> req.setRemote.on
         Request.OpCase.SET_PUSH_KEY -> !req.setPushKey.key.isEmpty
+        Request.OpCase.GET_LAN_KEY -> true
         else -> false
     }
 
-    /** Why the request is not run on this link, or null. */
-    fun refusal(req: Request, bluetooth: Boolean): Code? = when {
+    /** Why the request is not run on a link of this [kind], or null. */
+    fun refusal(req: Request, kind: LinkKind): Code? = when {
         tooOld(req.opCase, req.ageMs) -> Code.CODE_TOO_OLD
-        !bluetooth && secret(req) -> Code.CODE_BLUETOOTH_ONLY
+        kind != LinkKind.BLUETOOTH && secret(req) -> Code.CODE_BLUETOOTH_ONLY
         // Off over the internet would cut this very link (internet mode runs on the host's mobile data).
-        !bluetooth && req.opCase == Request.OpCase.SET_MOBILE_DATA && !req.setMobileData.on -> Code.CODE_CARRIES_LINK
+        kind == LinkKind.INTERNET && req.opCase == Request.OpCase.SET_MOBILE_DATA && !req.setMobileData.on -> Code.CODE_CARRIES_LINK
         else -> null
     }
 
@@ -76,18 +80,18 @@ object HelloRules {
 
     /**
      * Why the Hello is refused, or null. [pinned]: the install id of the paired phone, null for none; [isMac]: an
-     * install id is a paired Mac's; [bluetooth]: the link is a Bluetooth one (a Mac talks over Bluetooth only).
+     * install id is a paired Mac's; [kind]: the link's kind (a Mac talks over Bluetooth or the local network only).
      */
-    fun refusal(hello: Hello, pinned: String?, isMac: (String) -> Boolean = { false }, bluetooth: Boolean = true): Code? = when {
+    fun refusal(hello: Hello, pinned: String?, isMac: (String) -> Boolean = { false }, kind: LinkKind = LinkKind.BLUETOOTH): Code? = when {
         commonVersion(hello.minVersion, hello.maxVersion) == null -> Code.CODE_VERSION
-        hello.role == Role.ROLE_MAC -> macRefusal(hello, isMac, bluetooth)
+        hello.role == Role.ROLE_MAC -> macRefusal(hello, isMac, kind)
         hello.role != Role.ROLE_PHONE -> Code.CODE_NOT_ALLOWED
         hello.installId.size() != 16 || id(hello) != pinned -> Code.CODE_NOT_PAIRED
         else -> null
     }
 
-    private fun macRefusal(hello: Hello, isMac: (String) -> Boolean, bluetooth: Boolean): Code? = when {
-        !bluetooth -> Code.CODE_NOT_ALLOWED
+    private fun macRefusal(hello: Hello, isMac: (String) -> Boolean, kind: LinkKind): Code? = when {
+        kind == LinkKind.INTERNET -> Code.CODE_NOT_ALLOWED
         hello.installId.size() != 16 || !isMac(id(hello)) -> Code.CODE_NOT_PAIRED
         else -> null
     }

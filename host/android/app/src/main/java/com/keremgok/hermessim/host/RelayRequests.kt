@@ -84,7 +84,7 @@ object Requests {
 
     private fun refusal(link: Link, req: Request): Code? =
         (if (link.role == Role.ROLE_MAC) MacRules.refusal(req, Relay.macs.grants(link.macId)) else null)
-            ?: RequestRules.refusal(req, link.bluetooth)
+            ?: RequestRules.refusal(req, link.kind)
             ?: RequestRules.voiceRefusal(req, VoiceGate.fullVoice, Daemon.hasProfile())
             // Test rig running (adb override): the real phone's switches would fight the scenario.
             ?: Code.CODE_NOT_ALLOWED.takeIf { HostWifi.clientOverride != null && req.opCase in RequestRules.heldByRig }
@@ -231,7 +231,7 @@ object Requests {
     }
 
     private fun setHostWifi(a: Ask) {
-        HostWifi.setUseWhenAway(a.req.setHostWifi.useWhenAway, remote = !a.link.bluetooth)
+        HostWifi.setUseWhenAway(a.req.setHostWifi.useWhenAway, remote = a.link.kind == LinkKind.INTERNET)
         a.ok()
     }
 

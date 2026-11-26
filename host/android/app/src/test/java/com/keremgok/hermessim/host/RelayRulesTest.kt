@@ -16,6 +16,7 @@ import com.keremgok.hermessim.wire.SetHotspotSetup
 import com.keremgok.hermessim.wire.SetMobileData
 import com.keremgok.hermessim.wire.SetPushKey
 import com.keremgok.hermessim.wire.SetRemote
+import com.keremgok.hermessim.wire.GetLanKey
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -36,7 +37,7 @@ class RelayRulesTest {
         assertTrue(RequestRules.tooOld(Request.OpCase.SET_BOX, 30_001))
         assertFalse(RequestRules.tooOld(Request.OpCase.SEND_TEXT, 3_600_000))
         assertFalse(RequestRules.tooOld(Request.OpCase.GET_STATE, 3_600_000))
-        assertEquals(Code.CODE_TOO_OLD, RequestRules.refusal(request(ageMs = 10_001) { dial = Dial.getDefaultInstance() }, bluetooth = true))
+        assertEquals(Code.CODE_TOO_OLD, RequestRules.refusal(request(ageMs = 10_001) { dial = Dial.getDefaultInstance() }, LinkKind.BLUETOOTH))
     }
 
     @Test fun `a secret travels over Bluetooth only`() {
@@ -45,10 +46,13 @@ class RelayRulesTest {
             request { setHotspotSetup = SetHotspotSetup.newBuilder().setPassphrase("12345678").build() },
             request { setRemote = SetRemote.newBuilder().setOn(true).build() },
             request { setPushKey = SetPushKey.newBuilder().setKey(ByteString.copyFrom(ByteArray(32))).build() },
+            request { getLanKey = GetLanKey.getDefaultInstance() },
         )
         for (req in secrets) {
-            assertEquals(req.opCase.name, Code.CODE_BLUETOOTH_ONLY, RequestRules.refusal(req, bluetooth = false))
-            assertNull(req.opCase.name, RequestRules.refusal(req, bluetooth = true))
+            assertEquals(req.opCase.name, Code.CODE_BLUETOOTH_ONLY, RequestRules.refusal(req, LinkKind.INTERNET))
+            // The local network is no nearer: anyone on the same Wi-Fi could be asking (protocol/README.md "Local network")
+            assertEquals(req.opCase.name, Code.CODE_BLUETOOTH_ONLY, RequestRules.refusal(req, LinkKind.LAN))
+            assertNull(req.opCase.name, RequestRules.refusal(req, LinkKind.BLUETOOTH))
         }
     }
 
@@ -59,15 +63,17 @@ class RelayRulesTest {
             request { setHotspotSetup = SetHotspotSetup.newBuilder().setHidden(true).build() },
             request { sendText = SendText.getDefaultInstance() },
         )
-        for (req in open) assertNull(req.opCase.name, RequestRules.refusal(req, bluetooth = false))
+        for (req in open) assertNull(req.opCase.name, RequestRules.refusal(req, LinkKind.INTERNET))
     }
 
     @Test fun `mobile data is not turned off over the link it carries`() {
         val off = request { setMobileData = SetMobileData.getDefaultInstance() }
         val on = request { setMobileData = SetMobileData.newBuilder().setOn(true).build() }
-        assertEquals(Code.CODE_CARRIES_LINK, RequestRules.refusal(off, bluetooth = false))
-        assertNull(RequestRules.refusal(off, bluetooth = true))
-        assertNull(RequestRules.refusal(on, bluetooth = false))
+        assertEquals(Code.CODE_CARRIES_LINK, RequestRules.refusal(off, LinkKind.INTERNET))
+        assertNull(RequestRules.refusal(off, LinkKind.BLUETOOTH))
+        assertNull(RequestRules.refusal(on, LinkKind.INTERNET))
+        // The local network runs on the host's Wi-Fi, which mobile data does not carry
+        assertNull(RequestRules.refusal(off, LinkKind.LAN))
     }
 
     @Test fun `until the call test passes only the test call and hanging up reach a call`() {
@@ -109,7 +115,9 @@ class RelayRulesTest {
         val listed = { id: String -> id == pinned }
         assertNull(HelloRules.refusal(mac, null, listed))
         assertEquals(Code.CODE_NOT_PAIRED, HelloRules.refusal(mac, pinned, isMac = { false }))
-        assertEquals(Code.CODE_NOT_ALLOWED, HelloRules.refusal(mac, null, listed, bluetooth = false))
+        assertEquals(Code.CODE_NOT_ALLOWED, HelloRules.refusal(mac, null, listed, kind = LinkKind.INTERNET))
+        assertNull(HelloRules.refusal(mac, null, listed, kind = LinkKind.LAN))
+        assertEquals(Code.CODE_NOT_PAIRED, HelloRules.refusal(mac, null, isMac = { false }, kind = LinkKind.LAN))
         assertEquals(Code.CODE_NOT_PAIRED, HelloRules.refusal(hello { role = Role.ROLE_MAC; installId = ByteString.copyFrom(ByteArray(15)) }, null, { true }))
         assertEquals(Code.CODE_NOT_ALLOWED, HelloRules.refusal(hello { role = Role.ROLE_UNSPECIFIED }, pinned))
     }

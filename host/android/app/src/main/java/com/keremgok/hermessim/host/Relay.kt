@@ -72,14 +72,15 @@ sealed class Link(val id: String) {
     /** Sends the CREDIT that is due once the peer has been quiet for a moment. */
     val creditTick = Runnable { kick() }
 
-    abstract val bluetooth: Boolean
+    abstract val kind: LinkKind
+    val bluetooth: Boolean get() = kind == LinkKind.BLUETOOTH
 
     /** The channel has something to send. */
     abstract fun kick()
     abstract fun drop()
 
     class Ble(val device: BluetoothDevice, private val ble: BleLink) : Link(device.address) {
-        override val bluetooth = true
+        override val kind = LinkKind.BLUETOOTH
         override fun kick() = ble.kick(device)
         override fun drop() = ble.disconnect(device)
     }
@@ -88,7 +89,7 @@ sealed class Link(val id: String) {
     object Internet : Link("remote") {
         // A DATA body is at most 16 448 bytes; the tunnel adds its 25 bytes to the frames
         private const val MESSAGE_BYTES = 16_384
-        override val bluetooth = false
+        override val kind = LinkKind.INTERNET
         override fun kick() {
             while (true) {
                 val bytes = channel.next(MESSAGE_BYTES)
@@ -644,7 +645,7 @@ object Relay {
     }
 
     private fun hello(link: Link, h: Hello) {
-        val refusal = HelloRules.refusal(h, pinned(), macPeers::known, link.bluetooth)
+        val refusal = HelloRules.refusal(h, pinned(), macPeers::known, link.kind)
         if (refusal != null) {
             link.role = Role.ROLE_UNSPECIFIED
             if (refusal == Code.CODE_NOT_PAIRED) notPaired(link, h)
@@ -703,7 +704,7 @@ object Relay {
 
     /** What the host does for a phone it serves from now on, apart from the protocol. */
     private fun served(link: Link, h: Hello, resumed: Boolean) {
-        val via = if (link.bluetooth) "Bluetooth" else "internet"
+        val via = link.kind.name.lowercase()
         Log.i(TAG, "Hello from ${h.deviceModel} app ${h.appVersion} via $via (session ${if (resumed) "resumed" else "new"})")
         val edit = prefs().edit().putString("client_model", h.deviceModel)
         if (link is Link.Ble) {
