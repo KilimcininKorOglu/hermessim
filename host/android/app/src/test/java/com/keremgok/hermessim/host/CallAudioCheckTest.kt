@@ -86,4 +86,28 @@ class CallAudioCheckTest {
         assertEquals("to_phone", CallAudioCheck.judge(25, t, b(out = 1200), held = false))
         assertNull(CallAudioCheck.totals("OK call=0 session=0 silence=0 cap=0 voiced=0 sent=0 played=0 peak=0")["live"])
     }
+
+    private fun names(r: List<CallAudioCheck.Report>) = r.map { listOfNotNull(it.name, it.what).joinToString(" ") }
+
+    @Test
+    fun `a poor call reports itself with the host log, whatever its length`() {
+        val r = CallAudioCheck.reports(poor = true, seconds = 3, wentLean = true, late = true)
+        assertEquals(listOf("call_audio_poor"), names(r))
+        assertEquals(true, r.single().withLog)
+    }
+
+    @Test
+    fun `a fine call under 10 s reports nothing`() {
+        assertEquals(emptyList<String>(), names(CallAudioCheck.reports(poor = false, seconds = 9, wentLean = true, late = true)))
+    }
+
+    @Test
+    fun `a fine call reports going lean and the chip record, a baseline once per version`() {
+        assertEquals(listOf("call_audio_lean", "call_radio late"), names(CallAudioCheck.reports(false, 60, wentLean = true, late = true)))
+        val baseline = CallAudioCheck.reports(false, 60, wentLean = false, late = false)
+        assertEquals(listOf("call_radio baseline"), names(baseline))
+        assertEquals(true, baseline.single().oncePerVersion)
+        assertEquals(false, CallAudioCheck.reports(false, 60, wentLean = false, late = true).single().oncePerVersion)
+        assertEquals(emptyList<String>(), names(CallAudioCheck.reports(false, 60, wentLean = false, late = null)))
+    }
 }

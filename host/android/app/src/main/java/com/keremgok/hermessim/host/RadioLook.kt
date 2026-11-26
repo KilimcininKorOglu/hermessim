@@ -87,7 +87,10 @@ object RadioLook {
             val l = look()
             Log.i(TAG, "BLE link: ${l.link.ifEmpty { l.hci }}")
             // A look that got no answer says nothing: the next Hello looks again
-            if (l.hci.startsWith("no answer") || l.hci.startsWith("failed")) linkLooked = false
+            if (l.hci.startsWith("no answer") || l.hci.startsWith("failed")) { linkLooked = false; return@Thread }
+            // Once per version: what the link agreed and what this phone's record keeps need no call to be known
+            Diag.event("link_radio", org.json.JSONObject().put("what", "agreed").put("hci_link", l.link).put("hci", l.hci)
+                .put("bt_scans", l.scans).put("phy", LinkRadio.inUse), withLog = false, onceFor = Diag.version())
         }.apply { isDaemon = true }.start()
     }
 }

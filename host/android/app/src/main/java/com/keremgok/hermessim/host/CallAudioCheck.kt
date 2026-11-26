@@ -189,5 +189,26 @@ object CallAudioCheck {
         val detail = detail(what ?: "ok", seconds, d, b, reply, look)
         last = detail; lastAt = android.os.SystemClock.elapsedRealtime()
         if (what == null) android.util.Log.i("HermesSimHost", line(detail)) else android.util.Log.w("HermesSimHost", line(detail))
+        reports(what != null, seconds, b.leanFromIn >= 0, look?.sending?.late).forEach { r ->
+            val sent = JSONObject(detail.toString()).apply { r.what?.let { put("what", it) } }
+            Diag.event(r.name, sent, withLog = r.withLog, onceFor = if (r.oncePerVersion) Diag.version() else null)
+        }
+    }
+
+    /** A report the call's end sends to the server: [what] replaces the detail's own when set. */
+    data class Report(val name: String, val what: String? = null, val withLog: Boolean = false, val oncePerVersion: Boolean = false)
+
+    /**
+     * The reports for a call's end. A poor call: call_audio_poor with the host log. A fine call of 10 s or more:
+     * call_audio_lean when it went lean (whether lean works is only known from a fine call), and call_radio when the
+     * chip's record was read ([late]): every late one, a baseline once per version.
+     */
+    fun reports(poor: Boolean, seconds: Long, wentLean: Boolean, late: Boolean?): List<Report> {
+        if (poor) return listOf(Report("call_audio_poor", withLog = true))
+        if (seconds < 10) return emptyList()
+        return listOfNotNull(
+            Report("call_audio_lean").takeIf { wentLean },
+            late?.let { if (it) Report("call_radio", "late") else Report("call_radio", "baseline", oncePerVersion = true) },
+        )
     }
 }
