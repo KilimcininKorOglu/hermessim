@@ -22,9 +22,10 @@ import com.keremgok.hermessim.wire.WifiRule
 import com.keremgok.hermessim.wire.WifiSeen
 
 /**
- * The host's own Wi-Fi connection (not the hotspot), one rule on every phone (18 Oct 2026; `HostWifi`, `WifiRule`):
- * off while the hotspot is on and while the client is on Bluetooth; when the client has been away [AWAY_MS], on only if
- * the user chose "use Wi-Fi when I'm away". Never switched during a call; left alone until a client is paired.
+ * The host's own Wi-Fi connection (not the hotspot), one rule on every phone (`HostWifi`, `WifiRule`, [WifiRuleCore]):
+ * off while the hotspot is on; with the user's "use Wi-Fi" switch on, on and joined to any saved network, near or
+ * away, so a phone on the same network reaches the host over the local network; with it off, off. Never switched
+ * during a call; left alone until a client is paired.
  *
  * Saved networks, scans and joins go through `cmd wifi` as root: the same commands on Android 11-14 and every maker
  * checked so far (Redmi Note 8 Pro / Android 11, S20 FE / Android 13), where the app APIs need NETWORK_SETTINGS.
@@ -105,21 +106,13 @@ object HostWifi {
         val away = clientOverride == false || now - lastNear >= AWAY_MS
         if (away && !wasAway && paired()) leftHost()
         wasAway = away
-        val (want, r) = when {
-            !paired() -> null to WifiRule.WIFI_RULE_NOT_PAIRED
-            inCall() -> null to WifiRule.WIFI_RULE_IN_CALL
-            hotspotOn() -> false to WifiRule.WIFI_RULE_HOTSPOT
-            now < setupUntil -> true to WifiRule.WIFI_RULE_SETUP
-            !away -> false to WifiRule.WIFI_RULE_PHONE_NEAR
-            useWhenAway -> true to WifiRule.WIFI_RULE_AWAY
-            else -> false to WifiRule.WIFI_RULE_SETTING_OFF
-        }
+        val (want, r) = WifiRuleCore.decide(paired(), inCall(), hotspotOn(), now < setupUntil, away, useWhenAway)
         if (r != reason) { reason = r; changed() }
         if (want != null && want != wifiOn()) {
             Log.i(TAG, "host Wi-Fi -> ${if (want) "on" else "off"} ($r, $why)")
             setRadio(want)
         }
-        if (want == true && r == WifiRule.WIFI_RULE_AWAY) kickJoin() else { WakeAlarm.cancel(app, JOIN_ALARM); kicks = 0 }
+        if (want == true && WifiRuleCore.joins(r)) kickJoin() else { WakeAlarm.cancel(app, JOIN_ALARM); kicks = 0 }
         // Bluetooth just went: look again when "away" begins.
         if (!isNear && !away) WakeAlarm.set(app, AWAY_ALARM, lastNear + AWAY_MS - now + 500) { evaluate("client away") }
         else WakeAlarm.cancel(app, AWAY_ALARM)
@@ -132,7 +125,7 @@ object HostWifi {
      */
     private var kicks = 0
     private fun joinKick() {
-        if (reason != WifiRule.WIFI_RULE_AWAY || !wifiOn() || connectedSsid.isNotEmpty()) { kicks = 0; return }
+        if (!WifiRuleCore.joins(reason) || !wifiOn() || connectedSsid.isNotEmpty()) { kicks = 0; return }
         kicks++
         exec.execute { root("cmd wifi start-scan"); refresh() }
         Log.i(TAG, "host Wi-Fi: not joined yet, scanning (try $kicks)")
