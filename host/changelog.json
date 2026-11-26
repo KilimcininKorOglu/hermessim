@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.3.8",
+    "code": 83,
+    "en": "When your phone or Mac is out of Bluetooth range but on the same Wi-Fi as the host, it now connects to the host directly over the local network. Calls, texts and call audio then stay on your Wi-Fi and do not go through the relay server.",
+    "tr": "Telefonunuz veya Mac'iniz Bluetooth menzili dışındayken ana cihazla aynı Wi-Fi ağındaysa artık ana cihaza yerel ağ üzerinden doğrudan bağlanır. Aramalar, mesajlar ve arama sesi Wi-Fi ağınızda kalır, relay sunucusundan geçmez."
+  },
+  {
     "version": "1.3.7",
     "code": 82,
     "en": "With diagnostics on, the host also reports how each call's audio went and what its Bluetooth link agreed on, without personal data, so call problems can be found without your phone.",
